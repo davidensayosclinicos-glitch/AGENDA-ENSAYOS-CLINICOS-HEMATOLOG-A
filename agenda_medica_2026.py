@@ -1,5 +1,8 @@
 import streamlit as st
-from streamlit_calendar import calendar
+try:
+    from streamlit_calendar import calendar
+except ImportError:
+    calendar = None
 import sqlite3
 from datetime import datetime, timedelta
 import pandas as pd
@@ -10,7 +13,11 @@ import re
 import base64
 import webbrowser
 import tempfile
-from PyPDF2 import PdfReader
+
+try:
+    from PyPDF2 import PdfReader
+except ImportError:
+    PdfReader = None
 
 try:
     from zoneinfo import ZoneInfo
@@ -19,6 +26,13 @@ except ImportError:
 
 # --- CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(page_title="Agenda Ensayos 2026", layout="wide")
+
+if calendar is None:
+    st.error(
+        "Falta la dependencia `streamlit-calendar` en el entorno. "
+        "Instala/declara `streamlit-calendar>=1.2.0` en `requirements.txt` y vuelve a desplegar."
+    )
+    st.stop()
 
 # --- ESTILOS ---
 st.markdown(
@@ -713,6 +727,8 @@ def listar_imagenes(directorio):
 
 @st.cache_data(show_spinner=False)
 def extraer_texto_pdf(ruta_pdf):
+    if PdfReader is None:
+        return ""
     try:
         reader = PdfReader(ruta_pdf)
         partes = []
@@ -818,6 +834,8 @@ def render_pdf_viewer(ruta_pdf, initial_page=1):
 
 @st.cache_data(show_spinner=False)
 def buscar_paginas_pdf(ruta_pdf, consulta):
+    if PdfReader is None:
+        return []
     try:
         reader = PdfReader(ruta_pdf)
         paginas = []
@@ -831,6 +849,8 @@ def buscar_paginas_pdf(ruta_pdf, consulta):
 
 @st.cache_data(show_spinner=False)
 def contar_paginas_pdf(ruta_pdf):
+    if PdfReader is None:
+        return 1
     try:
         reader = PdfReader(ruta_pdf)
         return len(reader.pages)
