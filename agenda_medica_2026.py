@@ -127,7 +127,37 @@ def leer_config(clave, default=None):
     return default
 
 
-DATABASE_URL = leer_config("DATABASE_URL", "")
+def extraer_database_url():
+    # 1) Variables de entorno frecuentes.
+    for clave in ("DATABASE_URL", "POSTGRES_URL", "POSTGRESQL_URL", "SUPABASE_DB_URL"):
+        valor = os.getenv(clave)
+        if valor:
+            return valor
+
+    # 2) Claves planas en st.secrets.
+    try:
+        for clave in ("DATABASE_URL", "POSTGRES_URL", "POSTGRESQL_URL", "SUPABASE_DB_URL"):
+            if clave in st.secrets and st.secrets[clave]:
+                return st.secrets[clave]
+    except Exception:
+        pass
+
+    # 3) Estructuras anidadas tipicas de Streamlit secrets.
+    try:
+        if "connections" in st.secrets:
+            conexiones = st.secrets["connections"]
+            for nombre in ("postgresql", "postgres", "db"):
+                if nombre in conexiones:
+                    bloque = conexiones[nombre]
+                    if "url" in bloque and bloque["url"]:
+                        return bloque["url"]
+    except Exception:
+        pass
+
+    return ""
+
+
+DATABASE_URL = extraer_database_url()
 _postgres_disponible = bool(
     DATABASE_URL
     and DATABASE_URL.startswith(("postgres://", "postgresql://"))
@@ -137,6 +167,8 @@ DB_BACKEND = "postgres" if _postgres_disponible else "sqlite"
 
 if DATABASE_URL and DATABASE_URL.startswith(("postgres://", "postgresql://")) and psycopg2 is None:
     st.warning("Se detecto DATABASE_URL de PostgreSQL, pero falta `psycopg2-binary`; usando SQLite temporalmente.")
+elif DATABASE_URL and not DATABASE_URL.startswith(("postgres://", "postgresql://")):
+    st.warning("Se detecto URL de base de datos, pero no es PostgreSQL valido; usando SQLite temporalmente.")
 
 
 def _adaptar_query_postgres(query):
