@@ -13,6 +13,14 @@ import re
 import base64
 import webbrowser
 import tempfile
+import importlib
+
+try:
+    psycopg2 = importlib.import_module("psycopg2")
+    PsycopgCursor = importlib.import_module("psycopg2.extensions").cursor
+except ImportError:
+    psycopg2 = None
+    PsycopgCursor = None
 
 try:
     from PyPDF2 import PdfReader
@@ -46,6 +54,15 @@ st.markdown(
             }
             .fc .fc-scrollgrid, .fc .fc-scrollgrid-section table {
                 border-color: #f1dede;
+            }
+            div[data-baseweb="tab-list"] {
+                flex-wrap: wrap;
+                gap: 0.25rem;
+            }
+            button[data-baseweb="tab"] {
+                white-space: normal;
+                height: auto;
+                min-height: 2.25rem;
             }
         </style>
         """,
@@ -93,6 +110,137 @@ IMG_DIR_ESQUEMAS = resolver_directorio(
     r"H:\ENSAYOS\ENSAYOS\ESQUEMAS TRATAMIENTOS"
 )
 APP_TIMEZONE = "Europe/Madrid"
+DB_PATH = os.path.join(SCRIPT_DIR, "agenda_ensayos.db")
+DB_BACKUP_DIR = os.path.join(SCRIPT_DIR, "backups_db")
+APP_BUILD = datetime.fromtimestamp(os.path.getmtime(__file__)).strftime("%Y-%m-%d %H:%M")
+
+
+def leer_config(clave, default=None):
+    valor_env = os.getenv(clave)
+    if valor_env:
+        return valor_env
+    try:
+        if clave in st.secrets:
+            return st.secrets[clave]
+    except Exception:
+        pass
+    return default
+
+
+DATABASE_URL = leer_config("DATABASE_URL", "")
+_postgres_disponible = bool(
+    DATABASE_URL
+    and DATABASE_URL.startswith(("postgres://", "postgresql://"))
+    and psycopg2 is not None
+)
+DB_BACKEND = "postgres" if _postgres_disponible else "sqlite"
+
+if DATABASE_URL and DATABASE_URL.startswith(("postgres://", "postgresql://")) and psycopg2 is None:
+    st.warning("Se detecto DATABASE_URL de PostgreSQL, pero falta `psycopg2-binary`; usando SQLite temporalmente.")
+
+
+def _adaptar_query_postgres(query):
+    q = str(query).replace("?", "%s")
+    q_up = q.upper()
+
+    if "INSERT OR IGNORE INTO PACIENTES" in q_up:
+        q = q.replace("INSERT OR IGNORE INTO pacientes", "INSERT INTO pacientes")
+        if "ON CONFLICT" not in q.upper():
+            q += " ON CONFLICT (codigo, ensayo) DO NOTHING"
+
+    if "INSERT OR REPLACE INTO REVISION_OCULAR" in q_up:
+        q = (
+            "INSERT INTO revision_ocular (visita_id, fecha_cita, kva) "
+            "VALUES (%s, %s, %s) "
+            "ON CONFLICT (visita_id) DO UPDATE SET "
+            "fecha_cita = EXCLUDED.fecha_cita, "
+            "kva = EXCLUDED.kva"
+        )
+
+    return q
+
+
+if PsycopgCursor is not None:
+    class CursorCompatPostgres(PsycopgCursor):
+        def execute(self, query, vars=None):
+            return super().execute(_adaptar_query_postgres(query), vars)
+
+        def executemany(self, query, vars_list):
+            return super().executemany(_adaptar_query_postgres(query), vars_list)
+else:
+    CursorCompatPostgres = None
+
+
+def connect_db():
+    if DB_BACKEND == "postgres":
+        return psycopg2.connect(DATABASE_URL, cursor_factory=CursorCompatPostgres)
+    return sqlite3.connect(DB_PATH)
+
+
+def snapshot_db(tag="autosave"):
+    if DB_BACKEND != "sqlite":
+        return
+    try:
+        if not os.path.exists(DB_PATH):
+            return
+
+        os.makedirs(DB_BACKUP_DIR, exist_ok=True)
+        ts = ahora_local().strftime("%Y%m%d_%H%M%S")
+        backup_name = f"agenda_ensayos_{tag}_{ts}.db"
+        backup_path = os.path.join(DB_BACKUP_DIR, backup_name)
+
+        src = connect_db()
+        dst = sqlite3.connect(backup_path)
+        try:
+            src.backup(dst)
+        finally:
+            dst.close()
+            src.close()
+
+        # Conserva un historial corto para no crecer sin limite.
+        prefijo = f"agenda_ensayos_{tag}_"
+        backups = sorted(
+            [
+                nombre for nombre in os.listdir(DB_BACKUP_DIR)
+                if nombre.startswith(prefijo) and nombre.endswith(".db")
+            ],
+            reverse=True,
+        )
+        for viejo in backups[30:]:
+            try:
+                os.remove(os.path.join(DB_BACKUP_DIR, viejo))
+            except OSError:
+                pass
+    except Exception:
+        # Un fallo de backup no debe impedir el guardado principal.
+        pass
+
+
+def export_db_bytes():
+    if DB_BACKEND != "sqlite":
+        return None
+    if not os.path.exists(DB_PATH):
+        return None
+    try:
+        with open(DB_PATH, "rb") as f:
+            return f.read()
+    except OSError:
+        return None
+
+
+def restore_db_from_bytes(db_bytes):
+    if DB_BACKEND != "sqlite":
+        return False, "La restauracion manual aplica solo al modo SQLite local."
+    if not db_bytes:
+        return False, "Archivo vacio o invalido."
+    try:
+        # Guardamos un snapshot antes de sobrescribir para poder volver atras.
+        snapshot_db("pre_restore")
+        with open(DB_PATH, "wb") as f:
+            f.write(db_bytes)
+        return True, "Base de datos restaurada correctamente."
+    except OSError:
+        return False, "No se pudo escribir la base de datos de restauracion."
 
 
 def fecha_hoy_local():
@@ -102,6 +250,15 @@ def fecha_hoy_local():
         except Exception:
             pass
     return datetime.now().date()
+
+
+def ahora_local():
+    if ZoneInfo is not None:
+        try:
+            return datetime.now(ZoneInfo(APP_TIMEZONE))
+        except Exception:
+            pass
+    return datetime.now()
 
 
 def normalizar_texto_campo(valor):
@@ -295,57 +452,137 @@ def eliminar_ensayos_sin_pacientes(cursor):
 
 
 def init_db():
-    conn = sqlite3.connect('agenda_ensayos.db')
+    conn = connect_db()
     c = conn.cursor()
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS visitas (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            fecha TEXT NOT NULL,
-            nombre TEXT,
-            codigo TEXT,
-            ensayo TEXT,
-            ciclo TEXT,
-            kits TEXT,
-            tablet BOOLEAN,
-            medula BOOLEAN,
-            otras_pruebas TEXT,
-            comentarios TEXT
+    if DB_BACKEND == "postgres":
+        c.execute(
+            '''
+            CREATE TABLE IF NOT EXISTS visitas (
+                id BIGSERIAL PRIMARY KEY,
+                fecha TEXT NOT NULL,
+                nombre TEXT,
+                codigo TEXT,
+                ensayo TEXT,
+                ciclo TEXT,
+                kits TEXT,
+                tablet BOOLEAN,
+                medula BOOLEAN,
+                otras_pruebas TEXT,
+                comentarios TEXT
+            )
+            '''
         )
-    ''')
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS revision_ocular (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            visita_id INTEGER UNIQUE,
-            fecha_cita TEXT,
-            kva INTEGER,
-            FOREIGN KEY(visita_id) REFERENCES visitas(id)
+        c.execute(
+            '''
+            CREATE TABLE IF NOT EXISTS revision_ocular (
+                id BIGSERIAL PRIMARY KEY,
+                visita_id BIGINT UNIQUE,
+                fecha_cita TEXT,
+                kva INTEGER
+            )
+            '''
         )
-    ''')
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS pacientes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            codigo TEXT,
-            nombre TEXT,
-            ensayo TEXT,
-            UNIQUE(codigo, ensayo)
+        c.execute(
+            '''
+            CREATE TABLE IF NOT EXISTS pacientes (
+                id BIGSERIAL PRIMARY KEY,
+                codigo TEXT,
+                nombre TEXT,
+                ensayo TEXT,
+                UNIQUE(codigo, ensayo)
+            )
+            '''
         )
-    ''')
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS checklist_items (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            ensayo TEXT,
-            item TEXT,
-            done BOOLEAN DEFAULT 0
+        c.execute(
+            '''
+            CREATE TABLE IF NOT EXISTS checklist_items (
+                id BIGSERIAL PRIMARY KEY,
+                ensayo TEXT,
+                item TEXT,
+                done BOOLEAN DEFAULT FALSE
+            )
+            '''
         )
-    ''')
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS notas_esquemas (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            nombre_esquema TEXT UNIQUE,
-            nota TEXT,
-            fecha_modificacion TEXT
+        c.execute(
+            '''
+            CREATE TABLE IF NOT EXISTS notas_esquemas (
+                id BIGSERIAL PRIMARY KEY,
+                nombre_esquema TEXT UNIQUE,
+                nota TEXT,
+                fecha_modificacion TEXT
+            )
+            '''
         )
-    ''')
+        c.execute(
+            '''
+            CREATE TABLE IF NOT EXISTS notas_enfermeria (
+                id BIGSERIAL PRIMARY KEY,
+                fecha_nota TEXT NOT NULL,
+                texto TEXT NOT NULL,
+                urgencia TEXT NOT NULL,
+                creado_en TEXT NOT NULL
+            )
+            '''
+        )
+    else:
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS visitas (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                fecha TEXT NOT NULL,
+                nombre TEXT,
+                codigo TEXT,
+                ensayo TEXT,
+                ciclo TEXT,
+                kits TEXT,
+                tablet BOOLEAN,
+                medula BOOLEAN,
+                otras_pruebas TEXT,
+                comentarios TEXT
+            )
+        ''')
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS revision_ocular (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                visita_id INTEGER UNIQUE,
+                fecha_cita TEXT,
+                kva INTEGER,
+                FOREIGN KEY(visita_id) REFERENCES visitas(id)
+            )
+        ''')
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS pacientes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                codigo TEXT,
+                nombre TEXT,
+                ensayo TEXT,
+                UNIQUE(codigo, ensayo)
+            )
+        ''')
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS checklist_items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ensayo TEXT,
+                item TEXT,
+                done BOOLEAN DEFAULT 0
+            )
+        ''')
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS notas_esquemas (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                nombre_esquema TEXT UNIQUE,
+                nota TEXT,
+                fecha_modificacion TEXT
+            )
+        ''')
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS notas_enfermeria (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                fecha_nota TEXT NOT NULL,
+                texto TEXT NOT NULL,
+                urgencia TEXT NOT NULL,
+                creado_en TEXT NOT NULL
+            )
+        ''')
     anonimizar_nombres_existentes(c)
     normalizar_ensayos_existentes(c)
     sincronizar_pacientes_desde_visitas(c)
@@ -358,7 +595,7 @@ def guardar_visita(fecha, data):
     data['nombre'] = nombre_a_iniciales(data.get('nombre'))
     data['codigo'] = normalizar_texto_campo(data.get('codigo'))
     data['ensayo'] = normalizar_ensayo(data.get('ensayo'))
-    conn = sqlite3.connect('agenda_ensayos.db')
+    conn = connect_db()
     c = conn.cursor()
     c.execute('''
         INSERT INTO visitas (fecha, nombre, codigo, ensayo, ciclo, kits, tablet, medula, otras_pruebas, comentarios)
@@ -370,13 +607,14 @@ def guardar_visita(fecha, data):
     eliminar_ensayos_sin_pacientes(c)
     conn.commit()
     conn.close()
+    snapshot_db("pacientes")
 
 def actualizar_visita(id_visita, fecha, data):
     data = data.copy()
     data['nombre'] = nombre_a_iniciales(data.get('nombre'))
     data['codigo'] = normalizar_texto_campo(data.get('codigo'))
     data['ensayo'] = normalizar_ensayo(data.get('ensayo'))
-    conn = sqlite3.connect('agenda_ensayos.db')
+    conn = connect_db()
     c = conn.cursor()
     c.execute('''
         UPDATE visitas
@@ -393,9 +631,10 @@ def actualizar_visita(id_visita, fecha, data):
     eliminar_ensayos_sin_pacientes(c)
     conn.commit()
     conn.close()
+    snapshot_db("pacientes")
 
 def get_visitas():
-    conn = sqlite3.connect('agenda_ensayos.db')
+    conn = connect_db()
     try:
         df = pd.read_sql("SELECT * FROM visitas", conn)
     except:
@@ -404,7 +643,7 @@ def get_visitas():
     return df
 
 def get_pacientes_unicos():
-    conn = sqlite3.connect('agenda_ensayos.db')
+    conn = connect_db()
     try:
         df = pd.read_sql("SELECT codigo, nombre, ensayo FROM pacientes", conn)
     except Exception:
@@ -466,17 +705,18 @@ def get_ensayos_existentes():
     return sorted(ensayos)
 
 def borrar_visita(id_visita):
-    conn = sqlite3.connect('agenda_ensayos.db')
+    conn = connect_db()
     c = conn.cursor()
     c.execute("DELETE FROM visitas WHERE id=?", (id_visita,))
     sincronizar_pacientes_desde_visitas(c)
     eliminar_ensayos_sin_pacientes(c)
     conn.commit()
     conn.close()
+    snapshot_db("pacientes")
 
 def get_checklist_items(ensayo):
     ensayo = normalizar_ensayo(ensayo)
-    conn = sqlite3.connect('agenda_ensayos.db')
+    conn = connect_db()
     df = pd.read_sql(
         "SELECT id, item, done FROM checklist_items WHERE ensayo = ? ORDER BY id",
         conn,
@@ -487,7 +727,7 @@ def get_checklist_items(ensayo):
 
 def add_checklist_item(ensayo, item):
     ensayo = normalizar_ensayo(ensayo)
-    conn = sqlite3.connect('agenda_ensayos.db')
+    conn = connect_db()
     c = conn.cursor()
     c.execute(
         "INSERT INTO checklist_items (ensayo, item, done) VALUES (?, ?, 0)",
@@ -500,7 +740,7 @@ def add_checklist_items_bulk(ensayo, items):
     ensayo = normalizar_ensayo(ensayo)
     if not items:
         return
-    conn = sqlite3.connect('agenda_ensayos.db')
+    conn = connect_db()
     c = conn.cursor()
     existentes = set(
         row[0] for row in c.execute(
@@ -518,21 +758,102 @@ def add_checklist_items_bulk(ensayo, items):
     conn.close()
 
 def set_checklist_done(item_id, done):
-    conn = sqlite3.connect('agenda_ensayos.db')
+    conn = connect_db()
     c = conn.cursor()
     c.execute("UPDATE checklist_items SET done = ? WHERE id = ?", (int(done), item_id))
     conn.commit()
     conn.close()
 
 def delete_checklist_item(item_id):
-    conn = sqlite3.connect('agenda_ensayos.db')
+    conn = connect_db()
     c = conn.cursor()
     c.execute("DELETE FROM checklist_items WHERE id = ?", (item_id,))
     conn.commit()
     conn.close()
 
+
+def add_nota_enfermeria(fecha_nota, texto, urgencia):
+    conn = connect_db()
+    c = conn.cursor()
+    creado_en = ahora_local().isoformat(timespec="seconds")
+    c.execute(
+        """
+        INSERT INTO notas_enfermeria (fecha_nota, texto, urgencia, creado_en)
+        VALUES (?, ?, ?, ?)
+        """,
+        (fecha_nota, texto, urgencia, creado_en)
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_notas_enfermeria():
+    conn = connect_db()
+    df = pd.read_sql(
+        """
+        SELECT id, fecha_nota, texto, urgencia, creado_en
+        FROM notas_enfermeria
+        ORDER BY creado_en ASC, id ASC
+        """,
+        conn
+    )
+    conn.close()
+    return df
+
+
+def delete_nota_enfermeria(nota_id):
+    conn = connect_db()
+    c = conn.cursor()
+    c.execute("DELETE FROM notas_enfermeria WHERE id = ?", (nota_id,))
+    conn.commit()
+    conn.close()
+
+
+def parse_datetime_iso(valor):
+    if valor is None:
+        return None
+    texto = str(valor).strip()
+    if not texto:
+        return None
+    try:
+        if texto.endswith("Z"):
+            texto = texto[:-1] + "+00:00"
+        dt = datetime.fromisoformat(texto)
+        if dt.tzinfo is not None:
+            if ZoneInfo is not None:
+                return dt.astimezone(ZoneInfo(APP_TIMEZONE))
+            return dt.astimezone()
+        return dt
+    except (ValueError, TypeError):
+        return None
+
+
+def formatear_latencia_desde_creacion(creado_en):
+    creado_dt = parse_datetime_iso(creado_en)
+    if creado_dt is None:
+        return "N/D"
+
+    ahora = ahora_local()
+    if creado_dt.tzinfo is None and ahora.tzinfo is not None:
+        creado_dt = creado_dt.replace(tzinfo=ahora.tzinfo)
+    if creado_dt.tzinfo is not None and ahora.tzinfo is None:
+        ahora = ahora.replace(tzinfo=creado_dt.tzinfo)
+
+    delta = ahora - creado_dt
+    segundos = int(max(delta.total_seconds(), 0))
+
+    dias = segundos // 86400
+    horas = (segundos % 86400) // 3600
+    minutos = (segundos % 3600) // 60
+
+    if dias > 0:
+        return f"{dias}d {horas}h {minutos}m"
+    if horas > 0:
+        return f"{horas}h {minutos}m"
+    return f"{minutos}m"
+
 def guardar_revision_ocular(visita_id, fecha_cita, kva):
-    conn = sqlite3.connect('agenda_ensayos.db')
+    conn = connect_db()
     c = conn.cursor()
     c.execute(
         "INSERT OR REPLACE INTO revision_ocular (visita_id, fecha_cita, kva) VALUES (?, ?, ?)",
@@ -542,7 +863,7 @@ def guardar_revision_ocular(visita_id, fecha_cita, kva):
     conn.close()
 
 def get_revision_ocular(visita_id):
-    conn = sqlite3.connect('agenda_ensayos.db')
+    conn = connect_db()
     c = conn.cursor()
     c.execute("SELECT fecha_cita, kva FROM revision_ocular WHERE visita_id=?", (visita_id,))
     row = c.fetchone()
@@ -889,7 +1210,7 @@ def render_resumen_manana():
         df_manana = df_proximas[df_proximas["_fecha_dt"] == fecha_mostrar].copy()
         st.caption(f"Mostrando próxima fecha con pacientes: {fecha_mostrar.strftime('%d/%m/%Y')}")
 
-    conn = sqlite3.connect('agenda_ensayos.db')
+    conn = connect_db()
     df_rev = pd.read_sql(
         "SELECT visita_id, fecha_cita, kva FROM revision_ocular",
         conn
@@ -959,15 +1280,54 @@ init_db()
 
 # --- INTERFAZ PRINCIPAL ---
 st.title("📅 Agenda de Pacientes - Ensayos Clínicos 2026")
+st.caption(f"Version visible de la app: {APP_BUILD}")
+st.caption(f"Backend de datos: {DB_BACKEND}")
 
-tab_agenda, tab_protocolos, tab_protocolos_ensayo, tab_ficha, tab_checklist, tab_esquemas = st.tabs(
+if DB_BACKEND == "sqlite":
+    st.warning(
+        "Si usas Streamlit Cloud, un 'Reboot app' puede borrar el almacenamiento local. "
+        "Usa el bloque de respaldo para descargar/restaurar la base."
+    )
+
+    with st.expander("Respaldo y restauracion de datos", expanded=False):
+        db_bytes = export_db_bytes()
+        if db_bytes is None:
+            st.info("Aun no existe base de datos para descargar.")
+        else:
+            ts = ahora_local().strftime("%Y%m%d_%H%M%S")
+            st.download_button(
+                "Descargar backup (.db)",
+                data=db_bytes,
+                file_name=f"agenda_ensayos_backup_{ts}.db",
+                mime="application/octet-stream",
+                key="download_db_backup"
+            )
+
+        st.caption("Para recuperar datos tras reboot: sube un backup .db y pulsa restaurar.")
+        uploaded_db = st.file_uploader(
+            "Subir backup de base de datos (.db)",
+            type=["db"],
+            key="upload_db_backup"
+        )
+        if uploaded_db is not None and st.button("Restaurar backup subido", key="restore_db_backup"):
+            ok, msg = restore_db_from_bytes(uploaded_db.getvalue())
+            if ok:
+                st.success(msg)
+                st.rerun()
+            else:
+                st.error(msg)
+else:
+    st.success("Conectado a BD externa. Los datos no dependen del disco local del contenedor.")
+
+tab_agenda, tab_protocolos, tab_protocolos_ensayo, tab_ficha, tab_checklist, tab_notas_enfermeria, tab_esquemas = st.tabs(
     [
         "Agenda",
-        "Protocolos de Enfermería",
-        "Protocolos de Ensayo",
-        "Ficha del paciente",
-        "Check List",
-        "Esquemas de tratamiento"
+        "Prot. enfermeria",
+        "Prot. ensayo",
+        "Ficha paciente",
+        "Check list",
+        "Notas enfermeria",
+        "Esquemas"
     ]
 )
 
@@ -1071,7 +1431,7 @@ with tab_esquemas:
             st.markdown("### 📝 Notas del Esquema")
             
             # Cargar nota existente
-            conn = sqlite3.connect('agenda_ensayos.db')
+            conn = connect_db()
             c = conn.cursor()
             c.execute("SELECT nota FROM notas_esquemas WHERE nombre_esquema = ?", (img_sel,))
             resultado = c.fetchone()
@@ -1092,7 +1452,7 @@ with tab_esquemas:
             with col1:
                 # Botón para guardar
                 if st.button("💾 Guardar Nota", key=f"guardar_nota_{img_sel}"):
-                    conn = sqlite3.connect('agenda_ensayos.db')
+                    conn = connect_db()
                     c = conn.cursor()
                     fecha_mod = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     c.execute("""
@@ -1260,7 +1620,7 @@ with tab_esquemas:
             
             # Mostrar fecha de última modificación
             if nota_actual:
-                conn = sqlite3.connect('agenda_ensayos.db')
+                conn = connect_db()
                 c = conn.cursor()
                 c.execute("SELECT fecha_modificacion FROM notas_esquemas WHERE nombre_esquema = ?", (img_sel,))
                 resultado = c.fetchone()
@@ -1348,7 +1708,7 @@ with tab_ficha:
                 df_ficha = base[filtro].copy()
 
                 if not df_ficha.empty:
-                    conn = sqlite3.connect('agenda_ensayos.db')
+                    conn = connect_db()
                     df_rev = pd.read_sql(
                         "SELECT visita_id, fecha_cita, kva FROM revision_ocular",
                         conn
@@ -1373,7 +1733,7 @@ with tab_ficha:
                     & (base["_ensayo_norm"] == ensayo_sel_norm)
                 ].copy()
                 if not df_ficha.empty:
-                    conn = sqlite3.connect('agenda_ensayos.db')
+                    conn = connect_db()
                     df_rev = pd.read_sql(
                         "SELECT visita_id, fecha_cita, kva FROM revision_ocular",
                         conn
@@ -1636,6 +1996,65 @@ with tab_checklist:
                     marca = "[x]" if bool(row["done"]) else "[ ]"
                     lineas.append(f"{marca} {row['item']}")
                 render_print_dialog("\n".join(lineas), f"Checklist {ensayo_sel}")
+
+with tab_notas_enfermeria:
+    st.subheader("📝 Notas de enfermería")
+
+    urgencias = {
+        "verde": {"label": "Verde (baja)", "icono": "🟢", "color": "#15803d"},
+        "amarillo": {"label": "Amarillo (media)", "icono": "🟡", "color": "#ca8a04"},
+        "rojo": {"label": "Rojo (alta)", "icono": "🔴", "color": "#dc2626"},
+    }
+
+    with st.form("form_nota_enfermeria", clear_on_submit=True):
+        fecha_nota = st.date_input("Fecha de la nota", value=fecha_hoy_local(), key="nota_enf_fecha")
+        texto_nota = st.text_area("Texto libre", key="nota_enf_texto", height=120)
+        urgencia_sel = st.selectbox(
+            "Urgencia (semáforo)",
+            options=list(urgencias.keys()),
+            format_func=lambda u: f"{urgencias[u]['icono']} {urgencias[u]['label']}",
+            key="nota_enf_urgencia"
+        )
+        guardar_nota = st.form_submit_button("Guardar nota", type="primary")
+
+        if guardar_nota:
+            texto_limpio = texto_nota.strip()
+            if not texto_limpio:
+                st.warning("El texto de la nota no puede estar vacio.")
+            else:
+                add_nota_enfermeria(fecha_nota.isoformat(), texto_limpio, urgencia_sel)
+                st.success("Nota de enfermería guardada.")
+                st.rerun()
+
+    df_notas_enf = get_notas_enfermeria()
+    if df_notas_enf.empty:
+        st.info("No hay notas de enfermería pendientes.")
+    else:
+        st.caption("Marca una nota como realizada para eliminarla automáticamente.")
+        for _, row in df_notas_enf.iterrows():
+            urg = str(row.get("urgencia") or "verde").strip().lower()
+            if urg not in urgencias:
+                urg = "verde"
+            cfg_urg = urgencias[urg]
+
+            fecha_txt = formatear_fecha_visita(row.get("fecha_nota"))
+            latencia_txt = formatear_latencia_desde_creacion(row.get("creado_en"))
+
+            st.markdown(
+                f"{cfg_urg['icono']} **{cfg_urg['label']}** | Fecha nota: **{fecha_txt}** | "
+                f"Latencia desde creación: **{latencia_txt}**"
+            )
+            st.markdown(
+                f"<div style='border-left: 4px solid {cfg_urg['color']}; padding: 8px 12px; "
+                f"background: #fff; border-radius: 4px;'>{html.escape(str(row.get('texto') or ''))}</div>",
+                unsafe_allow_html=True
+            )
+            if st.button("✅ Marcar como realizado (borrar)", key=f"nota_enf_done_{int(row['id'])}"):
+                latencia_cierre = formatear_latencia_desde_creacion(row.get("creado_en"))
+                delete_nota_enfermeria(int(row["id"]))
+                st.success(f"Nota realizada y eliminada. Latencia de respuesta: {latencia_cierre}.")
+                st.rerun()
+            st.markdown("---")
 
 with tab_agenda:
     with st.expander("📌 Ver resumen de mañana", expanded=False):
