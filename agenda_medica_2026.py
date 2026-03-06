@@ -1314,44 +1314,7 @@ init_db()
 
 # --- INTERFAZ PRINCIPAL ---
 st.title("📅 Agenda de Pacientes - Ensayos Clínicos 2026")
-st.caption(f"Version visible de la app: {APP_BUILD}")
-st.caption(f"Backend de datos: {DB_BACKEND}")
-
-if DB_BACKEND == "sqlite":
-    st.warning(
-        "Si usas Streamlit Cloud, un 'Reboot app' puede borrar el almacenamiento local. "
-        "Usa el bloque de respaldo para descargar/restaurar la base."
-    )
-
-    with st.expander("Respaldo y restauracion de datos", expanded=False):
-        db_bytes = export_db_bytes()
-        if db_bytes is None:
-            st.info("Aun no existe base de datos para descargar.")
-        else:
-            ts = ahora_local().strftime("%Y%m%d_%H%M%S")
-            st.download_button(
-                "Descargar backup (.db)",
-                data=db_bytes,
-                file_name=f"agenda_ensayos_backup_{ts}.db",
-                mime="application/octet-stream",
-                key="download_db_backup"
-            )
-
-        st.caption("Para recuperar datos tras reboot: sube un backup .db y pulsa restaurar.")
-        uploaded_db = st.file_uploader(
-            "Subir backup de base de datos (.db)",
-            type=["db"],
-            key="upload_db_backup"
-        )
-        if uploaded_db is not None and st.button("Restaurar backup subido", key="restore_db_backup"):
-            ok, msg = restore_db_from_bytes(uploaded_db.getvalue())
-            if ok:
-                st.success(msg)
-                st.rerun()
-            else:
-                st.error(msg)
-else:
-    st.success("Conectado a BD externa. Los datos no dependen del disco local del contenedor.")
+st.success("Conectado a BD externa. Los datos no dependen del disco local del contenedor.")
 
 tab_agenda, tab_protocolos, tab_protocolos_ensayo, tab_ficha, tab_checklist, tab_notas_enfermeria, tab_esquemas = st.tabs(
     [
