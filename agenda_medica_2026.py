@@ -1307,7 +1307,6 @@ init_db()
 
 # --- INTERFAZ PRINCIPAL ---
 st.title("📅 Agenda de Pacientes - Ensayos Clínicos 2026")
-st.success("Conectado a BD externa. Los datos no dependen del disco local del contenedor.")
 
 tab_agenda, tab_protocolos, tab_protocolos_ensayo, tab_ficha, tab_checklist, tab_notas_enfermeria, tab_esquemas = st.tabs(
     [
