@@ -14,6 +14,7 @@ import base64
 import webbrowser
 import tempfile
 import importlib
+from urllib.parse import quote_plus
 
 try:
     psycopg2 = importlib.import_module("psycopg2")
@@ -128,17 +129,54 @@ def leer_config(clave, default=None):
 
 
 def extraer_database_url():
+    def _limpiar_url(valor):
+        if valor is None:
+            return ""
+        return str(valor).strip()
+
+    def _construir_url_postgres_desde_bloque(bloque):
+        if not bloque:
+            return ""
+
+        url_directa = _limpiar_url(bloque.get("url") if hasattr(bloque, "get") else None)
+        if url_directa:
+            return url_directa
+
+        host = _limpiar_url(bloque.get("host") if hasattr(bloque, "get") else None)
+        port = _limpiar_url(bloque.get("port") if hasattr(bloque, "get") else None) or "5432"
+        dbname = _limpiar_url(
+            (bloque.get("database") if hasattr(bloque, "get") else None)
+            or (bloque.get("dbname") if hasattr(bloque, "get") else None)
+        )
+        user = _limpiar_url(
+            (bloque.get("user") if hasattr(bloque, "get") else None)
+            or (bloque.get("username") if hasattr(bloque, "get") else None)
+        )
+        password = _limpiar_url(bloque.get("password") if hasattr(bloque, "get") else None)
+        sslmode = _limpiar_url(bloque.get("sslmode") if hasattr(bloque, "get") else None) or "require"
+
+        if not (host and dbname and user):
+            return ""
+
+        credenciales = quote_plus(user)
+        if password:
+            credenciales += f":{quote_plus(password)}"
+
+        return f"postgresql://{credenciales}@{host}:{port}/{dbname}?sslmode={sslmode}"
+
     # 1) Variables de entorno frecuentes.
     for clave in ("DATABASE_URL", "POSTGRES_URL", "POSTGRESQL_URL", "SUPABASE_DB_URL"):
-        valor = os.getenv(clave)
+        valor = _limpiar_url(os.getenv(clave))
         if valor:
             return valor
 
     # 2) Claves planas en st.secrets.
     try:
         for clave in ("DATABASE_URL", "POSTGRES_URL", "POSTGRESQL_URL", "SUPABASE_DB_URL"):
-            if clave in st.secrets and st.secrets[clave]:
-                return st.secrets[clave]
+            if clave in st.secrets:
+                valor = _limpiar_url(st.secrets[clave])
+                if valor:
+                    return valor
     except Exception:
         pass
 
@@ -149,8 +187,20 @@ def extraer_database_url():
             for nombre in ("postgresql", "postgres", "db"):
                 if nombre in conexiones:
                     bloque = conexiones[nombre]
-                    if "url" in bloque and bloque["url"]:
-                        return bloque["url"]
+                    url = _construir_url_postgres_desde_bloque(bloque)
+                    if url:
+                        return url
+    except Exception:
+        pass
+
+    # 4) Estructuras anidadas alternativas.
+    try:
+        for raiz in ("database", "postgres", "postgresql", "db"):
+            if raiz in st.secrets:
+                bloque = st.secrets[raiz]
+                url = _construir_url_postgres_desde_bloque(bloque)
+                if url:
+                    return url
     except Exception:
         pass
 
@@ -158,12 +208,26 @@ def extraer_database_url():
 
 
 DATABASE_URL = extraer_database_url()
+ALLOW_SQLITE_FALLBACK = str(leer_config("ALLOW_SQLITE_FALLBACK", "0")).strip().lower() in {
+    "1", "true", "yes", "si"
+}
+_prefijos_postgres = ("postgres://", "postgresql://", "postgresql+psycopg2://")
 _postgres_disponible = bool(
     DATABASE_URL
-    and DATABASE_URL.startswith(("postgres://", "postgresql://"))
+    and DATABASE_URL.startswith(_prefijos_postgres)
     and psycopg2 is not None
 )
-DB_BACKEND = "postgres" if _postgres_disponible else "sqlite"
+
+if _postgres_disponible:
+    DB_BACKEND = "postgres"
+elif ALLOW_SQLITE_FALLBACK:
+    DB_BACKEND = "sqlite"
+else:
+    st.error(
+        "No hay conexion PostgreSQL valida. Configura `DATABASE_URL` en Streamlit Secrets "
+        "o define `ALLOW_SQLITE_FALLBACK=1` solo para uso temporal local."
+    )
+    st.stop()
 
 
 def _adaptar_query_postgres(query):
