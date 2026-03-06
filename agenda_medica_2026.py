@@ -158,17 +158,19 @@ def extraer_database_url():
 
 
 DATABASE_URL = extraer_database_url()
-_postgres_disponible = bool(
-    DATABASE_URL
-    and DATABASE_URL.startswith(("postgres://", "postgresql://"))
-    and psycopg2 is not None
-)
-DB_BACKEND = "postgres" if _postgres_disponible else "sqlite"
+if not DATABASE_URL:
+    st.error("Falta `DATABASE_URL`. La app requiere PostgreSQL externa para iniciar.")
+    st.stop()
 
-if DATABASE_URL and DATABASE_URL.startswith(("postgres://", "postgresql://")) and psycopg2 is None:
-    st.warning("Se detecto DATABASE_URL de PostgreSQL, pero falta `psycopg2-binary`; usando SQLite temporalmente.")
-elif DATABASE_URL and not DATABASE_URL.startswith(("postgres://", "postgresql://")):
-    st.warning("Se detecto URL de base de datos, pero no es PostgreSQL valido; usando SQLite temporalmente.")
+if not DATABASE_URL.startswith(("postgres://", "postgresql://")):
+    st.error("`DATABASE_URL` no es valida. Debe empezar por `postgres://` o `postgresql://`.")
+    st.stop()
+
+if psycopg2 is None:
+    st.error("Falta `psycopg2-binary` en el entorno. No se puede conectar a PostgreSQL.")
+    st.stop()
+
+DB_BACKEND = "postgres"
 
 
 def _adaptar_query_postgres(query):
