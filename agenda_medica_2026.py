@@ -261,10 +261,12 @@ def _adaptar_query_postgres(query):
 if PsycopgCursor is not None:
     class CursorCompatPostgres(PsycopgCursor):
         def execute(self, query, vars=None):
-            return super().execute(_adaptar_query_postgres(query), vars)
+            super().execute(_adaptar_query_postgres(query), vars)
+            return self
 
         def executemany(self, query, vars_list):
-            return super().executemany(_adaptar_query_postgres(query), vars_list)
+            super().executemany(_adaptar_query_postgres(query), vars_list)
+            return self
 else:
     CursorCompatPostgres = None
 
