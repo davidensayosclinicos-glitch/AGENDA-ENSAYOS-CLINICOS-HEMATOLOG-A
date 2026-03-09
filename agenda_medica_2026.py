@@ -273,7 +273,11 @@ def connect_db():
     global DB_BACKEND
     if DB_BACKEND == "postgres":
         try:
-            return psycopg2.connect(DATABASE_URL, cursor_factory=CursorCompatPostgres)
+            return psycopg2.connect(
+                DATABASE_URL,
+                cursor_factory=CursorCompatPostgres,
+                connect_timeout=8,
+            )
         except Exception:
             DB_BACKEND = "sqlite"
             if not st.session_state.get("_postgres_fallback_notificado"):
