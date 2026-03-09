@@ -211,6 +211,7 @@ DATABASE_URL = extraer_database_url()
 ALLOW_SQLITE_FALLBACK = str(leer_config("ALLOW_SQLITE_FALLBACK", "0")).strip().lower() in {
     "1", "true", "yes", "si"
 }
+SQLITE_DB_EXISTE = os.path.exists(DB_PATH)
 _prefijos_postgres = ("postgres://", "postgresql://", "postgresql+psycopg2://")
 _postgres_disponible = bool(
     DATABASE_URL
@@ -220,14 +221,20 @@ _postgres_disponible = bool(
 
 if _postgres_disponible:
     DB_BACKEND = "postgres"
-elif ALLOW_SQLITE_FALLBACK:
+elif ALLOW_SQLITE_FALLBACK or SQLITE_DB_EXISTE:
     DB_BACKEND = "sqlite"
 else:
-    st.error(
-        "No hay conexion PostgreSQL valida. Configura `DATABASE_URL` en Streamlit Secrets "
-        "o define `ALLOW_SQLITE_FALLBACK=1` solo para uso temporal local."
+    DB_BACKEND = "sqlite"
+    st.info(
+        "Modo local SQLite activo (`agenda_ensayos.db`). "
+        "Para produccion, configura `DATABASE_URL` en Streamlit Secrets."
     )
-    st.stop()
+
+if DB_BACKEND == "sqlite" and not ALLOW_SQLITE_FALLBACK and SQLITE_DB_EXISTE:
+    st.info(
+        "Usando base local `agenda_ensayos.db` detectada en el proyecto. "
+        "Para produccion, configura `DATABASE_URL` en Streamlit Secrets."
+    )
 
 
 def _adaptar_query_postgres(query):

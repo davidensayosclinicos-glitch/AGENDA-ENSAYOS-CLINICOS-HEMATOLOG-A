@@ -31,3 +31,22 @@ streamlit run app.py
 ## Nota sobre datos
 
 La app usa SQLite (`agenda_ensayos.db`) en el sistema de archivos local. En Streamlit Cloud ese almacenamiento es temporal, por lo que los datos pueden perderse en reinicios/redeploys.
+
+## PostgreSQL y Secrets
+
+Si aparece el error `No hay conexion PostgreSQL valida`, configura los secretos asi:
+
+```toml
+DATABASE_URL = "postgresql://usuario:password@host:5432/dbname?sslmode=require"
+ALLOW_SQLITE_FALLBACK = "0"
+```
+
+En Streamlit Cloud: **App settings > Secrets**.
+
+Para pruebas locales temporales (sin PostgreSQL), puedes usar:
+
+```toml
+ALLOW_SQLITE_FALLBACK = "1"
+```
+
+No se recomienda usar `ALLOW_SQLITE_FALLBACK=1` en produccion.
