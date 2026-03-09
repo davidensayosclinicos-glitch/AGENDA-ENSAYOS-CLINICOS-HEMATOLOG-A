@@ -270,8 +270,19 @@ else:
 
 
 def connect_db():
+    global DB_BACKEND
     if DB_BACKEND == "postgres":
-        return psycopg2.connect(DATABASE_URL, cursor_factory=CursorCompatPostgres)
+        try:
+            return psycopg2.connect(DATABASE_URL, cursor_factory=CursorCompatPostgres)
+        except Exception:
+            DB_BACKEND = "sqlite"
+            if not st.session_state.get("_postgres_fallback_notificado"):
+                st.session_state["_postgres_fallback_notificado"] = True
+                st.warning(
+                    "No se pudo conectar con PostgreSQL. "
+                    "La app sigue en modo SQLite local (`agenda_ensayos.db`)."
+                )
+            return sqlite3.connect(DB_PATH)
     return sqlite3.connect(DB_PATH)
 
 
