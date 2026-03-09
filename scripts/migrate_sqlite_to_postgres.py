@@ -131,7 +131,13 @@ def ensure_postgres_schema(pg_cur) -> None:
 
 def fetch_all(sqlite_cur, table: str, columns: list[str]) -> list[tuple]:
     query = f"SELECT {', '.join(columns)} FROM {table}"
-    rows = sqlite_cur.execute(query).fetchall()
+    try:
+        rows = sqlite_cur.execute(query).fetchall()
+    except sqlite3.OperationalError as exc:
+        # Some historical SQLite files may not include all tables.
+        if "no such table" in str(exc).lower():
+            return []
+        raise
     return [tuple(row[col] for col in columns) for row in rows]
 
 
@@ -221,6 +227,21 @@ def main() -> int:
             "notas_enfermeria",
             ["id", "fecha_nota", "texto", "urgencia", "creado_en"],
         )
+
+        # SQLite stores booleans as integers; Postgres expects bool.
+        visitas = [
+            (
+                r[0], r[1], r[2], r[3], r[4], r[5], r[6],
+                bool(r[7]) if r[7] is not None else False,
+                bool(r[8]) if r[8] is not None else False,
+                r[9], r[10],
+            )
+            for r in visitas
+        ]
+        checklist = [
+            (r[0], r[1], r[2], bool(r[3]) if r[3] is not None else False)
+            for r in checklist
+        ]
 
         upsert_table(
             pg_cur,
