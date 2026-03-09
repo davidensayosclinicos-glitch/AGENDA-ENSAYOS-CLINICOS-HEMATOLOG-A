@@ -798,6 +798,7 @@ def guardar_visita(fecha, data):
     eliminar_ensayos_sin_pacientes(c)
     conn.commit()
     conn.close()
+    invalidar_cache_lecturas()
     snapshot_db("pacientes")
 
 def actualizar_visita(id_visita, fecha, data):
@@ -822,8 +823,10 @@ def actualizar_visita(id_visita, fecha, data):
     eliminar_ensayos_sin_pacientes(c)
     conn.commit()
     conn.close()
+    invalidar_cache_lecturas()
     snapshot_db("pacientes")
 
+@st.cache_data(show_spinner=False)
 def get_visitas():
     conn = connect_db()
     try:
@@ -833,6 +836,7 @@ def get_visitas():
     conn.close()
     return df
 
+@st.cache_data(show_spinner=False)
 def get_pacientes_unicos():
     conn = connect_db()
     try:
@@ -875,6 +879,7 @@ def get_pacientes_unicos():
     return deduplicar_pacientes(df.dropna(how='all'))
 
 
+@st.cache_data(show_spinner=False)
 def get_ensayos_existentes():
     ensayos = set()
 
@@ -903,8 +908,10 @@ def borrar_visita(id_visita):
     eliminar_ensayos_sin_pacientes(c)
     conn.commit()
     conn.close()
+    invalidar_cache_lecturas()
     snapshot_db("pacientes")
 
+@st.cache_data(show_spinner=False)
 def get_checklist_items(ensayo):
     ensayo = normalizar_ensayo(ensayo)
     conn = connect_db()
@@ -926,6 +933,7 @@ def add_checklist_item(ensayo, item):
     )
     conn.commit()
     conn.close()
+    invalidar_cache_lecturas()
 
 def add_checklist_items_bulk(ensayo, items):
     ensayo = normalizar_ensayo(ensayo)
@@ -947,6 +955,7 @@ def add_checklist_items_bulk(ensayo, items):
         )
     conn.commit()
     conn.close()
+    invalidar_cache_lecturas()
 
 def set_checklist_done(item_id, done):
     conn = connect_db()
@@ -954,6 +963,7 @@ def set_checklist_done(item_id, done):
     c.execute("UPDATE checklist_items SET done = ? WHERE id = ?", (int(done), item_id))
     conn.commit()
     conn.close()
+    invalidar_cache_lecturas()
 
 def delete_checklist_item(item_id):
     conn = connect_db()
@@ -961,6 +971,7 @@ def delete_checklist_item(item_id):
     c.execute("DELETE FROM checklist_items WHERE id = ?", (item_id,))
     conn.commit()
     conn.close()
+    invalidar_cache_lecturas()
 
 
 def add_nota_enfermeria(fecha_nota, texto, urgencia):
@@ -976,8 +987,10 @@ def add_nota_enfermeria(fecha_nota, texto, urgencia):
     )
     conn.commit()
     conn.close()
+    invalidar_cache_lecturas()
 
 
+@st.cache_data(show_spinner=False)
 def get_notas_enfermeria():
     conn = connect_db()
     df = pd.read_sql(
@@ -998,6 +1011,7 @@ def delete_nota_enfermeria(nota_id):
     c.execute("DELETE FROM notas_enfermeria WHERE id = ?", (nota_id,))
     conn.commit()
     conn.close()
+    invalidar_cache_lecturas()
 
 
 def parse_datetime_iso(valor):
@@ -1053,6 +1067,7 @@ def guardar_revision_ocular(visita_id, fecha_cita, kva):
     conn.commit()
     conn.close()
 
+@st.cache_data(show_spinner=False)
 def get_revision_ocular(visita_id):
     conn = connect_db()
     c = conn.cursor()
@@ -1060,6 +1075,15 @@ def get_revision_ocular(visita_id):
     row = c.fetchone()
     conn.close()
     return row
+
+
+def invalidar_cache_lecturas():
+    get_visitas.clear()
+    get_pacientes_unicos.clear()
+    get_ensayos_existentes.clear()
+    get_checklist_items.clear()
+    get_notas_enfermeria.clear()
+    get_revision_ocular.clear()
 
 def render_print_dialog(texto, titulo):
         texto_html = html.escape(texto).replace("\n", "<br>")
