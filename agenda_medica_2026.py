@@ -1066,6 +1066,7 @@ def guardar_revision_ocular(visita_id, fecha_cita, kva):
     )
     conn.commit()
     conn.close()
+    invalidar_cache_lecturas()
 
 @st.cache_data(show_spinner=False)
 def get_revision_ocular(visita_id):
@@ -1077,6 +1078,17 @@ def get_revision_ocular(visita_id):
     return row
 
 
+@st.cache_data(show_spinner=False)
+def get_revisiones_oculares_df():
+    conn = connect_db()
+    df = pd.read_sql(
+        "SELECT visita_id, fecha_cita, kva FROM revision_ocular",
+        conn
+    )
+    conn.close()
+    return df
+
+
 def invalidar_cache_lecturas():
     get_visitas.clear()
     get_pacientes_unicos.clear()
@@ -1084,6 +1096,7 @@ def invalidar_cache_lecturas():
     get_checklist_items.clear()
     get_notas_enfermeria.clear()
     get_revision_ocular.clear()
+    get_revisiones_oculares_df.clear()
 
 def render_print_dialog(texto, titulo):
         texto_html = html.escape(texto).replace("\n", "<br>")
@@ -1173,6 +1186,7 @@ def parse_fecha_iso(fecha_iso):
             continue
     return None
 
+@st.cache_data(show_spinner=False)
 def generar_visita_teorica_2274(df_visitas):
     if df_visitas.empty:
         return []
@@ -1240,6 +1254,36 @@ def generar_visita_teorica_2274(df_visitas):
             "borderColor": "#2f6fbf"
         })
 
+    return eventos
+
+
+@st.cache_data(show_spinner=False)
+def construir_eventos_calendario(df_visitas):
+    eventos = []
+    if df_visitas.empty:
+        return eventos
+
+    for _, row in df_visitas.iterrows():
+        titulo_evento = f"🆔 {row['codigo']} | {row['ensayo']}"
+        if row['medula']:
+            titulo_evento += " 🩸"
+
+        event = {
+            "title": titulo_evento,
+            "start": row['fecha'],
+            "allDay": True,
+            "extendedProps": {
+                "id": row['id'],
+                "nombre": row['nombre'],
+                "ciclo": row['ciclo'],
+                "medula": row['medula'],
+                "ensayo": row['ensayo']
+            },
+            "backgroundColor": "#ff4b4b" if row['medula'] else "#3788d8"
+        }
+        eventos.append(event)
+
+    eventos.extend(generar_visita_teorica_2274(df_visitas))
     return eventos
 
 def listar_pdfs(directorio):
@@ -1425,12 +1469,7 @@ def render_resumen_manana():
         df_manana = df_proximas[df_proximas["_fecha_dt"] == fecha_mostrar].copy()
         st.caption(f"Mostrando próxima fecha con pacientes: {fecha_mostrar.strftime('%d/%m/%Y')}")
 
-    conn = connect_db()
-    df_rev = pd.read_sql(
-        "SELECT visita_id, fecha_cita, kva FROM revision_ocular",
-        conn
-    )
-    conn.close()
+    df_rev = get_revisiones_oculares_df()
 
     if not df_rev.empty:
         df_manana = df_manana.merge(
@@ -1887,12 +1926,7 @@ with tab_ficha:
                 df_ficha = base[filtro].copy()
 
                 if not df_ficha.empty:
-                    conn = connect_db()
-                    df_rev = pd.read_sql(
-                        "SELECT visita_id, fecha_cita, kva FROM revision_ocular",
-                        conn
-                    )
-                    conn.close()
+                    df_rev = get_revisiones_oculares_df()
                     df_ficha = df_ficha.merge(
                         df_rev,
                         how="left",
@@ -1912,12 +1946,7 @@ with tab_ficha:
                     & (base["_ensayo_norm"] == ensayo_sel_norm)
                 ].copy()
                 if not df_ficha.empty:
-                    conn = connect_db()
-                    df_rev = pd.read_sql(
-                        "SELECT visita_id, fecha_cita, kva FROM revision_ocular",
-                        conn
-                    )
-                    conn.close()
+                    df_rev = get_revisiones_oculares_df()
                     df_ficha = df_ficha.merge(
                         df_rev,
                         how="left",
@@ -2243,31 +2272,7 @@ with tab_agenda:
 
     # 1. Preparar eventos para el calendario
     df_visitas = get_visitas()
-    calendar_events = []
-
-    if not df_visitas.empty:
-        for _, row in df_visitas.iterrows():
-            titulo_evento = f"🆔 {row['codigo']} | {row['ensayo']}"
-            if row['medula']:
-                titulo_evento += " 🩸"
-
-            event = {
-                "title": titulo_evento,
-                "start": row['fecha'],
-                "allDay": True,
-                "extendedProps": {
-                    "id": row['id'],
-                    "nombre": row['nombre'],
-                    "ciclo": row['ciclo'],
-                    "medula": row['medula'],
-                    "ensayo": row['ensayo']
-                },
-                # Color diferente si lleva médula
-                "backgroundColor": "#ff4b4b" if row['medula'] else "#3788d8"
-            }
-            calendar_events.append(event)
-
-        calendar_events.extend(generar_visita_teorica_2274(df_visitas))
+    calendar_events = construir_eventos_calendario(df_visitas)
 
     # 2. Configuración del Calendario
     calendar_options = {
@@ -2542,33 +2547,6 @@ with tab_agenda:
                         index=1 if tiene_rev else 0,
                         horizontal=True,
                         key=f"revision_ocular_{id_evento_cmp}"
-                    )
-
-                    if opcion_rev == "Si":
-                        fecha_default = parse_fecha_iso(rev[0]) if rev else None
-                        if fecha_default is None:
-                            fecha_default = parse_fecha_iso(paciente['fecha']) or fecha_hoy_local()
-                        kva_default = rev[1] if rev and rev[1] is not None else 0
-                        kva_opciones = [0, 1, 2, 3, 4]
-                        kva_index = kva_opciones.index(kva_default) if kva_default in kva_opciones else 0
-
-                        with st.form(f"form_revision_{id_evento_cmp}"):
-                            fecha_cita = st.date_input("Fecha de cita", value=fecha_default)
-                            kva = st.selectbox("Resultado KVA", options=kva_opciones, index=kva_index)
-                            guardar_rev = st.form_submit_button("Guardar revision ocular")
-                            if guardar_rev:
-                                guardar_revision_ocular(id_evento_cmp, fecha_cita.isoformat(), kva)
-                                st.success("Revision ocular guardada.")
-
-                    st.divider()
-                    st.subheader("Revision ocular")
-                    rev = get_revision_ocular(id_evento_cmp)
-                    tiene_rev = bool(rev and (rev[0] or rev[1] is not None))
-                    opcion_rev = st.radio(
-                        "Revision ocular",
-                        options=["No", "Si"],
-                        index=1 if tiene_rev else 0,
-                        horizontal=True
                     )
 
                     if opcion_rev == "Si":
