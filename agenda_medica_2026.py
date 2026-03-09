@@ -490,13 +490,63 @@ def unificar_pacientes_duplicados(cursor):
 
 
 def sincronizar_pacientes_desde_visitas(cursor):
-    cursor.execute("DELETE FROM pacientes")
     visitas = cursor.execute(
         "SELECT codigo, nombre, ensayo FROM visitas ORDER BY id DESC"
     ).fetchall()
+
+    # Construimos el estado deseado por clave unificada para evitar vaciar toda la tabla.
+    deseados = {}
     for codigo, nombre, ensayo in visitas:
-        guardar_o_actualizar_paciente(cursor, codigo, nombre, ensayo)
+        codigo_limpio = normalizar_texto_campo(codigo)
+        nombre_limpio = nombre_a_iniciales(nombre)
+        ensayo_limpio = normalizar_ensayo(ensayo)
+        clave = clave_paciente_unificada(codigo_limpio, nombre_limpio, ensayo_limpio)
+        if clave and clave not in deseados:
+            deseados[clave] = (codigo_limpio, nombre_limpio, ensayo_limpio)
+
+    existentes = cursor.execute(
+        "SELECT id, codigo, nombre, ensayo FROM pacientes ORDER BY id ASC"
+    ).fetchall()
+
+    ids_borrar = []
+    for fila_id, codigo, nombre, ensayo in existentes:
+        codigo_limpio = normalizar_texto_campo(codigo)
+        nombre_limpio = nombre_a_iniciales(nombre)
+        ensayo_limpio = normalizar_ensayo(ensayo)
+        clave = clave_paciente_unificada(codigo_limpio, nombre_limpio, ensayo_limpio)
+
+        if not clave or clave not in deseados:
+            ids_borrar.append(fila_id)
+            continue
+
+        objetivo = deseados.pop(clave)
+        if (codigo_limpio, nombre_limpio, ensayo_limpio) != objetivo:
+            cursor.execute(
+                "UPDATE pacientes SET codigo = ?, nombre = ?, ensayo = ? WHERE id = ?",
+                (objetivo[0], objetivo[1], objetivo[2], fila_id)
+            )
+
+    for codigo, nombre, ensayo in deseados.values():
+        cursor.execute(
+            "INSERT OR IGNORE INTO pacientes (codigo, nombre, ensayo) VALUES (?, ?, ?)",
+            (codigo, nombre, ensayo)
+        )
+
+    if ids_borrar:
+        cursor.executemany(
+            "DELETE FROM pacientes WHERE id = ?",
+            [(fila_id,) for fila_id in ids_borrar]
+        )
+
     unificar_pacientes_duplicados(cursor)
+
+
+def _es_deadlock_error(exc):
+    if psycopg2 is None:
+        return False
+    errores = getattr(psycopg2, "errors", None)
+    deadlock_cls = getattr(errores, "DeadlockDetected", None)
+    return deadlock_cls is not None and isinstance(exc, deadlock_cls)
 
 
 def normalizar_ensayos_existentes(cursor):
@@ -698,10 +748,36 @@ def init_db():
                 creado_en TEXT NOT NULL
             )
         ''')
-    anonimizar_nombres_existentes(c)
-    normalizar_ensayos_existentes(c)
-    sincronizar_pacientes_desde_visitas(c)
-    eliminar_ensayos_sin_pacientes(c)
+
+    # En PostgreSQL y despliegues concurrentes, serializamos el mantenimiento
+    # para evitar contencion y deadlocks entre sesiones de Streamlit.
+    if DB_BACKEND == "postgres":
+        lock_id = 20260309
+        try:
+            c.execute("SELECT pg_try_advisory_xact_lock(?)", (lock_id,))
+            fila_lock = c.fetchone()
+            lock_adquirido = bool(fila_lock and fila_lock[0])
+        except Exception:
+            lock_adquirido = False
+
+        if not lock_adquirido:
+            conn.commit()
+            conn.close()
+            return
+
+    try:
+        anonimizar_nombres_existentes(c)
+        normalizar_ensayos_existentes(c)
+        sincronizar_pacientes_desde_visitas(c)
+        eliminar_ensayos_sin_pacientes(c)
+    except Exception as exc:
+        if _es_deadlock_error(exc):
+            # En arranque con varias sesiones, evitamos que un deadlock puntual derribe la app.
+            conn.rollback()
+        else:
+            conn.rollback()
+            conn.close()
+            raise
     conn.commit()
     conn.close()
 
@@ -1390,8 +1466,10 @@ def render_resumen_manana():
             for tarea in tareas:
                 st.write(f"• {tarea}")
 
-# Inicializamos DB
-init_db()
+# Inicializamos DB una vez por sesion para evitar coste en cada rerun.
+if not st.session_state.get("_db_inicializada", False):
+    init_db()
+    st.session_state["_db_inicializada"] = True
 
 # --- INTERFAZ PRINCIPAL ---
 st.title("📅 Agenda de Pacientes - Ensayos Clínicos 2026")
