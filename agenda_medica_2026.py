@@ -1573,35 +1573,32 @@ if not st.session_state.get("_db_inicializada", False):
     st.session_state["_db_inicializada"] = True
 
 # --- INTERFAZ PRINCIPAL ---
-st.warning(f"DEBUG VERSION ACTIVA: {APP_BUILD}")
 if LOGO_PATH:
-    st.sidebar.image(LOGO_PATH, width=140)
+    st.sidebar.image(LOGO_PATH, width=320)
 else:
     st.sidebar.caption("Logo no encontrado")
-st.sidebar.caption(f"Build: {APP_BUILD}")
+
+secciones_principales = [
+    "Agenda",
+    "Prot. enfermeria",
+    "Prot. ensayo",
+    "Ficha paciente",
+    "Check list",
+    "Notas enfermeria",
+    "Esquemas",
+]
+seccion_activa = st.sidebar.radio("Navegación", options=secciones_principales, key="seccion_principal")
 
 if LOGO_PATH:
     col_logo, col_titulo = st.columns([1, 6])
     with col_logo:
-        st.image(LOGO_PATH, width=120)
+        st.image(LOGO_PATH, width=220)
     with col_titulo:
         st.title("📅 Agenda de Pacientes - Ensayos Clínicos 2026")
 else:
     st.title("📅 Agenda de Pacientes - Ensayos Clínicos 2026")
 
-tab_agenda, tab_protocolos, tab_protocolos_ensayo, tab_ficha, tab_checklist, tab_notas_enfermeria, tab_esquemas = st.tabs(
-    [
-        "Agenda",
-        "Prot. enfermeria",
-        "Prot. ensayo",
-        "Ficha paciente",
-        "Check list",
-        "Notas enfermeria",
-        "Esquemas"
-    ]
-)
-
-with tab_protocolos:
+if seccion_activa == "Prot. enfermeria":
     st.subheader("📄 Protocolos de Enfermería")
     col_list, col_view = st.columns([1, 1])
     with col_list:
@@ -1617,7 +1614,7 @@ with tab_protocolos:
             ruta_pdf = os.path.join(PDF_DIR, pdf_seleccionado)
             render_pdf_viewer(ruta_pdf)
 
-with tab_protocolos_ensayo:
+if seccion_activa == "Prot. ensayo":
     st.subheader("📄 Protocolos de Ensayo")
     col_list, col_view = st.columns([1, 1])
     with col_list:
@@ -1680,7 +1677,7 @@ with tab_protocolos_ensayo:
             st.session_state[page_key] = pagina_manual
             render_pdf_viewer(ruta_pdf, initial_page=st.session_state[page_key])
 
-with tab_esquemas:
+if seccion_activa == "Esquemas":
     st.subheader("🧩 Esquemas de tratamiento")
     col_list, col_view = st.columns([1, 2])
     with col_list:
@@ -1898,7 +1895,7 @@ with tab_esquemas:
                 if resultado:
                     st.caption(f"Última modificación: {resultado[0]}")
 
-with tab_ficha:
+if seccion_activa == "Ficha paciente":
     st.subheader("🧾 Ficha del paciente")
     df_visitas = get_visitas()
     if df_visitas.empty:
@@ -2072,7 +2069,7 @@ with tab_ficha:
                 st.caption("Verde: visitas realizadas. Amarillo: hoy. Rojo: pendientes.")
                 st.dataframe(df_ficha.style.apply(colorear_filas, axis=1), use_container_width=True)
 
-with tab_checklist:
+if seccion_activa == "Check list":
     st.subheader("✅ Check List por ensayo")
     df_pacientes = get_pacientes_unicos()
     ensayos = []
@@ -2257,7 +2254,7 @@ with tab_checklist:
                     lineas.append(f"{marca} {row['item']}")
                 render_print_dialog("\n".join(lineas), f"Checklist {ensayo_sel}")
 
-with tab_notas_enfermeria:
+if seccion_activa == "Notas enfermeria":
     st.subheader("📝 Notas de enfermería")
 
     urgencias = {
@@ -2316,7 +2313,7 @@ with tab_notas_enfermeria:
                 st.rerun()
             st.markdown("---")
 
-with tab_agenda:
+if seccion_activa == "Agenda":
     with st.expander("📌 Ver resumen de mañana", expanded=False):
         render_resumen_manana()
 
