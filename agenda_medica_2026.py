@@ -778,6 +778,16 @@ def init_db():
             )
             '''
         )
+        c.execute(
+            '''
+            CREATE TABLE IF NOT EXISTS adendas_ensayo (
+                id BIGSERIAL PRIMARY KEY,
+                ensayo TEXT UNIQUE,
+                texto TEXT,
+                fecha_modificacion TEXT
+            )
+            '''
+        )
     else:
         c.execute('''
             CREATE TABLE IF NOT EXISTS visitas (
@@ -844,6 +854,14 @@ def init_db():
                 texto TEXT NOT NULL,
                 urgencia TEXT NOT NULL,
                 creado_en TEXT NOT NULL
+            )
+        ''')
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS adendas_ensayo (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ensayo TEXT UNIQUE,
+                texto TEXT,
+                fecha_modificacion TEXT
             )
         ''')
 
@@ -1159,6 +1177,52 @@ def delete_nota_coordinacion(nota_id):
     invalidar_cache_lecturas()
 
 
+def guardar_adenda_ensayo(ensayo, texto):
+    ensayo = normalizar_ensayo(ensayo)
+    if not ensayo:
+        return
+    conn = connect_db()
+    c = conn.cursor()
+    fecha_mod = ahora_local().isoformat(timespec="seconds")
+    c.execute(
+        """
+        UPDATE adendas_ensayo
+        SET texto = ?, fecha_modificacion = ?
+        WHERE ensayo = ?
+        """,
+        (texto, fecha_mod, ensayo)
+    )
+    if c.rowcount == 0:
+        c.execute(
+            """
+            INSERT INTO adendas_ensayo (ensayo, texto, fecha_modificacion)
+            VALUES (?, ?, ?)
+            """,
+            (ensayo, texto, fecha_mod)
+        )
+    conn.commit()
+    conn.close()
+    invalidar_cache_lecturas()
+
+
+@st.cache_data(show_spinner=False)
+def get_adendas_ensayo():
+    conn = connect_db()
+    try:
+        df = pd.read_sql(
+            """
+            SELECT id, ensayo, texto, fecha_modificacion
+            FROM adendas_ensayo
+            ORDER BY ensayo ASC
+            """,
+            conn
+        )
+    except Exception:
+        df = pd.DataFrame(columns=["id", "ensayo", "texto", "fecha_modificacion"])
+    conn.close()
+    return df
+
+
 def parse_datetime_iso(valor):
     if valor is None:
         return None
@@ -1241,6 +1305,7 @@ def invalidar_cache_lecturas():
     get_checklist_items.clear()
     get_notas_enfermeria.clear()
     get_notas_coordinacion.clear()
+    get_adendas_ensayo.clear()
     get_revision_ocular.clear()
     get_revisiones_oculares_df.clear()
 
@@ -1695,6 +1760,7 @@ secciones_principales = [
     "Check list",
     "Notas enfermeria",
     "Notas coordinacion",
+    "Adendas",
     "Esquemas",
 ]
 seccion_activa = st.sidebar.radio("Navegación", options=secciones_principales, key="seccion_principal")
@@ -2472,6 +2538,41 @@ if seccion_activa == "Notas coordinacion":
                 st.success(f"Nota realizada y eliminada. Latencia de respuesta: {latencia_cierre}.")
                 st.rerun()
             st.markdown("---")
+
+if seccion_activa == "Adendas":
+    st.subheader("📎 Adendas por ensayo")
+
+    ensayos = get_ensayos_existentes()
+    if not ensayos:
+        st.info("No hay ensayos guardados todavía. Registra visitas para habilitar adendas.")
+    else:
+        ensayo_sel = st.selectbox("Ensayo", options=ensayos, key="adenda_ensayo_sel")
+        df_adendas = get_adendas_ensayo()
+
+        adenda_actual = ""
+        fecha_mod = ""
+        if not df_adendas.empty:
+            fila = df_adendas[df_adendas["ensayo"].astype(str) == str(ensayo_sel)]
+            if not fila.empty:
+                adenda_actual = str(fila.iloc[0].get("texto") or "")
+                fecha_mod = str(fila.iloc[0].get("fecha_modificacion") or "")
+
+        with st.form("form_adenda_ensayo"):
+            texto_adenda = st.text_area(
+                "Texto libre de la adenda",
+                value=adenda_actual,
+                height=220,
+                key=f"adenda_texto_{ensayo_sel}"
+            )
+            guardar_adenda = st.form_submit_button("Guardar adenda", type="primary")
+
+            if guardar_adenda:
+                guardar_adenda_ensayo(ensayo_sel, texto_adenda.strip())
+                st.success(f"Adenda guardada para el ensayo {ensayo_sel}.")
+                st.rerun()
+
+        if fecha_mod:
+            st.caption(f"Última modificación: {fecha_mod}")
 
 if seccion_activa == "Agenda":
     with st.expander("📌 Ver resumen de mañana", expanded=False):
