@@ -1223,6 +1223,27 @@ def get_adendas_ensayo():
     return df
 
 
+@st.cache_data(show_spinner=False)
+def get_ensayos_con_adendas_pendientes():
+    conn = connect_db()
+    try:
+        df = pd.read_sql(
+            """
+            SELECT ensayo
+            FROM adendas_ensayo
+            WHERE TRIM(COALESCE(texto, '')) <> ''
+            ORDER BY ensayo ASC
+            """,
+            conn
+        )
+    except Exception:
+        df = pd.DataFrame(columns=["ensayo"])
+    conn.close()
+    if df.empty or "ensayo" not in df.columns:
+        return []
+    return [str(e) for e in df["ensayo"].dropna().tolist() if str(e).strip()]
+
+
 def parse_datetime_iso(valor):
     if valor is None:
         return None
@@ -1306,6 +1327,7 @@ def invalidar_cache_lecturas():
     get_notas_enfermeria.clear()
     get_notas_coordinacion.clear()
     get_adendas_ensayo.clear()
+    get_ensayos_con_adendas_pendientes.clear()
     get_revision_ocular.clear()
     get_revisiones_oculares_df.clear()
 
@@ -1764,6 +1786,13 @@ secciones_principales = [
     "Esquemas",
 ]
 seccion_activa = st.sidebar.radio("Navegación", options=secciones_principales, key="seccion_principal")
+
+ensayos_con_adendas = get_ensayos_con_adendas_pendientes()
+if ensayos_con_adendas:
+    st.sidebar.markdown("#### 📌 Adendas pendientes")
+    st.sidebar.caption(f"{len(ensayos_con_adendas)} ensayo(s)")
+    for ensayo_p in ensayos_con_adendas:
+        st.sidebar.markdown(f"• {ensayo_p}")
 
 if seccion_activa == "Prot. enfermeria":
     st.subheader("📄 Protocolos de Enfermería")
@@ -2541,6 +2570,15 @@ if seccion_activa == "Notas coordinacion":
 
 if seccion_activa == "Adendas":
     st.subheader("📎 Adendas por ensayo")
+
+    ensayos_pendientes = get_ensayos_con_adendas_pendientes()
+    if ensayos_pendientes:
+        st.info(
+            "Ensayos con adendas pendientes: "
+            + ", ".join(ensayos_pendientes)
+        )
+    else:
+        st.success("No hay adendas pendientes.")
 
     ensayos = get_ensayos_existentes()
     if not ensayos:
