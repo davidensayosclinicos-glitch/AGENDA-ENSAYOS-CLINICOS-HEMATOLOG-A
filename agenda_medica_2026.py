@@ -70,8 +70,23 @@ def construir_estilos_app():
             [data-testid="stHeader"] {{
                 background-color: rgba(219, 234, 254, 0.9) !important;
             }}
+            section[data-testid="stSidebar"] {{
+                width: 520px !important;
+            }}
             section[data-testid="stSidebar"] > div {{
+                width: 520px !important;
                 background: rgba(234, 244, 255, 0.9) !important;
+            }}
+            section[data-testid="stSidebar"] img {{
+                width: 100% !important;
+                max-width: none !important;
+                height: auto !important;
+            }}
+            @media (max-width: 900px) {{
+                section[data-testid="stSidebar"],
+                section[data-testid="stSidebar"] > div {{
+                    width: 320px !important;
+                }}
             }}
             .fc, .fc .fc-scrollgrid, .fc .fc-view-harness {{
                 background: #ffffff;
@@ -1574,7 +1589,7 @@ if not st.session_state.get("_db_inicializada", False):
 
 # --- INTERFAZ PRINCIPAL ---
 if LOGO_PATH:
-    st.sidebar.image(LOGO_PATH, width=1260)
+    st.sidebar.image(LOGO_PATH, use_container_width=True)
 else:
     st.sidebar.caption("Logo no encontrado")
 st.sidebar.markdown("### 📅 Agenda de Pacientes - Ensayos Clínicos 2026")
