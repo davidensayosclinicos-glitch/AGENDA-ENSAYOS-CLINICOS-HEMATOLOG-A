@@ -43,30 +43,57 @@ if calendar is None:
     )
     st.stop()
 
-# --- ESTILOS ---
-st.markdown(
-        """
+
+def construir_estilos_app():
+    estilo_fondo = "background-color: #dbeafe !important;"
+
+    return f"""
         <style>
-            .stApp {
-                background: #fff1f1;
-            }
-            .fc, .fc .fc-scrollgrid, .fc .fc-view-harness {
+            :root {{
+                --background-color: #dbeafe;
+                --secondary-background-color: #eff6ff;
+            }}
+            html, body, .stApp, [data-testid="stApp"], [data-testid="stAppViewContainer"] {{
+                {estilo_fondo}
+            }}
+            [data-testid="stAppViewContainer"] > .main {{
+                {estilo_fondo}
+            }}
+            [data-testid="stAppViewContainer"] > .main .block-container {{
+                background: transparent !important;
+            }}
+            [data-testid="stAppViewContainer"] > .main,
+            [data-testid="stHeader"],
+            [data-testid="stToolbar"] {{
+                background: transparent !important;
+            }}
+            [data-testid="stHeader"] {{
+                background-color: rgba(219, 234, 254, 0.9) !important;
+            }}
+            section[data-testid="stSidebar"] > div {{
+                background: rgba(234, 244, 255, 0.9) !important;
+            }}
+            .fc, .fc .fc-scrollgrid, .fc .fc-view-harness {{
                 background: #ffffff;
-            }
-            .fc .fc-scrollgrid, .fc .fc-scrollgrid-section table {
+            }}
+            .fc .fc-scrollgrid, .fc .fc-scrollgrid-section table {{
                 border-color: #f1dede;
-            }
-            div[data-baseweb="tab-list"] {
+            }}
+            div[data-baseweb="tab-list"] {{
                 flex-wrap: wrap;
                 gap: 0.25rem;
-            }
-            button[data-baseweb="tab"] {
+            }}
+            button[data-baseweb="tab"] {{
                 white-space: normal;
                 height: auto;
                 min-height: 2.25rem;
-            }
+            }}
         </style>
-        """,
+    """
+
+# --- ESTILOS ---
+st.markdown(
+        construir_estilos_app(),
         unsafe_allow_html=True,
 )
 
@@ -95,6 +122,13 @@ def resolver_directorio(*candidatos):
     return candidatos[0] if candidatos else ""
 
 
+def resolver_archivo(*candidatos):
+    for ruta in candidatos:
+        if ruta and os.path.isfile(ruta):
+            return ruta
+    return ""
+
+
 PDF_DIR = resolver_directorio(
     os.path.join(SCRIPT_DIR, "PROTOCOLOS ENFERMERIA"),
     r"N:\ENSAYOS\ENSAYOS\PROTOCOLOS ENFERMERIA",
@@ -114,6 +148,10 @@ APP_TIMEZONE = "Europe/Madrid"
 DB_PATH = os.path.join(SCRIPT_DIR, "agenda_ensayos.db")
 DB_BACKUP_DIR = os.path.join(SCRIPT_DIR, "backups_db")
 APP_BUILD = datetime.fromtimestamp(os.path.getmtime(__file__)).strftime("%Y-%m-%d %H:%M")
+LOGO_PATH = resolver_archivo(
+    os.path.join(SCRIPT_DIR, "ChatGPT Image 10 mar 2026, 09_32_03.png"),
+    os.path.join(SCRIPT_DIR, "ChatGPT Image 10 mar 2026, 09_22_55.png")
+)
 
 
 def leer_config(clave, default=None):
@@ -1535,7 +1573,21 @@ if not st.session_state.get("_db_inicializada", False):
     st.session_state["_db_inicializada"] = True
 
 # --- INTERFAZ PRINCIPAL ---
-st.title("📅 Agenda de Pacientes - Ensayos Clínicos 2026")
+st.warning(f"DEBUG VERSION ACTIVA: {APP_BUILD}")
+if LOGO_PATH:
+    st.sidebar.image(LOGO_PATH, width=140)
+else:
+    st.sidebar.caption("Logo no encontrado")
+st.sidebar.caption(f"Build: {APP_BUILD}")
+
+if LOGO_PATH:
+    col_logo, col_titulo = st.columns([1, 6])
+    with col_logo:
+        st.image(LOGO_PATH, width=120)
+    with col_titulo:
+        st.title("📅 Agenda de Pacientes - Ensayos Clínicos 2026")
+else:
+    st.title("📅 Agenda de Pacientes - Ensayos Clínicos 2026")
 
 tab_agenda, tab_protocolos, tab_protocolos_ensayo, tab_ficha, tab_checklist, tab_notas_enfermeria, tab_esquemas = st.tabs(
     [
