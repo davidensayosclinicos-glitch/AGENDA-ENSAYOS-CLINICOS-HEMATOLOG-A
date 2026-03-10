@@ -847,6 +847,10 @@ def init_db():
             )
         ''')
 
+    # Persistimos el esquema antes del mantenimiento: si luego hay rollback por deadlock,
+    # no se pierden tablas nuevas en despliegues concurrentes.
+    conn.commit()
+
     # En PostgreSQL y despliegues concurrentes, serializamos el mantenimiento
     # para evitar contencion y deadlocks entre sesiones de Streamlit.
     if DB_BACKEND == "postgres":
@@ -1131,14 +1135,17 @@ def add_nota_coordinacion(fecha_nota, texto, urgencia):
 @st.cache_data(show_spinner=False)
 def get_notas_coordinacion():
     conn = connect_db()
-    df = pd.read_sql(
-        """
-        SELECT id, fecha_nota, texto, urgencia, creado_en
-        FROM notas_coordinacion
-        ORDER BY creado_en ASC, id ASC
-        """,
-        conn
-    )
+    try:
+        df = pd.read_sql(
+            """
+            SELECT id, fecha_nota, texto, urgencia, creado_en
+            FROM notas_coordinacion
+            ORDER BY creado_en ASC, id ASC
+            """,
+            conn
+        )
+    except Exception:
+        df = pd.DataFrame(columns=["id", "fecha_nota", "texto", "urgencia", "creado_en"])
     conn.close()
     return df
 
