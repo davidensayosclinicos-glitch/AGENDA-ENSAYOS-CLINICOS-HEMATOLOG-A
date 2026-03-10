@@ -1574,7 +1574,7 @@ if not st.session_state.get("_db_inicializada", False):
 
 # --- INTERFAZ PRINCIPAL ---
 if LOGO_PATH:
-    st.sidebar.image(LOGO_PATH, width=420)
+    st.sidebar.image(LOGO_PATH, width=1260)
 else:
     st.sidebar.caption("Logo no encontrado")
 st.sidebar.markdown("### 📅 Agenda de Pacientes - Ensayos Clínicos 2026")
