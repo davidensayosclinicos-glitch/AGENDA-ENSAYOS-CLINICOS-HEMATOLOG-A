@@ -71,10 +71,10 @@ def construir_estilos_app():
                 background-color: rgba(219, 234, 254, 0.9) !important;
             }}
             section[data-testid="stSidebar"] {{
-                width: 520px !important;
+                width: 240px !important;
             }}
             section[data-testid="stSidebar"] > div {{
-                width: 520px !important;
+                width: 240px !important;
                 background: rgba(234, 244, 255, 0.9) !important;
             }}
             section[data-testid="stSidebar"] img {{
@@ -85,7 +85,7 @@ def construir_estilos_app():
             @media (max-width: 900px) {{
                 section[data-testid="stSidebar"],
                 section[data-testid="stSidebar"] > div {{
-                    width: 320px !important;
+                    width: 220px !important;
                 }}
             }}
             .fc, .fc .fc-scrollgrid, .fc .fc-view-harness {{
