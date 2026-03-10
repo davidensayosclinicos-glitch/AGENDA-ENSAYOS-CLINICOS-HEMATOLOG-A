@@ -1574,9 +1574,10 @@ if not st.session_state.get("_db_inicializada", False):
 
 # --- INTERFAZ PRINCIPAL ---
 if LOGO_PATH:
-    st.sidebar.image(LOGO_PATH, width=320)
+    st.sidebar.image(LOGO_PATH, width=420)
 else:
     st.sidebar.caption("Logo no encontrado")
+st.sidebar.markdown("### 📅 Agenda de Pacientes - Ensayos Clínicos 2026")
 
 secciones_principales = [
     "Agenda",
@@ -1588,15 +1589,6 @@ secciones_principales = [
     "Esquemas",
 ]
 seccion_activa = st.sidebar.radio("Navegación", options=secciones_principales, key="seccion_principal")
-
-if LOGO_PATH:
-    col_logo, col_titulo = st.columns([1, 6])
-    with col_logo:
-        st.image(LOGO_PATH, width=220)
-    with col_titulo:
-        st.title("📅 Agenda de Pacientes - Ensayos Clínicos 2026")
-else:
-    st.title("📅 Agenda de Pacientes - Ensayos Clínicos 2026")
 
 if seccion_activa == "Prot. enfermeria":
     st.subheader("📄 Protocolos de Enfermería")
