@@ -767,6 +767,17 @@ def init_db():
             )
             '''
         )
+        c.execute(
+            '''
+            CREATE TABLE IF NOT EXISTS notas_coordinacion (
+                id BIGSERIAL PRIMARY KEY,
+                fecha_nota TEXT NOT NULL,
+                texto TEXT NOT NULL,
+                urgencia TEXT NOT NULL,
+                creado_en TEXT NOT NULL
+            )
+            '''
+        )
     else:
         c.execute('''
             CREATE TABLE IF NOT EXISTS visitas (
@@ -819,6 +830,15 @@ def init_db():
         ''')
         c.execute('''
             CREATE TABLE IF NOT EXISTS notas_enfermeria (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                fecha_nota TEXT NOT NULL,
+                texto TEXT NOT NULL,
+                urgencia TEXT NOT NULL,
+                creado_en TEXT NOT NULL
+            )
+        ''')
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS notas_coordinacion (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 fecha_nota TEXT NOT NULL,
                 texto TEXT NOT NULL,
@@ -1092,6 +1112,46 @@ def delete_nota_enfermeria(nota_id):
     invalidar_cache_lecturas()
 
 
+def add_nota_coordinacion(fecha_nota, texto, urgencia):
+    conn = connect_db()
+    c = conn.cursor()
+    creado_en = ahora_local().isoformat(timespec="seconds")
+    c.execute(
+        """
+        INSERT INTO notas_coordinacion (fecha_nota, texto, urgencia, creado_en)
+        VALUES (?, ?, ?, ?)
+        """,
+        (fecha_nota, texto, urgencia, creado_en)
+    )
+    conn.commit()
+    conn.close()
+    invalidar_cache_lecturas()
+
+
+@st.cache_data(show_spinner=False)
+def get_notas_coordinacion():
+    conn = connect_db()
+    df = pd.read_sql(
+        """
+        SELECT id, fecha_nota, texto, urgencia, creado_en
+        FROM notas_coordinacion
+        ORDER BY creado_en ASC, id ASC
+        """,
+        conn
+    )
+    conn.close()
+    return df
+
+
+def delete_nota_coordinacion(nota_id):
+    conn = connect_db()
+    c = conn.cursor()
+    c.execute("DELETE FROM notas_coordinacion WHERE id = ?", (nota_id,))
+    conn.commit()
+    conn.close()
+    invalidar_cache_lecturas()
+
+
 def parse_datetime_iso(valor):
     if valor is None:
         return None
@@ -1173,6 +1233,7 @@ def invalidar_cache_lecturas():
     get_ensayos_existentes.clear()
     get_checklist_items.clear()
     get_notas_enfermeria.clear()
+    get_notas_coordinacion.clear()
     get_revision_ocular.clear()
     get_revisiones_oculares_df.clear()
 
@@ -1626,6 +1687,7 @@ secciones_principales = [
     "Ficha paciente",
     "Check list",
     "Notas enfermeria",
+    "Notas coordinacion",
     "Esquemas",
 ]
 seccion_activa = st.sidebar.radio("Navegación", options=secciones_principales, key="seccion_principal")
@@ -2341,6 +2403,65 @@ if seccion_activa == "Notas enfermeria":
             if st.button("✅ Marcar como realizado (borrar)", key=f"nota_enf_done_{int(row['id'])}"):
                 latencia_cierre = formatear_latencia_desde_creacion(row.get("creado_en"))
                 delete_nota_enfermeria(int(row["id"]))
+                st.success(f"Nota realizada y eliminada. Latencia de respuesta: {latencia_cierre}.")
+                st.rerun()
+            st.markdown("---")
+
+if seccion_activa == "Notas coordinacion":
+    st.subheader("🗂️ Notas de coordinación de ensayos")
+
+    urgencias = {
+        "verde": {"label": "Verde (baja)", "icono": "🟢", "color": "#15803d"},
+        "amarillo": {"label": "Amarillo (media)", "icono": "🟡", "color": "#ca8a04"},
+        "rojo": {"label": "Rojo (alta)", "icono": "🔴", "color": "#dc2626"},
+    }
+
+    with st.form("form_nota_coordinacion", clear_on_submit=True):
+        fecha_nota = st.date_input("Fecha de la nota", value=fecha_hoy_local(), key="nota_coord_fecha")
+        texto_nota = st.text_area("Texto libre", key="nota_coord_texto", height=120)
+        urgencia_sel = st.selectbox(
+            "Urgencia (semáforo)",
+            options=list(urgencias.keys()),
+            format_func=lambda u: f"{urgencias[u]['icono']} {urgencias[u]['label']}",
+            key="nota_coord_urgencia"
+        )
+        guardar_nota = st.form_submit_button("Guardar nota", type="primary")
+
+        if guardar_nota:
+            texto_limpio = texto_nota.strip()
+            if not texto_limpio:
+                st.warning("El texto de la nota no puede estar vacio.")
+            else:
+                add_nota_coordinacion(fecha_nota.isoformat(), texto_limpio, urgencia_sel)
+                st.success("Nota de coordinación guardada.")
+                st.rerun()
+
+    df_notas_coord = get_notas_coordinacion()
+    if df_notas_coord.empty:
+        st.info("No hay notas de coordinación pendientes.")
+    else:
+        st.caption("Marca una nota como realizada para eliminarla automáticamente.")
+        for _, row in df_notas_coord.iterrows():
+            urg = str(row.get("urgencia") or "verde").strip().lower()
+            if urg not in urgencias:
+                urg = "verde"
+            cfg_urg = urgencias[urg]
+
+            fecha_txt = formatear_fecha_visita(row.get("fecha_nota"))
+            latencia_txt = formatear_latencia_desde_creacion(row.get("creado_en"))
+
+            st.markdown(
+                f"{cfg_urg['icono']} **{cfg_urg['label']}** | Fecha nota: **{fecha_txt}** | "
+                f"Latencia desde creación: **{latencia_txt}**"
+            )
+            st.markdown(
+                f"<div style='border-left: 4px solid {cfg_urg['color']}; padding: 8px 12px; "
+                f"background: #fff; border-radius: 4px;'>{html.escape(str(row.get('texto') or ''))}</div>",
+                unsafe_allow_html=True
+            )
+            if st.button("✅ Marcar como realizado (borrar)", key=f"nota_coord_done_{int(row['id'])}"):
+                latencia_cierre = formatear_latencia_desde_creacion(row.get("creado_en"))
+                delete_nota_coordinacion(int(row["id"]))
                 st.success(f"Nota realizada y eliminada. Latencia de respuesta: {latencia_cierre}.")
                 st.rerun()
             st.markdown("---")
