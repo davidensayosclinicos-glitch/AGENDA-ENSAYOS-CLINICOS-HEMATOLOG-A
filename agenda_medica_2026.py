@@ -76,11 +76,25 @@ def construir_estilos_app():
             section[data-testid="stSidebar"] > div {{
                 width: 240px !important;
                 background: rgba(234, 244, 255, 0.9) !important;
+                padding-top: 0.4rem !important;
+                padding-left: 0.45rem !important;
+                padding-right: 0.45rem !important;
             }}
             section[data-testid="stSidebar"] img {{
                 width: 100% !important;
                 max-width: none !important;
                 height: auto !important;
+                border-radius: 10px;
+                box-shadow: 0 6px 16px rgba(30, 58, 138, 0.18);
+            }}
+            section[data-testid="stSidebar"] label[data-testid="stWidgetLabel"] p {{
+                font-size: 1.1rem !important;
+                font-weight: 700 !important;
+            }}
+            section[data-testid="stSidebar"] div[role="radiogroup"] label p {{
+                font-size: 1.02rem !important;
+                font-weight: 600 !important;
+                line-height: 1.35 !important;
             }}
             @media (max-width: 900px) {{
                 section[data-testid="stSidebar"],
@@ -96,12 +110,23 @@ def construir_estilos_app():
             }}
             div[data-baseweb="tab-list"] {{
                 flex-wrap: wrap;
-                gap: 0.25rem;
+                gap: 0.6rem;
+                margin-bottom: 0.7rem;
             }}
             button[data-baseweb="tab"] {{
                 white-space: normal;
                 height: auto;
-                min-height: 2.25rem;
+                min-height: 2.6rem;
+                padding: 0.45rem 0.85rem !important;
+                border-radius: 10px !important;
+                border: 1px solid #bfdbfe !important;
+                background: #eff6ff !important;
+                font-size: 0.98rem !important;
+                font-weight: 600 !important;
+            }}
+            button[data-baseweb="tab"][aria-selected="true"] {{
+                background: #dbeafe !important;
+                border-color: #60a5fa !important;
             }}
         </style>
     """
