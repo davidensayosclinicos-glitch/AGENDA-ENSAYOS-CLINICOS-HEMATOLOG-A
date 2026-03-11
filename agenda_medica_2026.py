@@ -788,6 +788,19 @@ def init_db():
             )
             '''
         )
+        c.execute(
+            '''
+            CREATE TABLE IF NOT EXISTS adendas_paciente (
+                id BIGSERIAL PRIMARY KEY,
+                clave_paciente TEXT UNIQUE,
+                codigo TEXT,
+                nombre TEXT,
+                ensayo TEXT,
+                texto TEXT,
+                fecha_modificacion TEXT
+            )
+            '''
+        )
     else:
         c.execute('''
             CREATE TABLE IF NOT EXISTS visitas (
@@ -860,6 +873,17 @@ def init_db():
             CREATE TABLE IF NOT EXISTS adendas_ensayo (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 ensayo TEXT UNIQUE,
+                texto TEXT,
+                fecha_modificacion TEXT
+            )
+        ''')
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS adendas_paciente (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                clave_paciente TEXT UNIQUE,
+                codigo TEXT,
+                nombre TEXT,
+                ensayo TEXT,
                 texto TEXT,
                 fecha_modificacion TEXT
             )
@@ -1205,6 +1229,73 @@ def guardar_adenda_ensayo(ensayo, texto):
     invalidar_cache_lecturas()
 
 
+def guardar_adenda_paciente(codigo, nombre, ensayo, texto):
+    codigo = normalizar_texto_campo(codigo)
+    nombre = nombre_a_iniciales(nombre)
+    ensayo = normalizar_ensayo(ensayo)
+    clave = clave_paciente_unificada(codigo, nombre, ensayo)
+    if not clave:
+        return
+
+    conn = connect_db()
+    c = conn.cursor()
+    fecha_mod = ahora_local().isoformat(timespec="seconds")
+    c.execute(
+        """
+        UPDATE adendas_paciente
+        SET codigo = ?, nombre = ?, ensayo = ?, texto = ?, fecha_modificacion = ?
+        WHERE clave_paciente = ?
+        """,
+        (codigo, nombre, ensayo, texto, fecha_mod, clave)
+    )
+    if c.rowcount == 0:
+        c.execute(
+            """
+            INSERT INTO adendas_paciente (
+                clave_paciente, codigo, nombre, ensayo, texto, fecha_modificacion
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (clave, codigo, nombre, ensayo, texto, fecha_mod)
+        )
+    conn.commit()
+    conn.close()
+    invalidar_cache_lecturas()
+
+
+@st.cache_data(show_spinner=False)
+def get_adenda_paciente(codigo, nombre, ensayo):
+    codigo = normalizar_texto_campo(codigo)
+    nombre = nombre_a_iniciales(nombre)
+    ensayo = normalizar_ensayo(ensayo)
+    clave = clave_paciente_unificada(codigo, nombre, ensayo)
+    if not clave:
+        return {"texto": "", "fecha_modificacion": ""}
+
+    conn = connect_db()
+    try:
+        c = conn.cursor()
+        c.execute(
+            """
+            SELECT texto, fecha_modificacion
+            FROM adendas_paciente
+            WHERE clave_paciente = ?
+            """,
+            (clave,)
+        )
+        row = c.fetchone()
+    except Exception:
+        row = None
+    conn.close()
+
+    if not row:
+        return {"texto": "", "fecha_modificacion": ""}
+    return {
+        "texto": "" if row[0] is None else str(row[0]),
+        "fecha_modificacion": "" if row[1] is None else str(row[1])
+    }
+
+
 @st.cache_data(show_spinner=False)
 def get_adendas_ensayo():
     conn = connect_db()
@@ -1327,6 +1418,7 @@ def invalidar_cache_lecturas():
     get_notas_enfermeria.clear()
     get_notas_coordinacion.clear()
     get_adendas_ensayo.clear()
+    get_adenda_paciente.clear()
     get_ensayos_con_adendas_pendientes.clear()
     get_revision_ocular.clear()
     get_revisiones_oculares_df.clear()
@@ -2151,6 +2243,25 @@ if seccion_activa == "Ficha paciente":
             nombre_sel = datos_sel.get("nombre")
             ensayo_sel = datos_sel.get("ensayo")
 
+            if (codigo_sel or nombre_sel) and ensayo_sel:
+                adenda_paciente = get_adenda_paciente(codigo_sel, nombre_sel, ensayo_sel)
+                with st.form("form_adenda_paciente_ficha"):
+                    texto_adenda_paciente = st.text_area(
+                        "Adenda asociada al paciente",
+                        value=adenda_paciente.get("texto", ""),
+                        height=140,
+                        key=f"ficha_adenda_paciente_{normalizar_clave_paciente(codigo_sel)}_{normalizar_clave_paciente(ensayo_sel)}"
+                    )
+                    guardar_adenda_pac = st.form_submit_button("Guardar adenda paciente", type="primary")
+                    if guardar_adenda_pac:
+                        guardar_adenda_paciente(codigo_sel, nombre_sel, ensayo_sel, texto_adenda_paciente.strip())
+                        st.success("Adenda del paciente guardada.")
+                        st.rerun()
+                fecha_mod_pac = adenda_paciente.get("fecha_modificacion", "")
+                if fecha_mod_pac:
+                    st.caption(f"Ultima modificación adenda paciente: {fecha_mod_pac}")
+                st.divider()
+
             df_ficha = pd.DataFrame()
             ensayo_sel_norm = normalizar_clave_paciente(ensayo_sel)
             if codigo_sel or nombre_sel:
@@ -2789,6 +2900,37 @@ if seccion_activa == "Agenda":
                     st.markdown(f"**Paciente:** {paciente['nombre']}")
                     st.markdown(f"**Ensayo:** {paciente['ensayo']} | **Ciclo:** {paciente['ciclo']}")
 
+                    adenda_paciente_info = get_adenda_paciente(
+                        paciente.get('codigo'),
+                        paciente.get('nombre'),
+                        paciente.get('ensayo')
+                    )
+                    with st.expander("Adenda asociada al paciente", expanded=False):
+                        with st.form(f"form_adenda_paciente_agenda_{id_evento_cmp}"):
+                            texto_adenda_paciente = st.text_area(
+                                "Texto libre",
+                                value=adenda_paciente_info.get("texto", ""),
+                                height=120,
+                                key=f"agenda_adenda_paciente_{id_evento_cmp}"
+                            )
+                            guardar_adenda_paciente_btn = st.form_submit_button(
+                                "Guardar adenda paciente",
+                                type="primary"
+                            )
+                            if guardar_adenda_paciente_btn:
+                                guardar_adenda_paciente(
+                                    paciente.get('codigo'),
+                                    paciente.get('nombre'),
+                                    paciente.get('ensayo'),
+                                    texto_adenda_paciente.strip()
+                                )
+                                st.success("Adenda del paciente guardada.")
+                                st.rerun()
+
+                        fecha_mod_pac = adenda_paciente_info.get("fecha_modificacion", "")
+                        if fecha_mod_pac:
+                            st.caption(f"Ultima modificación: {fecha_mod_pac}")
+
                     st.divider()
                     with st.expander("Editar visita"):
                         fecha_default = parse_fecha_iso(paciente['fecha']) or fecha_hoy_local()
@@ -2925,6 +3067,7 @@ if seccion_activa == "Agenda":
                         f"Medula: {'Si' if paciente['medula'] else 'No'}\n"
                         f"Otras pruebas: {paciente['otras_pruebas']}\n"
                         f"Comentarios: {paciente['comentarios']}\n"
+                        f"Adenda paciente: {adenda_paciente_info.get('texto', '')}\n"
                     )
                     st.download_button(
                         "Descargar informe",
