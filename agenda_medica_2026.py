@@ -2686,6 +2686,8 @@ if seccion_activa == "Citas ojos":
         tabla = tabla.sort_values(by=["ENSAYO", "CODIGO", "NOMBRE"], na_position="last").reset_index(drop=True)
 
         def _estado_fila(row):
+            if str(row.get("MEDICO") or "").strip():
+                return "CITADO"
             if pd.notna(row.get("FECHA EVALUACION")):
                 return "PENDIENTE DE CITA"
             return ""
@@ -2713,11 +2715,13 @@ if seccion_activa == "Citas ojos":
                 "MEDICO": st.column_config.SelectboxColumn(
                     "MEDICO",
                     options=[""] + MEDICOS_OJOS_PERMITIDOS,
+                    width="medium",
                 ),
                 "AGENDA HOSPITALARIA": st.column_config.TextColumn("AGENDA HOSPITALARIA"),
                 "FECHA EVALUACION": st.column_config.DateColumn("FECHA EVALUACION", format="DD/MM/YYYY"),
                 "RESULTADO": st.column_config.TextColumn("RESULTADO"),
                 "REALIZADO": st.column_config.CheckboxColumn("REALIZADO"),
+                "ESTADO": st.column_config.TextColumn("ESTADO", width="large"),
             },
         )
 
