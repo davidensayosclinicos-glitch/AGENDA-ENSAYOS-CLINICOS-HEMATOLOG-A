@@ -2680,51 +2680,14 @@ if seccion_activa == "Notas coordinacion":
             st.markdown("---")
 
 if seccion_activa == "Adendas":
-    st.subheader("📎 Adendas por ensayo")
-
-    ensayos_pendientes = get_ensayos_con_adendas_pendientes()
-    if ensayos_pendientes:
-        st.info(
-            "Ensayos con adendas pendientes: "
-            + ", ".join(ensayos_pendientes)
-        )
-    else:
-        st.success("No hay adendas pendientes.")
+    st.subheader("📎 Adendas por paciente")
 
     ensayos = get_ensayos_existentes()
     if not ensayos:
         st.info("No hay ensayos guardados todavía. Registra visitas para habilitar adendas.")
     else:
         ensayo_sel = st.selectbox("Ensayo", options=ensayos, key="adenda_ensayo_sel")
-        df_adendas = get_adendas_ensayo()
-
-        adenda_actual = ""
-        fecha_mod = ""
-        if not df_adendas.empty:
-            fila = df_adendas[df_adendas["ensayo"].astype(str) == str(ensayo_sel)]
-            if not fila.empty:
-                adenda_actual = str(fila.iloc[0].get("texto") or "")
-                fecha_mod = str(fila.iloc[0].get("fecha_modificacion") or "")
-
-        with st.form("form_adenda_ensayo"):
-            texto_adenda = st.text_area(
-                "Texto libre de la adenda",
-                value=adenda_actual,
-                height=220,
-                key=f"adenda_texto_{ensayo_sel}"
-            )
-            guardar_adenda = st.form_submit_button("Guardar adenda", type="primary")
-
-            if guardar_adenda:
-                guardar_adenda_ensayo(ensayo_sel, texto_adenda.strip())
-                st.success(f"Adenda guardada para el ensayo {ensayo_sel}.")
-                st.rerun()
-
-        if fecha_mod:
-            st.caption(f"Última modificación: {fecha_mod}")
-
-        st.divider()
-        st.subheader("🧾 Adenda por paciente")
+        st.caption("Selecciona un paciente del ensayo para ver o guardar su adenda.")
 
         df_pacientes_ad = get_pacientes_unicos()
         if df_pacientes_ad.empty:
