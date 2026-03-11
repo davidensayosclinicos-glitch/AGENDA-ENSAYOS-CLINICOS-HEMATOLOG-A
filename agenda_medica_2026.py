@@ -1297,6 +1297,28 @@ def get_adenda_paciente(codigo, nombre, ensayo):
 
 
 @st.cache_data(show_spinner=False)
+def get_pacientes_con_adenda(ensayo):
+    ensayo = normalizar_ensayo(ensayo)
+    conn = connect_db()
+    try:
+        df = pd.read_sql(
+            """
+            SELECT codigo, nombre, fecha_modificacion
+            FROM adendas_paciente
+            WHERE ensayo = ?
+              AND TRIM(COALESCE(texto, '')) <> ''
+            ORDER BY codigo ASC, nombre ASC
+            """,
+            conn,
+            params=(ensayo,)
+        )
+    except Exception:
+        df = pd.DataFrame(columns=["codigo", "nombre", "fecha_modificacion"])
+    conn.close()
+    return df
+
+
+@st.cache_data(show_spinner=False)
 def get_adendas_ensayo():
     conn = connect_db()
     try:
@@ -1419,6 +1441,7 @@ def invalidar_cache_lecturas():
     get_notas_coordinacion.clear()
     get_adendas_ensayo.clear()
     get_adenda_paciente.clear()
+    get_pacientes_con_adenda.clear()
     get_ensayos_con_adendas_pendientes.clear()
     get_revision_ocular.clear()
     get_revisiones_oculares_df.clear()
@@ -2670,6 +2693,25 @@ if seccion_activa == "Adendas":
         st.info("No hay ensayos guardados todavía. Registra visitas para habilitar adendas.")
     else:
         ensayo_sel = st.selectbox("Ensayo", options=ensayos, key="adenda_ensayo_sel")
+        df_con_adenda = get_pacientes_con_adenda(ensayo_sel)
+        if df_con_adenda.empty:
+            st.info("Pacientes con adenda en este ensayo: ninguno")
+        else:
+            etiquetas_con_adenda = []
+            for _, row in df_con_adenda.iterrows():
+                codigo_ad = "" if pd.isna(row.get("codigo")) else str(row.get("codigo")).strip()
+                nombre_ad = "" if pd.isna(row.get("nombre")) else str(row.get("nombre")).strip()
+                etiqueta_ad = f"{codigo_ad} | {nombre_ad}".strip(" |")
+                if etiqueta_ad:
+                    etiquetas_con_adenda.append(etiqueta_ad)
+            if etiquetas_con_adenda:
+                st.success(
+                    "Pacientes con adenda en este ensayo: "
+                    + ", ".join(etiquetas_con_adenda)
+                )
+            else:
+                st.info("Pacientes con adenda en este ensayo: ninguno")
+
         st.caption("Selecciona un paciente del ensayo para ver o guardar su adenda.")
 
         df_pacientes_ad = get_pacientes_unicos()
