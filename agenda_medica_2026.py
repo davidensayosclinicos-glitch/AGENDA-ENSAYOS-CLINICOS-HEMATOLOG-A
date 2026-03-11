@@ -723,6 +723,7 @@ def init_db():
                 fecha_cita TEXT,
                 kva INTEGER,
                 sede TEXT,
+                medico TEXT,
                 agenda_hospitalaria TEXT,
                 fecha_evaluacion TEXT,
                 resultado TEXT
@@ -828,6 +829,7 @@ def init_db():
                 fecha_cita TEXT,
                 kva INTEGER,
                 sede TEXT,
+                medico TEXT,
                 agenda_hospitalaria TEXT,
                 fecha_evaluacion TEXT,
                 fechas_previas TEXT,
@@ -901,6 +903,7 @@ def init_db():
     # Migracion incremental de revision ocular para instalaciones existentes.
     if DB_BACKEND == "postgres":
         c.execute("ALTER TABLE revision_ocular ADD COLUMN IF NOT EXISTS sede TEXT")
+        c.execute("ALTER TABLE revision_ocular ADD COLUMN IF NOT EXISTS medico TEXT")
         c.execute("ALTER TABLE revision_ocular ADD COLUMN IF NOT EXISTS agenda_hospitalaria TEXT")
         c.execute("ALTER TABLE revision_ocular ADD COLUMN IF NOT EXISTS fecha_evaluacion TEXT")
         c.execute("ALTER TABLE revision_ocular ADD COLUMN IF NOT EXISTS fechas_previas TEXT")
@@ -908,6 +911,7 @@ def init_db():
     else:
         for col_sql in (
             "ALTER TABLE revision_ocular ADD COLUMN sede TEXT",
+            "ALTER TABLE revision_ocular ADD COLUMN medico TEXT",
             "ALTER TABLE revision_ocular ADD COLUMN agenda_hospitalaria TEXT",
             "ALTER TABLE revision_ocular ADD COLUMN fecha_evaluacion TEXT",
             "ALTER TABLE revision_ocular ADD COLUMN fechas_previas TEXT",
@@ -1429,8 +1433,11 @@ def formatear_latencia_desde_creacion(creado_en):
         return f"{horas}h {minutos}m"
     return f"{minutos}m"
 
-def guardar_revision_ocular(visita_id, sede, agenda_hospitalaria, fecha_evaluacion, resultado):
+def guardar_revision_ocular(visita_id, sede, medico, agenda_hospitalaria, fecha_evaluacion, resultado):
     sede = str(sede or "").strip().lower()
+    medico = str(medico or "").strip().upper()
+    if medico and medico not in MEDICOS_OJOS_PERMITIDOS:
+        medico = "OTRO"
     agenda_hospitalaria = str(agenda_hospitalaria or "").strip()
     fecha_evaluacion = str(fecha_evaluacion or "").strip()
     resultado = str(resultado or "").strip()
@@ -1476,21 +1483,21 @@ def guardar_revision_ocular(visita_id, sede, agenda_hospitalaria, fecha_evaluaci
     c.execute(
         """
         UPDATE revision_ocular
-        SET sede = ?, agenda_hospitalaria = ?, fecha_evaluacion = ?, fechas_previas = ?, resultado = ?,
+        SET sede = ?, medico = ?, agenda_hospitalaria = ?, fecha_evaluacion = ?, fechas_previas = ?, resultado = ?,
             fecha_cita = ?, kva = ?
         WHERE visita_id = ?
         """,
-        (sede, agenda_hospitalaria, fecha_evaluacion, fechas_previas_txt, resultado, fecha_evaluacion, kva, visita_id)
+        (sede, medico, agenda_hospitalaria, fecha_evaluacion, fechas_previas_txt, resultado, fecha_evaluacion, kva, visita_id)
     )
     if c.rowcount == 0:
         c.execute(
             """
             INSERT INTO revision_ocular (
-                visita_id, sede, agenda_hospitalaria, fecha_evaluacion, fechas_previas, resultado, fecha_cita, kva
+                visita_id, sede, medico, agenda_hospitalaria, fecha_evaluacion, fechas_previas, resultado, fecha_cita, kva
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (visita_id, sede, agenda_hospitalaria, fecha_evaluacion, "", resultado, fecha_evaluacion, kva)
+            (visita_id, sede, medico, agenda_hospitalaria, fecha_evaluacion, "", resultado, fecha_evaluacion, kva)
         )
     conn.commit()
     conn.close()
@@ -1502,7 +1509,7 @@ def get_revision_ocular(visita_id):
     c = conn.cursor()
     c.execute(
         """
-        SELECT sede, agenda_hospitalaria, fecha_evaluacion, fechas_previas, resultado, fecha_cita, kva
+        SELECT sede, medico, agenda_hospitalaria, fecha_evaluacion, fechas_previas, resultado, fecha_cita, kva
         FROM revision_ocular
         WHERE visita_id=?
         """,
@@ -1513,12 +1520,13 @@ def get_revision_ocular(visita_id):
     if not row:
         return {
             "sede": "",
+            "medico": "",
             "agenda_hospitalaria": "",
             "fecha_evaluacion": "",
             "resultado": "",
         }
 
-    sede, agenda_hospitalaria, fecha_evaluacion, fechas_previas, resultado, fecha_cita, kva = row
+    sede, medico, agenda_hospitalaria, fecha_evaluacion, fechas_previas, resultado, fecha_cita, kva = row
     fecha_eval_final = fecha_evaluacion if fecha_evaluacion else (fecha_cita or "")
     if resultado:
         resultado_final = str(resultado)
@@ -1529,6 +1537,7 @@ def get_revision_ocular(visita_id):
 
     return {
         "sede": "" if sede is None else str(sede),
+        "medico": "" if medico is None else str(medico),
         "agenda_hospitalaria": "" if agenda_hospitalaria is None else str(agenda_hospitalaria),
         "fecha_evaluacion": "" if fecha_eval_final is None else str(fecha_eval_final),
         "fechas_previas": "" if fechas_previas is None else str(fechas_previas),
@@ -1542,7 +1551,7 @@ def get_revisiones_oculares_df():
     try:
         df = pd.read_sql(
             """
-            SELECT visita_id, sede, agenda_hospitalaria, fecha_evaluacion, fechas_previas, resultado, fecha_cita, kva
+            SELECT visita_id, sede, medico, agenda_hospitalaria, fecha_evaluacion, fechas_previas, resultado, fecha_cita, kva
             FROM revision_ocular
             """,
             conn
@@ -1552,6 +1561,7 @@ def get_revisiones_oculares_df():
             columns=[
                 "visita_id",
                 "sede",
+                "medico",
                 "agenda_hospitalaria",
                 "fecha_evaluacion",
                 "fechas_previas",
@@ -1605,6 +1615,7 @@ def invalidar_cache_lecturas():
 
 
 ENSAYOS_OJOS_PERMITIDOS = ["DREAMM 10", "DREAMM-8", "Fuera de Ensayo"]
+MEDICOS_OJOS_PERMITIDOS = ["ISABEL", "ANTONIO", "ROCIO", "OTRO"]
 
 
 def _normalizar_ensayo_ojos(valor):
@@ -2645,6 +2656,7 @@ if seccion_activa == "Citas ojos":
         tabla["NOMBRE"] = base["nombre"].fillna("").astype(str)
         tabla["ENSAYO"] = base["ensayo"].apply(_normalizar_ensayo_ojos)
         tabla["SEDE"] = base["sede"].fillna("").astype(str)
+        tabla["MEDICO"] = base["medico"].fillna("").astype(str)
         tabla["AGENDA HOSPITALARIA"] = base["agenda_hospitalaria"].fillna("").astype(str)
         tabla["FECHA EVALUACION"] = pd.to_datetime(base["fecha_evaluacion"], errors="coerce").dt.date
         tabla["FECHAS PREVIAS"] = base["fechas_previas"].fillna("").astype(str)
@@ -2678,6 +2690,10 @@ if seccion_activa == "Citas ojos":
                     "SEDE",
                     options=["", "cabueñes", "puerta de la villa", "pumarin"],
                 ),
+                "MEDICO": st.column_config.SelectboxColumn(
+                    "MEDICO",
+                    options=[""] + MEDICOS_OJOS_PERMITIDOS,
+                ),
                 "AGENDA HOSPITALARIA": st.column_config.TextColumn("AGENDA HOSPITALARIA"),
                 "FECHA EVALUACION": st.column_config.DateColumn("FECHA EVALUACION", format="DD/MM/YYYY"),
                 "RESULTADO": st.column_config.TextColumn("RESULTADO"),
@@ -2700,6 +2716,9 @@ if seccion_activa == "Citas ojos":
                     cambios += 1
 
                 sede_nueva = str(fila_nueva.get("SEDE") or "").strip().lower()
+                medico_nueva = str(fila_nueva.get("MEDICO") or "").strip().upper()
+                if medico_nueva and medico_nueva not in MEDICOS_OJOS_PERMITIDOS:
+                    medico_nueva = "OTRO"
                 agenda_nueva = str(fila_nueva.get("AGENDA HOSPITALARIA") or "").strip()
                 resultado_nueva = str(fila_nueva.get("RESULTADO") or "").strip()
                 fecha_nueva_val = fila_nueva.get("FECHA EVALUACION")
@@ -2707,6 +2726,7 @@ if seccion_activa == "Citas ojos":
                 realizado_nuevo = bool(fila_nueva.get("REALIZADO"))
 
                 sede_orig = str(fila_orig.get("SEDE") or "").strip().lower()
+                medico_orig = str(fila_orig.get("MEDICO") or "").strip().upper()
                 agenda_orig = str(fila_orig.get("AGENDA HOSPITALARIA") or "").strip()
                 resultado_orig = str(fila_orig.get("RESULTADO") or "").strip()
                 fecha_orig_val = fila_orig.get("FECHA EVALUACION")
@@ -2717,6 +2737,7 @@ if seccion_activa == "Citas ojos":
 
                 if (
                     sede_nueva != sede_orig
+                    or medico_nueva != medico_orig
                     or agenda_nueva != agenda_orig
                     or resultado_nueva != resultado_orig
                     or fecha_guardar != fecha_orig
@@ -2724,6 +2745,7 @@ if seccion_activa == "Citas ojos":
                     guardar_revision_ocular(
                         int(visita_id),
                         sede_nueva,
+                        medico_nueva,
                         agenda_nueva,
                         fecha_guardar,
                         resultado_nueva,
@@ -3441,6 +3463,12 @@ if seccion_activa == "Agenda":
                             sede_index = sedes_disponibles.index(sede_actual)
                         else:
                             sede_index = 0
+                        medico_actual = str(rev.get("medico") or "").strip().upper()
+                        medicos_disponibles = [""] + MEDICOS_OJOS_PERMITIDOS
+                        if medico_actual in medicos_disponibles:
+                            medico_index = medicos_disponibles.index(medico_actual)
+                        else:
+                            medico_index = 0
 
                         fecha_eval_default = parse_fecha_iso(rev.get("fecha_evaluacion"))
                         if fecha_eval_default is None:
@@ -3452,6 +3480,11 @@ if seccion_activa == "Agenda":
                                 options=sedes_disponibles,
                                 index=sede_index,
                                 format_func=lambda v: v.title(),
+                            )
+                            medico_sel = st.selectbox(
+                                "Médico",
+                                options=medicos_disponibles,
+                                index=medico_index,
                             )
                             agenda_hospitalaria = st.text_area(
                                 "Agenda hospitalaria (texto libre)",
@@ -3472,6 +3505,7 @@ if seccion_activa == "Agenda":
                                 guardar_revision_ocular(
                                     id_evento_cmp,
                                     sede_sel,
+                                    medico_sel,
                                     agenda_hospitalaria,
                                     fecha_eval.isoformat(),
                                     resultado_eval,
@@ -3494,6 +3528,7 @@ if seccion_activa == "Agenda":
                         f"Otras pruebas: {paciente['otras_pruebas']}\n"
                         f"Comentarios: {paciente['comentarios']}\n"
                         f"Revision ocular (sede): {rev_informe.get('sede', '')}\n"
+                        f"Medico ocular: {rev_informe.get('medico', '')}\n"
                         f"Agenda hospitalaria ocular: {rev_informe.get('agenda_hospitalaria', '')}\n"
                         f"Fecha evaluacion ocular: {formatear_fecha_visita(rev_informe.get('fecha_evaluacion', ''))}\n"
                         f"Resultado ocular: {rev_informe.get('resultado', '')}\n"
