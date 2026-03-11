@@ -1453,52 +1453,73 @@ def guardar_revision_ocular(visita_id, sede, medico, agenda_hospitalaria, fecha_
     conn = connect_db()
     c = conn.cursor()
 
-    c.execute(
-        """
-        SELECT fecha_evaluacion, fecha_cita, fechas_previas
-        FROM revision_ocular
-        WHERE visita_id = ?
-        """,
-        (visita_id,)
-    )
-    previa = c.fetchone()
+    # Sincronizamos la revision ocular entre todas las visitas del mismo paciente.
+    filas_visitas = c.execute(
+        "SELECT id, codigo, nombre, ensayo FROM visitas ORDER BY id DESC"
+    ).fetchall()
 
-    historial_fechas = []
-    if previa:
-        fechas_previas_raw = "" if previa[2] is None else str(previa[2]).strip()
-        if fechas_previas_raw:
-            historial_fechas = [f.strip() for f in fechas_previas_raw.split(" | ") if f.strip()]
+    clave_ref = ""
+    for fila_id, codigo_ref, nombre_ref, ensayo_ref in filas_visitas:
+        if int(fila_id) == int(visita_id):
+            clave_ref = clave_paciente_unificada(codigo_ref, nombre_ref, ensayo_ref)
+            break
 
-        fecha_actual = ""
-        if previa[0] is not None and str(previa[0]).strip():
-            fecha_actual = str(previa[0]).strip()
-        elif previa[1] is not None and str(previa[1]).strip():
-            fecha_actual = str(previa[1]).strip()
+    if clave_ref:
+        visita_ids_objetivo = [
+            int(fila_id)
+            for fila_id, codigo_ref, nombre_ref, ensayo_ref in filas_visitas
+            if clave_paciente_unificada(codigo_ref, nombre_ref, ensayo_ref) == clave_ref
+        ]
+    else:
+        visita_ids_objetivo = [int(visita_id)]
 
-        if fecha_actual and fecha_actual != fecha_evaluacion and fecha_actual not in historial_fechas:
-            historial_fechas.append(fecha_actual)
-
-    fechas_previas_txt = " | ".join(historial_fechas)
-
-    c.execute(
-        """
-        UPDATE revision_ocular
-        SET sede = ?, medico = ?, agenda_hospitalaria = ?, fecha_evaluacion = ?, fechas_previas = ?, resultado = ?,
-            fecha_cita = ?, kva = ?
-        WHERE visita_id = ?
-        """,
-        (sede, medico, agenda_hospitalaria, fecha_evaluacion, fechas_previas_txt, resultado, fecha_evaluacion, kva, visita_id)
-    )
-    if c.rowcount == 0:
+    for visita_id_destino in visita_ids_objetivo:
         c.execute(
             """
-            INSERT INTO revision_ocular (
-                visita_id, sede, medico, agenda_hospitalaria, fecha_evaluacion, fechas_previas, resultado, fecha_cita, kva
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            SELECT fecha_evaluacion, fecha_cita, fechas_previas
+            FROM revision_ocular
+            WHERE visita_id = ?
             """,
-            (visita_id, sede, medico, agenda_hospitalaria, fecha_evaluacion, "", resultado, fecha_evaluacion, kva)
+            (visita_id_destino,)
         )
+        previa = c.fetchone()
+
+        historial_fechas = []
+        if previa:
+            fechas_previas_raw = "" if previa[2] is None else str(previa[2]).strip()
+            if fechas_previas_raw:
+                historial_fechas = [f.strip() for f in fechas_previas_raw.split(" | ") if f.strip()]
+
+            fecha_actual = ""
+            if previa[0] is not None and str(previa[0]).strip():
+                fecha_actual = str(previa[0]).strip()
+            elif previa[1] is not None and str(previa[1]).strip():
+                fecha_actual = str(previa[1]).strip()
+
+            if fecha_actual and fecha_actual != fecha_evaluacion and fecha_actual not in historial_fechas:
+                historial_fechas.append(fecha_actual)
+
+        fechas_previas_txt = " | ".join(historial_fechas)
+
+        c.execute(
+            """
+            UPDATE revision_ocular
+            SET sede = ?, medico = ?, agenda_hospitalaria = ?, fecha_evaluacion = ?, fechas_previas = ?, resultado = ?,
+                fecha_cita = ?, kva = ?
+            WHERE visita_id = ?
+            """,
+            (sede, medico, agenda_hospitalaria, fecha_evaluacion, fechas_previas_txt, resultado, fecha_evaluacion, kva, visita_id_destino)
+        )
+        if c.rowcount == 0:
+            c.execute(
+                """
+                INSERT INTO revision_ocular (
+                    visita_id, sede, medico, agenda_hospitalaria, fecha_evaluacion, fechas_previas, resultado, fecha_cita, kva
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (visita_id_destino, sede, medico, agenda_hospitalaria, fecha_evaluacion, "", resultado, fecha_evaluacion, kva)
+            )
     conn.commit()
     conn.close()
     invalidar_cache_lecturas()
