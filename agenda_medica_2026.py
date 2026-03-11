@@ -2566,12 +2566,39 @@ if seccion_activa == "Citas ojos":
     if df_visitas.empty:
         st.info("No hay visitas registradas.")
     else:
+        with st.expander("➕ Añadir paciente fuera de ensayo", expanded=False):
+            with st.form("form_nuevo_fuera_ensayo"):
+                col_nuevo_1, col_nuevo_2 = st.columns(2)
+                codigo_nuevo = col_nuevo_1.text_input("Código", key="ojos_fuera_codigo")
+                nombre_nuevo = col_nuevo_2.text_input("Nombre", key="ojos_fuera_nombre")
+                ciclo_nuevo = st.text_input("Ciclo", key="ojos_fuera_ciclo")
+                fecha_visita_nueva = st.date_input("Fecha de visita", value=fecha_hoy_local(), key="ojos_fuera_fecha")
+                crear_fuera = st.form_submit_button("Crear paciente Fuera de Ensayo", type="primary")
+                if crear_fuera:
+                    if not str(codigo_nuevo or "").strip() and not str(nombre_nuevo or "").strip():
+                        st.warning("Introduce al menos código o nombre.")
+                    else:
+                        data_nueva = {
+                            "nombre": str(nombre_nuevo or "").strip(),
+                            "codigo": str(codigo_nuevo or "").strip(),
+                            "ensayo": "Fuera de Ensayo",
+                            "ciclo": str(ciclo_nuevo or "").strip(),
+                            "kits": "",
+                            "tablet": False,
+                            "medula": False,
+                            "otras_pruebas": "",
+                            "comentarios": "",
+                        }
+                        guardar_visita(fecha_visita_nueva.isoformat(), data_nueva)
+                        st.success("Paciente creado en Fuera de Ensayo.")
+                        st.rerun()
+
         df_visitas = df_visitas.copy()
         df_visitas["ensayo"] = df_visitas["ensayo"].apply(_normalizar_ensayo_ojos)
         df_visitas = df_visitas[df_visitas["ensayo"].isin(ENSAYOS_OJOS_PERMITIDOS)].copy()
         if df_visitas.empty:
             st.info("No hay pacientes de DREAMM 10, DREAMM-8 o Fuera de Ensayo.")
-            st.caption("Puedes asignar una visita a 'Fuera de Ensayo' desde esta misma tabla cuando haya datos visibles.")
+            st.caption("Puedes crear un paciente en 'Fuera de Ensayo' con el formulario superior.")
             st.stop()
 
         df_rev = get_revisiones_oculares_df()
