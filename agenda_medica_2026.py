@@ -721,7 +721,11 @@ def init_db():
                 id BIGSERIAL PRIMARY KEY,
                 visita_id BIGINT UNIQUE,
                 fecha_cita TEXT,
-                kva INTEGER
+                kva INTEGER,
+                sede TEXT,
+                agenda_hospitalaria TEXT,
+                fecha_evaluacion TEXT,
+                resultado TEXT
             )
             '''
         )
@@ -823,6 +827,10 @@ def init_db():
                 visita_id INTEGER UNIQUE,
                 fecha_cita TEXT,
                 kva INTEGER,
+                sede TEXT,
+                agenda_hospitalaria TEXT,
+                fecha_evaluacion TEXT,
+                resultado TEXT,
                 FOREIGN KEY(visita_id) REFERENCES visitas(id)
             )
         ''')
@@ -888,6 +896,24 @@ def init_db():
                 fecha_modificacion TEXT
             )
         ''')
+
+    # Migracion incremental de revision ocular para instalaciones existentes.
+    if DB_BACKEND == "postgres":
+        c.execute("ALTER TABLE revision_ocular ADD COLUMN IF NOT EXISTS sede TEXT")
+        c.execute("ALTER TABLE revision_ocular ADD COLUMN IF NOT EXISTS agenda_hospitalaria TEXT")
+        c.execute("ALTER TABLE revision_ocular ADD COLUMN IF NOT EXISTS fecha_evaluacion TEXT")
+        c.execute("ALTER TABLE revision_ocular ADD COLUMN IF NOT EXISTS resultado TEXT")
+    else:
+        for col_sql in (
+            "ALTER TABLE revision_ocular ADD COLUMN sede TEXT",
+            "ALTER TABLE revision_ocular ADD COLUMN agenda_hospitalaria TEXT",
+            "ALTER TABLE revision_ocular ADD COLUMN fecha_evaluacion TEXT",
+            "ALTER TABLE revision_ocular ADD COLUMN resultado TEXT",
+        ):
+            try:
+                c.execute(col_sql)
+            except Exception:
+                pass
 
     # Persistimos el esquema antes del mantenimiento: si luego hay rollback por deadlock,
     # no se pierden tablas nuevas en despliegues concurrentes.
@@ -1400,13 +1426,41 @@ def formatear_latencia_desde_creacion(creado_en):
         return f"{horas}h {minutos}m"
     return f"{minutos}m"
 
-def guardar_revision_ocular(visita_id, fecha_cita, kva):
+def guardar_revision_ocular(visita_id, sede, agenda_hospitalaria, fecha_evaluacion, resultado):
+    sede = str(sede or "").strip().lower()
+    agenda_hospitalaria = str(agenda_hospitalaria or "").strip()
+    fecha_evaluacion = str(fecha_evaluacion or "").strip()
+    resultado = str(resultado or "").strip()
+
+    kva = None
+    m = re.search(r"\bKVA\s*([0-4])\b", resultado.upper())
+    if m:
+        try:
+            kva = int(m.group(1))
+        except Exception:
+            kva = None
+
     conn = connect_db()
     c = conn.cursor()
     c.execute(
-        "INSERT OR REPLACE INTO revision_ocular (visita_id, fecha_cita, kva) VALUES (?, ?, ?)",
-        (visita_id, fecha_cita, kva)
+        """
+        UPDATE revision_ocular
+        SET sede = ?, agenda_hospitalaria = ?, fecha_evaluacion = ?, resultado = ?,
+            fecha_cita = ?, kva = ?
+        WHERE visita_id = ?
+        """,
+        (sede, agenda_hospitalaria, fecha_evaluacion, resultado, fecha_evaluacion, kva, visita_id)
     )
+    if c.rowcount == 0:
+        c.execute(
+            """
+            INSERT INTO revision_ocular (
+                visita_id, sede, agenda_hospitalaria, fecha_evaluacion, resultado, fecha_cita, kva
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (visita_id, sede, agenda_hospitalaria, fecha_evaluacion, resultado, fecha_evaluacion, kva)
+        )
     conn.commit()
     conn.close()
     invalidar_cache_lecturas()
@@ -1415,20 +1469,88 @@ def guardar_revision_ocular(visita_id, fecha_cita, kva):
 def get_revision_ocular(visita_id):
     conn = connect_db()
     c = conn.cursor()
-    c.execute("SELECT fecha_cita, kva FROM revision_ocular WHERE visita_id=?", (visita_id,))
+    c.execute(
+        """
+        SELECT sede, agenda_hospitalaria, fecha_evaluacion, resultado, fecha_cita, kva
+        FROM revision_ocular
+        WHERE visita_id=?
+        """,
+        (visita_id,)
+    )
     row = c.fetchone()
     conn.close()
-    return row
+    if not row:
+        return {
+            "sede": "",
+            "agenda_hospitalaria": "",
+            "fecha_evaluacion": "",
+            "resultado": "",
+        }
+
+    sede, agenda_hospitalaria, fecha_evaluacion, resultado, fecha_cita, kva = row
+    fecha_eval_final = fecha_evaluacion if fecha_evaluacion else (fecha_cita or "")
+    if resultado:
+        resultado_final = str(resultado)
+    elif kva is not None:
+        resultado_final = f"KVA {int(kva)}"
+    else:
+        resultado_final = ""
+
+    return {
+        "sede": "" if sede is None else str(sede),
+        "agenda_hospitalaria": "" if agenda_hospitalaria is None else str(agenda_hospitalaria),
+        "fecha_evaluacion": "" if fecha_eval_final is None else str(fecha_eval_final),
+        "resultado": resultado_final,
+    }
 
 
 @st.cache_data(show_spinner=False)
 def get_revisiones_oculares_df():
     conn = connect_db()
-    df = pd.read_sql(
-        "SELECT visita_id, fecha_cita, kva FROM revision_ocular",
-        conn
-    )
+    try:
+        df = pd.read_sql(
+            """
+            SELECT visita_id, sede, agenda_hospitalaria, fecha_evaluacion, resultado, fecha_cita, kva
+            FROM revision_ocular
+            """,
+            conn
+        )
+    except Exception:
+        df = pd.DataFrame(
+            columns=[
+                "visita_id",
+                "sede",
+                "agenda_hospitalaria",
+                "fecha_evaluacion",
+                "resultado",
+                "fecha_cita",
+                "kva",
+            ]
+        )
     conn.close()
+
+    if "fecha_evaluacion" not in df.columns:
+        df["fecha_evaluacion"] = None
+    if "fecha_cita" not in df.columns:
+        df["fecha_cita"] = None
+    if "resultado" not in df.columns:
+        df["resultado"] = None
+    if "kva" not in df.columns:
+        df["kva"] = None
+    if "sede" not in df.columns:
+        df["sede"] = None
+    if "agenda_hospitalaria" not in df.columns:
+        df["agenda_hospitalaria"] = None
+
+    df["fecha_evaluacion"] = df["fecha_evaluacion"].fillna(df["fecha_cita"])
+    df["resultado"] = df.apply(
+        lambda r: (
+            str(r["resultado"])
+            if pd.notna(r["resultado"]) and str(r["resultado"]).strip()
+            else (f"KVA {int(r['kva'])}" if pd.notna(r["kva"]) else "")
+        ),
+        axis=1,
+    )
     return df
 
 
@@ -1827,8 +1949,10 @@ def render_resumen_manana():
             right_on="visita_id"
         )
     else:
-        df_manana["fecha_cita"] = None
-        df_manana["kva"] = None
+        df_manana["fecha_evaluacion"] = None
+        df_manana["resultado"] = None
+        df_manana["sede"] = None
+        df_manana["agenda_hospitalaria"] = None
 
     if fecha_mostrar == manana:
         st.info(f"Pacientes de mañana: {len(df_manana)}")
@@ -1857,13 +1981,19 @@ def render_resumen_manana():
         if otras:
             tareas.append(f"Otras pruebas: {otras}")
 
-        fecha_rev = parse_fecha_iso(row.get("fecha_cita")) if "fecha_cita" in row else None
-        kva = row.get("kva") if "kva" in row else None
+        fecha_rev = parse_fecha_iso(row.get("fecha_evaluacion")) if "fecha_evaluacion" in row else None
+        resultado_rev = "" if pd.isna(row.get("resultado")) else str(row.get("resultado")).strip()
+        sede_rev = "" if pd.isna(row.get("sede")) else str(row.get("sede")).strip()
+        agenda_hosp = "" if pd.isna(row.get("agenda_hospitalaria")) else str(row.get("agenda_hospitalaria")).strip()
         if fecha_rev:
             detalle_rev = f"Revisión ocular: {fecha_rev.strftime('%d/%m/%Y')}"
-            if kva is not None and not pd.isna(kva):
-                detalle_rev += f" (KVA {int(kva)})"
+            if sede_rev:
+                detalle_rev += f" ({sede_rev.title()})"
             tareas.append(detalle_rev)
+        if resultado_rev:
+            tareas.append(f"Resultado ocular: {resultado_rev}")
+        if agenda_hosp:
+            tareas.append(f"Agenda hospitalaria (ojos): {agenda_hosp}")
 
         comentarios = "" if pd.isna(row.get("comentarios")) else str(row.get("comentarios")).strip()
         if comentarios:
@@ -2295,7 +2425,14 @@ if seccion_activa == "Ficha paciente":
                         left_on="id",
                         right_on="visita_id"
                     )
-                    df_ficha = df_ficha.rename(columns={"fecha_cita": "fecha_revision"})
+                    df_ficha = df_ficha.rename(
+                        columns={
+                            "fecha_evaluacion": "fecha_revision",
+                            "resultado": "resultado_ocular",
+                            "sede": "sede_ocular",
+                            "agenda_hospitalaria": "agenda_hospitalaria_ocular",
+                        }
+                    )
                     df_ficha.drop(columns=["visita_id"], inplace=True, errors="ignore")
 
             if df_ficha.empty and nombre_sel:
@@ -2315,7 +2452,14 @@ if seccion_activa == "Ficha paciente":
                         left_on="id",
                         right_on="visita_id"
                     )
-                    df_ficha = df_ficha.rename(columns={"fecha_cita": "fecha_revision"})
+                    df_ficha = df_ficha.rename(
+                        columns={
+                            "fecha_evaluacion": "fecha_revision",
+                            "resultado": "resultado_ocular",
+                            "sede": "sede_ocular",
+                            "agenda_hospitalaria": "agenda_hospitalaria_ocular",
+                        }
+                    )
                     df_ficha.drop(columns=["visita_id"], inplace=True, errors="ignore")
 
             if df_ficha.empty:
@@ -2352,8 +2496,10 @@ if seccion_activa == "Ficha paciente":
                         "medula": "MEDULA",
                         "otras_pruebas": "OTRAS PRUEBAS",
                         "comentarios": "COMENTARIOS",
+                        "sede_ocular": "REVISION OCULAR (SEDE)",
+                        "agenda_hospitalaria_ocular": "AGENDA HOSPITALARIA (OCULAR)",
                         "fecha_revision": "REVISION OCULAR (FECHA)",
-                        "kva": "KVA"
+                        "resultado_ocular": "RESULTADO OCULAR"
                     }
                 )
                 df_ficha = df_ficha[
@@ -2368,8 +2514,10 @@ if seccion_activa == "Ficha paciente":
                         "MEDULA",
                         "OTRAS PRUEBAS",
                         "COMENTARIOS",
+                        "REVISION OCULAR (SEDE)",
+                        "AGENDA HOSPITALARIA (OCULAR)",
                         "REVISION OCULAR (FECHA)",
-                        "KVA"
+                        "RESULTADO OCULAR"
                     ]
                 ]
 
@@ -3061,8 +3209,8 @@ if seccion_activa == "Agenda":
                                     st.error("¡Falta el Código del sujeto!")
 
                     st.divider()
-                    tab_medula, tab_kits, tab_otras, tab_comentarios = st.tabs(
-                        ["Médula/Tablet", "Kits", "Otras pruebas", "Comentarios"]
+                    tab_medula, tab_kits, tab_otras, tab_comentarios, tab_ojos = st.tabs(
+                        ["Médula/Tablet", "Kits", "Otras pruebas", "Comentarios", "Citas de ojos"]
                     )
                     with tab_medula:
                         if paciente['medula']:
@@ -3079,34 +3227,53 @@ if seccion_activa == "Agenda":
                         st.write(paciente['otras_pruebas'] if paciente['otras_pruebas'] else "Sin datos")
                     with tab_comentarios:
                         st.write(paciente['comentarios'] if paciente['comentarios'] else "Sin datos")
+                    with tab_ojos:
+                        sedes_disponibles = ["cabueñes", "puerta de la villa", "pumarin"]
+                        rev = get_revision_ocular(id_evento_cmp)
+                        sede_actual = str(rev.get("sede") or "").strip().lower()
+                        if sede_actual in sedes_disponibles:
+                            sede_index = sedes_disponibles.index(sede_actual)
+                        else:
+                            sede_index = 0
 
-                    st.divider()
-                    st.subheader("Revision ocular")
-                    rev = get_revision_ocular(id_evento_cmp)
-                    tiene_rev = bool(rev and (rev[0] or rev[1] is not None))
-                    opcion_rev = st.radio(
-                        "Revision ocular",
-                        options=["No", "Si"],
-                        index=1 if tiene_rev else 0,
-                        horizontal=True,
-                        key=f"revision_ocular_{id_evento_cmp}"
-                    )
-
-                    if opcion_rev == "Si":
-                        fecha_default = parse_fecha_iso(rev[0]) if rev else None
-                        if fecha_default is None:
-                            fecha_default = parse_fecha_iso(paciente['fecha']) or fecha_hoy_local()
-                        kva_default = rev[1] if rev and rev[1] is not None else 0
-                        kva_opciones = [0, 1, 2, 3, 4]
-                        kva_index = kva_opciones.index(kva_default) if kva_default in kva_opciones else 0
+                        fecha_eval_default = parse_fecha_iso(rev.get("fecha_evaluacion"))
+                        if fecha_eval_default is None:
+                            fecha_eval_default = parse_fecha_iso(paciente['fecha']) or fecha_hoy_local()
 
                         with st.form(f"form_revision_{id_evento_cmp}"):
-                            fecha_cita = st.date_input("Fecha de cita", value=fecha_default)
-                            kva = st.selectbox("Resultado KVA", options=kva_opciones, index=kva_index)
-                            guardar_rev = st.form_submit_button("Guardar revision ocular")
+                            sede_sel = st.selectbox(
+                                "Dónde",
+                                options=sedes_disponibles,
+                                index=sede_index,
+                                format_func=lambda v: v.title(),
+                            )
+                            agenda_hospitalaria = st.text_area(
+                                "Agenda hospitalaria (texto libre)",
+                                value=rev.get("agenda_hospitalaria", ""),
+                                height=90,
+                            )
+                            fecha_eval = st.date_input(
+                                "Fecha de la evaluación",
+                                value=fecha_eval_default,
+                            )
+                            resultado_eval = st.text_area(
+                                "Resultado",
+                                value=rev.get("resultado", ""),
+                                height=90,
+                            )
+                            guardar_rev = st.form_submit_button("Guardar cita de ojos", type="primary")
                             if guardar_rev:
-                                guardar_revision_ocular(id_evento_cmp, fecha_cita.isoformat(), kva)
-                                st.success("Revision ocular guardada.")
+                                guardar_revision_ocular(
+                                    id_evento_cmp,
+                                    sede_sel,
+                                    agenda_hospitalaria,
+                                    fecha_eval.isoformat(),
+                                    resultado_eval,
+                                )
+                                st.success("Cita de ojos guardada.")
+                                st.rerun()
+
+                    rev_informe = get_revision_ocular(id_evento_cmp)
 
                     informe = (
                         f"Informe de visita\n"
@@ -3120,6 +3287,10 @@ if seccion_activa == "Agenda":
                         f"Medula: {'Si' if paciente['medula'] else 'No'}\n"
                         f"Otras pruebas: {paciente['otras_pruebas']}\n"
                         f"Comentarios: {paciente['comentarios']}\n"
+                        f"Revision ocular (sede): {rev_informe.get('sede', '')}\n"
+                        f"Agenda hospitalaria ocular: {rev_informe.get('agenda_hospitalaria', '')}\n"
+                        f"Fecha evaluacion ocular: {formatear_fecha_visita(rev_informe.get('fecha_evaluacion', ''))}\n"
+                        f"Resultado ocular: {rev_informe.get('resultado', '')}\n"
                         f"Adenda paciente: {adenda_paciente_info.get('texto', '')}\n"
                     )
                     st.download_button(
