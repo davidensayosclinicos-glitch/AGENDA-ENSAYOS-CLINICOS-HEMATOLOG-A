@@ -2723,6 +2723,71 @@ if seccion_activa == "Adendas":
         if fecha_mod:
             st.caption(f"Última modificación: {fecha_mod}")
 
+        st.divider()
+        st.subheader("🧾 Adenda por paciente")
+
+        df_pacientes_ad = get_pacientes_unicos()
+        if df_pacientes_ad.empty:
+            st.info("No hay pacientes guardados para asociar adendas.")
+        else:
+            df_pacientes_ad = df_pacientes_ad.copy()
+            for col in ["codigo", "nombre", "ensayo"]:
+                if col not in df_pacientes_ad.columns:
+                    df_pacientes_ad[col] = ""
+                df_pacientes_ad[col] = df_pacientes_ad[col].fillna("").astype(str)
+
+            pacientes_ensayo = df_pacientes_ad[
+                df_pacientes_ad["ensayo"].astype(str) == str(ensayo_sel)
+            ].copy()
+
+            opciones_pac = []
+            mapa_pac = {}
+            for _, row in pacientes_ensayo.iterrows():
+                codigo = str(row.get("codigo") or "").strip()
+                nombre = str(row.get("nombre") or "").strip()
+                ensayo = str(row.get("ensayo") or "").strip()
+                etiqueta = f"{codigo} | {nombre}".strip(" |")
+                if not etiqueta:
+                    continue
+                opciones_pac.append(etiqueta)
+                mapa_pac[etiqueta] = {
+                    "codigo": codigo,
+                    "nombre": nombre,
+                    "ensayo": ensayo,
+                }
+
+            if not opciones_pac:
+                st.info("No hay pacientes en este ensayo para asociar adendas.")
+            else:
+                paciente_sel = st.selectbox(
+                    "Paciente",
+                    options=opciones_pac,
+                    key=f"adenda_paciente_sel_{ensayo_sel}"
+                )
+                datos_sel = mapa_pac.get(paciente_sel, {})
+
+                codigo_sel = datos_sel.get("codigo", "")
+                nombre_sel = datos_sel.get("nombre", "")
+                ensayo_pac = datos_sel.get("ensayo", "")
+                adenda_pac_actual = get_adenda_paciente(codigo_sel, nombre_sel, ensayo_pac)
+
+                with st.form(f"form_adenda_paciente_{normalizar_clave_paciente(ensayo_sel)}"):
+                    texto_adenda_pac = st.text_area(
+                        "Texto libre de la adenda del paciente",
+                        value=adenda_pac_actual.get("texto", ""),
+                        height=180,
+                        key=f"adenda_paciente_texto_{normalizar_clave_paciente(codigo_sel)}_{normalizar_clave_paciente(ensayo_sel)}"
+                    )
+                    guardar_adenda_pac = st.form_submit_button("Guardar adenda paciente", type="primary")
+                    if guardar_adenda_pac:
+                        guardar_adenda_paciente(codigo_sel, nombre_sel, ensayo_pac, texto_adenda_pac.strip())
+                        st.success("Adenda del paciente guardada.")
+                        st.rerun()
+
+                fecha_mod_pac = adenda_pac_actual.get("fecha_modificacion", "")
+                if fecha_mod_pac:
+                    st.caption(f"Última modificación adenda paciente: {fecha_mod_pac}")
+
 if seccion_activa == "Agenda":
     with st.expander("📌 Ver resumen de mañana", expanded=False):
         render_resumen_manana()
