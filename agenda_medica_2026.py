@@ -2649,6 +2649,7 @@ if seccion_activa == "Citas ojos":
         tabla["FECHA EVALUACION"] = pd.to_datetime(base["fecha_evaluacion"], errors="coerce").dt.date
         tabla["FECHAS PREVIAS"] = base["fechas_previas"].fillna("").astype(str)
         tabla["RESULTADO"] = base["resultado"].fillna("").astype(str)
+        tabla["REALIZADO"] = False
 
         tabla = tabla.sort_values(by=["ENSAYO", "CODIGO", "NOMBRE"], na_position="last").reset_index(drop=True)
 
@@ -2660,7 +2661,7 @@ if seccion_activa == "Citas ojos":
         tabla["ESTADO"] = tabla.apply(_estado_fila, axis=1)
         tabla = tabla.set_index("VISITA_ID")
 
-        st.caption("Edición directa en la tabla. Solo aparece 'PENDIENTE DE CITA' cuando hay fecha de evaluación.")
+        st.caption("Edición directa en la tabla. Marca 'REALIZADO' y guarda para pasar la fecha actual a 'FECHAS PREVIAS'.")
         editada = st.data_editor(
             tabla,
             key="citas_ojos_editor",
@@ -2680,6 +2681,7 @@ if seccion_activa == "Citas ojos":
                 "AGENDA HOSPITALARIA": st.column_config.TextColumn("AGENDA HOSPITALARIA"),
                 "FECHA EVALUACION": st.column_config.DateColumn("FECHA EVALUACION", format="DD/MM/YYYY"),
                 "RESULTADO": st.column_config.TextColumn("RESULTADO"),
+                "REALIZADO": st.column_config.CheckboxColumn("REALIZADO"),
             },
         )
 
@@ -2702,6 +2704,7 @@ if seccion_activa == "Citas ojos":
                 resultado_nueva = str(fila_nueva.get("RESULTADO") or "").strip()
                 fecha_nueva_val = fila_nueva.get("FECHA EVALUACION")
                 fecha_nueva = "" if pd.isna(fecha_nueva_val) else str(fecha_nueva_val)
+                realizado_nuevo = bool(fila_nueva.get("REALIZADO"))
 
                 sede_orig = str(fila_orig.get("SEDE") or "").strip().lower()
                 agenda_orig = str(fila_orig.get("AGENDA HOSPITALARIA") or "").strip()
@@ -2709,17 +2712,20 @@ if seccion_activa == "Citas ojos":
                 fecha_orig_val = fila_orig.get("FECHA EVALUACION")
                 fecha_orig = "" if pd.isna(fecha_orig_val) else str(fecha_orig_val)
 
+                # Si se marca como realizado, movemos la fecha actual a historial y limpiamos fecha activa.
+                fecha_guardar = "" if realizado_nuevo else fecha_nueva
+
                 if (
                     sede_nueva != sede_orig
                     or agenda_nueva != agenda_orig
                     or resultado_nueva != resultado_orig
-                    or fecha_nueva != fecha_orig
+                    or fecha_guardar != fecha_orig
                 ):
                     guardar_revision_ocular(
                         int(visita_id),
                         sede_nueva,
                         agenda_nueva,
-                        fecha_nueva,
+                        fecha_guardar,
                         resultado_nueva,
                     )
                     cambios += 1
