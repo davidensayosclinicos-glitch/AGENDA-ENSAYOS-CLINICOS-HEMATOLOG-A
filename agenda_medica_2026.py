@@ -2646,6 +2646,26 @@ if seccion_activa == "Citas ojos":
             st.caption("Puedes crear un paciente en 'Fuera de Ensayo' con el formulario superior.")
             st.stop()
 
+        # Dejamos una sola fila por paciente en Citas ojos (la visita mas reciente),
+        # deduplicando por codigo/nombre sin depender del ensayo.
+        df_visitas["_fecha_dt"] = pd.to_datetime(df_visitas["fecha"], errors="coerce")
+
+        def _clave_paciente_ojos(row):
+            codigo_norm = normalizar_clave_paciente(row.get("codigo"))
+            if codigo_norm:
+                return f"codigo|{codigo_norm}"
+            nombre_norm = normalizar_clave_paciente(row.get("nombre"))
+            if nombre_norm:
+                return f"nombre|{nombre_norm}"
+            return ""
+
+        df_visitas["_clave_paciente"] = df_visitas.apply(_clave_paciente_ojos, axis=1)
+        df_visitas = df_visitas.sort_values(by=["_fecha_dt", "id"], ascending=[False, False])
+        con_clave = df_visitas[df_visitas["_clave_paciente"].astype(str).str.strip() != ""]
+        sin_clave = df_visitas[df_visitas["_clave_paciente"].astype(str).str.strip() == ""]
+        con_clave = con_clave.drop_duplicates(subset=["_clave_paciente"], keep="first")
+        df_visitas = pd.concat([con_clave, sin_clave], ignore_index=True)
+
         df_rev = get_revisiones_oculares_df()
         base = df_visitas.copy()
         base = base.merge(df_rev, how="left", left_on="id", right_on="visita_id")
