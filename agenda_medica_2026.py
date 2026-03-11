@@ -1868,7 +1868,6 @@ st.sidebar.markdown("### 📅 Agenda de Pacientes - Ensayos Clínicos 2026")
 
 secciones_principales = [
     "Agenda",
-    "Prot. enfermeria",
     "Prot. ensayo",
     "Ficha paciente",
     "Check list",
@@ -1885,22 +1884,6 @@ if ensayos_con_adendas:
     st.sidebar.caption(f"{len(ensayos_con_adendas)} ensayo(s)")
     for ensayo_p in ensayos_con_adendas:
         st.sidebar.markdown(f"• {ensayo_p}")
-
-if seccion_activa == "Prot. enfermeria":
-    st.subheader("📄 Protocolos de Enfermería")
-    col_list, col_view = st.columns([1, 1])
-    with col_list:
-        pdfs = listar_pdfs(PDF_DIR)
-        st.caption(f"Carpeta: {PDF_DIR}")
-        if not pdfs:
-            st.warning("No se encontraron PDFs en la carpeta configurada.")
-            pdf_seleccionado = None
-        else:
-            pdf_seleccionado = st.selectbox("Selecciona un PDF", pdfs, key="pdf_enfermeria")
-    with col_view:
-        if pdf_seleccionado:
-            ruta_pdf = os.path.join(PDF_DIR, pdf_seleccionado)
-            render_pdf_viewer(ruta_pdf)
 
 if seccion_activa == "Prot. ensayo":
     st.subheader("📄 Protocolos de Ensayo")
