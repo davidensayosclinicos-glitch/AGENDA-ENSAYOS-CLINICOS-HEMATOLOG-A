@@ -2538,140 +2538,106 @@ if seccion_activa == "Citas ojos":
     if df_visitas.empty:
         st.info("No hay visitas registradas.")
     else:
-        df_visitas = df_visitas.copy()
-        df_visitas["ensayo"] = df_visitas["ensayo"].fillna("").astype(str)
-        ensayos = sorted([e for e in df_visitas["ensayo"].unique() if e.strip()])
+        df_rev = get_revisiones_oculares_df()
+        base = df_visitas.copy()
+        base = base.merge(df_rev, how="left", left_on="id", right_on="visita_id")
 
-        ensayo_sel = st.selectbox("Ensayo", options=ensayos if ensayos else [""], key="ojos_ensayo")
-        if not ensayo_sel:
-            st.info("No hay ensayos disponibles.")
-        else:
-            df_ensayo = df_visitas[df_visitas["ensayo"].astype(str) == ensayo_sel].copy()
-            if df_ensayo.empty:
-                st.info("No hay visitas en este ensayo.")
-            else:
-                opciones_pac = []
-                mapa_pac = {}
-                for _, row in df_ensayo.iterrows():
-                    codigo = "" if pd.isna(row.get("codigo")) else str(row.get("codigo"))
-                    nombre = "" if pd.isna(row.get("nombre")) else str(row.get("nombre"))
-                    etiqueta = f"{codigo} | {nombre}".strip(" |")
-                    if etiqueta not in mapa_pac:
-                        mapa_pac[etiqueta] = {
-                            "codigo": codigo,
-                            "nombre": nombre,
-                        }
-                        opciones_pac.append(etiqueta)
+        def valor_o_pendiente(valor):
+            txt = "" if pd.isna(valor) else str(valor).strip()
+            return txt if txt else "PENDIENTE AGENDAR"
 
-                paciente_sel = st.selectbox("Paciente", options=opciones_pac, key="ojos_paciente")
-                datos_pac = mapa_pac.get(paciente_sel, {})
-                codigo_sel = datos_pac.get("codigo", "")
-                nombre_sel = datos_pac.get("nombre", "")
+        base["VISITA (FECHA)"] = base["fecha"].apply(formatear_fecha_visita)
+        base["CODIGO"] = base["codigo"].fillna("")
+        base["NOMBRE"] = base["nombre"].fillna("")
+        base["ENSAYO"] = base["ensayo"].fillna("")
+        base["CICLO"] = base["ciclo"].fillna("")
+        base["REVISION OCULAR (SEDE)"] = base["sede"].apply(valor_o_pendiente)
+        base["AGENDA HOSPITALARIA (OCULAR)"] = base["agenda_hospitalaria"].apply(valor_o_pendiente)
+        base["REVISION OCULAR (FECHA)"] = base["fecha_evaluacion"].apply(
+            lambda v: formatear_fecha_visita(v) if str(v or "").strip() else "PENDIENTE AGENDAR"
+        )
+        base["RESULTADO OCULAR"] = base["resultado"].apply(valor_o_pendiente)
 
-                df_pac_visitas = df_ensayo.copy()
-                df_pac_visitas["_codigo_norm"] = df_pac_visitas["codigo"].fillna("").astype(str).apply(normalizar_clave_paciente)
-                df_pac_visitas["_nombre_norm"] = df_pac_visitas["nombre"].fillna("").astype(str).apply(normalizar_clave_paciente)
-                codigo_norm = normalizar_clave_paciente(codigo_sel)
-                nombre_norm = normalizar_clave_paciente(nombre_sel)
+        st.caption("Si falta cualquier campo ocular, se muestra 'PENDIENTE AGENDAR'.")
+        st.dataframe(
+            base[
+                [
+                    "VISITA (FECHA)",
+                    "CODIGO",
+                    "NOMBRE",
+                    "ENSAYO",
+                    "CICLO",
+                    "REVISION OCULAR (SEDE)",
+                    "AGENDA HOSPITALARIA (OCULAR)",
+                    "REVISION OCULAR (FECHA)",
+                    "RESULTADO OCULAR",
+                ]
+            ],
+            use_container_width=True,
+        )
 
-                if codigo_norm:
-                    df_pac_visitas = df_pac_visitas[df_pac_visitas["_codigo_norm"] == codigo_norm]
-                elif nombre_norm:
-                    df_pac_visitas = df_pac_visitas[df_pac_visitas["_nombre_norm"] == nombre_norm]
+        st.markdown("### Editar cita de ojos")
+        opciones_editar = []
+        mapa_editar = {}
+        for _, row in base.sort_values(by=["ensayo", "codigo", "fecha"], na_position="last").iterrows():
+            visita_id = int(row["id"])
+            etiqueta = (
+                f"{formatear_fecha_visita(row.get('fecha'))} | "
+                f"{str(row.get('codigo') or '').strip()} | "
+                f"{str(row.get('nombre') or '').strip()} | "
+                f"{str(row.get('ensayo') or '').strip()}"
+            ).strip(" |")
+            opciones_editar.append(etiqueta)
+            mapa_editar[etiqueta] = visita_id
 
-                df_pac_visitas = df_pac_visitas.copy()
-                df_pac_visitas["_fecha_obj"] = df_pac_visitas["fecha"].apply(parse_fecha_iso)
-                df_pac_visitas = df_pac_visitas.sort_values("_fecha_obj", ascending=False)
+        if opciones_editar:
+            visita_edit_sel = st.selectbox("Selecciona la fila a editar", options=opciones_editar, key="ojos_editar_fila")
+            visita_id_edit = mapa_editar.get(visita_edit_sel)
+            rev_edit = get_revision_ocular(visita_id_edit)
 
-                opciones_visita = []
-                mapa_visita = {}
-                for _, row in df_pac_visitas.iterrows():
-                    visita_id = int(row["id"])
-                    fecha_txt = formatear_fecha_visita(row.get("fecha"))
-                    ciclo_txt = "" if pd.isna(row.get("ciclo")) else str(row.get("ciclo"))
-                    etiqueta = f"{fecha_txt} | {ciclo_txt}".strip(" |")
-                    opciones_visita.append(etiqueta)
-                    mapa_visita[etiqueta] = visita_id
+            sedes_disponibles = ["cabueñes", "puerta de la villa", "pumarin"]
+            sede_actual = str(rev_edit.get("sede") or "").strip().lower()
+            sede_index = sedes_disponibles.index(sede_actual) if sede_actual in sedes_disponibles else 0
 
-                if not opciones_visita:
-                    st.info("No hay visitas para este paciente.")
-                else:
-                    visita_sel = st.selectbox("Visita", options=opciones_visita, key="ojos_visita")
-                    visita_id = mapa_visita.get(visita_sel)
+            fecha_eval_default = parse_fecha_iso(rev_edit.get("fecha_evaluacion"))
+            if fecha_eval_default is None:
+                fila_visita = base[base["id"] == visita_id_edit]
+                fecha_base = fila_visita.iloc[0]["fecha"] if not fila_visita.empty else ""
+                fecha_eval_default = parse_fecha_iso(fecha_base) or fecha_hoy_local()
 
-                    rev = get_revision_ocular(visita_id)
-                    sedes_disponibles = ["cabueñes", "puerta de la villa", "pumarin"]
-                    sede_actual = str(rev.get("sede") or "").strip().lower()
-                    sede_index = sedes_disponibles.index(sede_actual) if sede_actual in sedes_disponibles else 0
+            with st.form(f"form_editar_ojos_{visita_id_edit}"):
+                tab_campos, tab_texto = st.tabs(["Campos", "Texto libre"])
+                with tab_campos:
+                    sede_sel = st.selectbox(
+                        "Dónde",
+                        options=sedes_disponibles,
+                        index=sede_index,
+                        format_func=lambda v: v.title(),
+                    )
+                    fecha_eval = st.date_input("Fecha de la evaluación", value=fecha_eval_default)
+                with tab_texto:
+                    agenda_hospitalaria = st.text_area(
+                        "Agenda hospitalaria",
+                        value=rev_edit.get("agenda_hospitalaria", ""),
+                        height=90,
+                    )
+                    resultado_eval = st.text_area(
+                        "Resultado",
+                        value=rev_edit.get("resultado", ""),
+                        height=90,
+                    )
 
-                    fecha_eval_default = parse_fecha_iso(rev.get("fecha_evaluacion"))
-                    if fecha_eval_default is None:
-                        fila_visita = df_pac_visitas[df_pac_visitas["id"] == visita_id]
-                        fecha_base = fila_visita.iloc[0]["fecha"] if not fila_visita.empty else ""
-                        fecha_eval_default = parse_fecha_iso(fecha_base) or fecha_hoy_local()
-
-                    with st.form(f"form_citas_ojos_{visita_id}"):
-                        sede_sel = st.selectbox(
-                            "Dónde",
-                            options=sedes_disponibles,
-                            index=sede_index,
-                            format_func=lambda v: v.title(),
-                        )
-                        agenda_hospitalaria = st.text_area(
-                            "Agenda hospitalaria (texto libre)",
-                            value=rev.get("agenda_hospitalaria", ""),
-                            height=100,
-                        )
-                        fecha_eval = st.date_input(
-                            "Fecha de la evaluación",
-                            value=fecha_eval_default,
-                        )
-                        resultado_eval = st.text_area(
-                            "Resultado",
-                            value=rev.get("resultado", ""),
-                            height=100,
-                        )
-                        guardar_ojos = st.form_submit_button("Guardar cita de ojos", type="primary")
-                        if guardar_ojos:
-                            guardar_revision_ocular(
-                                visita_id,
-                                sede_sel,
-                                agenda_hospitalaria,
-                                fecha_eval.isoformat(),
-                                resultado_eval,
-                            )
-                            st.success("Cita de ojos guardada.")
-                            st.rerun()
-
-                    st.markdown("### Historial ocular del paciente")
-                    df_rev = get_revisiones_oculares_df()
-                    if df_rev.empty:
-                        st.info("Sin historial ocular aún.")
-                    else:
-                        base_hist = df_pac_visitas.merge(
-                            df_rev,
-                            how="left",
-                            left_on="id",
-                            right_on="visita_id",
-                        )
-                        base_hist["VISITA (FECHA)"] = base_hist["fecha"].apply(formatear_fecha_visita)
-                        base_hist["REVISION OCULAR (FECHA)"] = base_hist["fecha_evaluacion"].apply(formatear_fecha_visita)
-                        base_hist["REVISION OCULAR (SEDE)"] = base_hist["sede"].fillna("")
-                        base_hist["AGENDA HOSPITALARIA (OCULAR)"] = base_hist["agenda_hospitalaria"].fillna("")
-                        base_hist["RESULTADO OCULAR"] = base_hist["resultado"].fillna("")
-
-                        st.dataframe(
-                            base_hist[
-                                [
-                                    "VISITA (FECHA)",
-                                    "REVISION OCULAR (SEDE)",
-                                    "AGENDA HOSPITALARIA (OCULAR)",
-                                    "REVISION OCULAR (FECHA)",
-                                    "RESULTADO OCULAR",
-                                ]
-                            ],
-                            use_container_width=True,
-                        )
+                guardar_ojos = st.form_submit_button("Guardar cambios", type="primary")
+                if guardar_ojos:
+                    guardar_revision_ocular(
+                        visita_id_edit,
+                        sede_sel,
+                        agenda_hospitalaria,
+                        fecha_eval.isoformat(),
+                        resultado_eval,
+                    )
+                    st.success("Cita de ojos actualizada.")
+                    st.rerun()
 
 if seccion_activa == "Check list":
     st.subheader("✅ Check List por ensayo")
