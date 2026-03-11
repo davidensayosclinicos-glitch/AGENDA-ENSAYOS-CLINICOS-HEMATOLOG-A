@@ -2571,7 +2571,6 @@ if seccion_activa == "Citas ojos":
                 col_nuevo_1, col_nuevo_2 = st.columns(2)
                 codigo_nuevo = col_nuevo_1.text_input("Código", key="ojos_fuera_codigo")
                 nombre_nuevo = col_nuevo_2.text_input("Nombre", key="ojos_fuera_nombre")
-                ciclo_nuevo = st.text_input("Ciclo", key="ojos_fuera_ciclo")
                 fecha_visita_nueva = st.date_input("Fecha de visita", value=fecha_hoy_local(), key="ojos_fuera_fecha")
                 crear_fuera = st.form_submit_button("Crear paciente Fuera de Ensayo", type="primary")
                 if crear_fuera:
@@ -2582,7 +2581,7 @@ if seccion_activa == "Citas ojos":
                             "nombre": str(nombre_nuevo or "").strip(),
                             "codigo": str(codigo_nuevo or "").strip(),
                             "ensayo": "Fuera de Ensayo",
-                            "ciclo": str(ciclo_nuevo or "").strip(),
+                            "ciclo": "",
                             "kits": "",
                             "tablet": False,
                             "medula": False,
@@ -2610,7 +2609,6 @@ if seccion_activa == "Citas ojos":
         tabla["CODIGO"] = base["codigo"].fillna("").astype(str)
         tabla["NOMBRE"] = base["nombre"].fillna("").astype(str)
         tabla["ENSAYO"] = base["ensayo"].apply(_normalizar_ensayo_ojos)
-        tabla["CICLO"] = base["ciclo"].fillna("").astype(str)
         tabla["SEDE"] = base["sede"].fillna("").astype(str)
         tabla["AGENDA HOSPITALARIA"] = base["agenda_hospitalaria"].fillna("").astype(str)
         tabla["FECHA EVALUACION"] = pd.to_datetime(base["fecha_evaluacion"], errors="coerce").dt.date
@@ -2632,7 +2630,7 @@ if seccion_activa == "Citas ojos":
             key="citas_ojos_editor",
             hide_index=True,
             use_container_width=True,
-            disabled=["CODIGO", "NOMBRE", "CICLO", "ESTADO"],
+            disabled=["CODIGO", "NOMBRE", "ESTADO"],
             column_config={
                 "ENSAYO": st.column_config.SelectboxColumn(
                     "ENSAYO",
