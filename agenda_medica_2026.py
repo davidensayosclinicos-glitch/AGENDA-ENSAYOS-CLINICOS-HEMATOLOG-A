@@ -2653,14 +2653,14 @@ if seccion_activa == "Citas ojos":
         tabla = tabla.sort_values(by=["ENSAYO", "CODIGO", "NOMBRE"], na_position="last").reset_index(drop=True)
 
         def _estado_fila(row):
-            if pd.isna(row.get("FECHA EVALUACION")):
+            if pd.notna(row.get("FECHA EVALUACION")):
                 return "PENDIENTE DE CITA"
             return ""
 
         tabla["ESTADO"] = tabla.apply(_estado_fila, axis=1)
         tabla = tabla.set_index("VISITA_ID")
 
-        st.caption("Edición directa en la tabla. Solo aparece 'PENDIENTE DE CITA' cuando falta la fecha de evaluación.")
+        st.caption("Edición directa en la tabla. Solo aparece 'PENDIENTE DE CITA' cuando hay fecha de evaluación.")
         editada = st.data_editor(
             tabla,
             key="citas_ojos_editor",
