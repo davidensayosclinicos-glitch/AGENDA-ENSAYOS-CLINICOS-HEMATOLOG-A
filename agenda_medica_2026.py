@@ -830,6 +830,7 @@ def init_db():
                 sede TEXT,
                 agenda_hospitalaria TEXT,
                 fecha_evaluacion TEXT,
+                fechas_previas TEXT,
                 resultado TEXT,
                 FOREIGN KEY(visita_id) REFERENCES visitas(id)
             )
@@ -902,12 +903,14 @@ def init_db():
         c.execute("ALTER TABLE revision_ocular ADD COLUMN IF NOT EXISTS sede TEXT")
         c.execute("ALTER TABLE revision_ocular ADD COLUMN IF NOT EXISTS agenda_hospitalaria TEXT")
         c.execute("ALTER TABLE revision_ocular ADD COLUMN IF NOT EXISTS fecha_evaluacion TEXT")
+        c.execute("ALTER TABLE revision_ocular ADD COLUMN IF NOT EXISTS fechas_previas TEXT")
         c.execute("ALTER TABLE revision_ocular ADD COLUMN IF NOT EXISTS resultado TEXT")
     else:
         for col_sql in (
             "ALTER TABLE revision_ocular ADD COLUMN sede TEXT",
             "ALTER TABLE revision_ocular ADD COLUMN agenda_hospitalaria TEXT",
             "ALTER TABLE revision_ocular ADD COLUMN fecha_evaluacion TEXT",
+            "ALTER TABLE revision_ocular ADD COLUMN fechas_previas TEXT",
             "ALTER TABLE revision_ocular ADD COLUMN resultado TEXT",
         ):
             try:
@@ -1442,24 +1445,52 @@ def guardar_revision_ocular(visita_id, sede, agenda_hospitalaria, fecha_evaluaci
 
     conn = connect_db()
     c = conn.cursor()
+
+    c.execute(
+        """
+        SELECT fecha_evaluacion, fecha_cita, fechas_previas
+        FROM revision_ocular
+        WHERE visita_id = ?
+        """,
+        (visita_id,)
+    )
+    previa = c.fetchone()
+
+    historial_fechas = []
+    if previa:
+        fechas_previas_raw = "" if previa[2] is None else str(previa[2]).strip()
+        if fechas_previas_raw:
+            historial_fechas = [f.strip() for f in fechas_previas_raw.split(" | ") if f.strip()]
+
+        fecha_actual = ""
+        if previa[0] is not None and str(previa[0]).strip():
+            fecha_actual = str(previa[0]).strip()
+        elif previa[1] is not None and str(previa[1]).strip():
+            fecha_actual = str(previa[1]).strip()
+
+        if fecha_actual and fecha_actual != fecha_evaluacion and fecha_actual not in historial_fechas:
+            historial_fechas.append(fecha_actual)
+
+    fechas_previas_txt = " | ".join(historial_fechas)
+
     c.execute(
         """
         UPDATE revision_ocular
-        SET sede = ?, agenda_hospitalaria = ?, fecha_evaluacion = ?, resultado = ?,
+        SET sede = ?, agenda_hospitalaria = ?, fecha_evaluacion = ?, fechas_previas = ?, resultado = ?,
             fecha_cita = ?, kva = ?
         WHERE visita_id = ?
         """,
-        (sede, agenda_hospitalaria, fecha_evaluacion, resultado, fecha_evaluacion, kva, visita_id)
+        (sede, agenda_hospitalaria, fecha_evaluacion, fechas_previas_txt, resultado, fecha_evaluacion, kva, visita_id)
     )
     if c.rowcount == 0:
         c.execute(
             """
             INSERT INTO revision_ocular (
-                visita_id, sede, agenda_hospitalaria, fecha_evaluacion, resultado, fecha_cita, kva
+                visita_id, sede, agenda_hospitalaria, fecha_evaluacion, fechas_previas, resultado, fecha_cita, kva
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (visita_id, sede, agenda_hospitalaria, fecha_evaluacion, resultado, fecha_evaluacion, kva)
+            (visita_id, sede, agenda_hospitalaria, fecha_evaluacion, "", resultado, fecha_evaluacion, kva)
         )
     conn.commit()
     conn.close()
@@ -1471,7 +1502,7 @@ def get_revision_ocular(visita_id):
     c = conn.cursor()
     c.execute(
         """
-        SELECT sede, agenda_hospitalaria, fecha_evaluacion, resultado, fecha_cita, kva
+        SELECT sede, agenda_hospitalaria, fecha_evaluacion, fechas_previas, resultado, fecha_cita, kva
         FROM revision_ocular
         WHERE visita_id=?
         """,
@@ -1487,7 +1518,7 @@ def get_revision_ocular(visita_id):
             "resultado": "",
         }
 
-    sede, agenda_hospitalaria, fecha_evaluacion, resultado, fecha_cita, kva = row
+    sede, agenda_hospitalaria, fecha_evaluacion, fechas_previas, resultado, fecha_cita, kva = row
     fecha_eval_final = fecha_evaluacion if fecha_evaluacion else (fecha_cita or "")
     if resultado:
         resultado_final = str(resultado)
@@ -1500,6 +1531,7 @@ def get_revision_ocular(visita_id):
         "sede": "" if sede is None else str(sede),
         "agenda_hospitalaria": "" if agenda_hospitalaria is None else str(agenda_hospitalaria),
         "fecha_evaluacion": "" if fecha_eval_final is None else str(fecha_eval_final),
+        "fechas_previas": "" if fechas_previas is None else str(fechas_previas),
         "resultado": resultado_final,
     }
 
@@ -1510,7 +1542,7 @@ def get_revisiones_oculares_df():
     try:
         df = pd.read_sql(
             """
-            SELECT visita_id, sede, agenda_hospitalaria, fecha_evaluacion, resultado, fecha_cita, kva
+            SELECT visita_id, sede, agenda_hospitalaria, fecha_evaluacion, fechas_previas, resultado, fecha_cita, kva
             FROM revision_ocular
             """,
             conn
@@ -1522,6 +1554,7 @@ def get_revisiones_oculares_df():
                 "sede",
                 "agenda_hospitalaria",
                 "fecha_evaluacion",
+                "fechas_previas",
                 "resultado",
                 "fecha_cita",
                 "kva",
@@ -1541,6 +1574,8 @@ def get_revisiones_oculares_df():
         df["sede"] = None
     if "agenda_hospitalaria" not in df.columns:
         df["agenda_hospitalaria"] = None
+    if "fechas_previas" not in df.columns:
+        df["fechas_previas"] = None
 
     df["fecha_evaluacion"] = df["fecha_evaluacion"].fillna(df["fecha_cita"])
     df["resultado"] = df.apply(
@@ -2612,6 +2647,7 @@ if seccion_activa == "Citas ojos":
         tabla["SEDE"] = base["sede"].fillna("").astype(str)
         tabla["AGENDA HOSPITALARIA"] = base["agenda_hospitalaria"].fillna("").astype(str)
         tabla["FECHA EVALUACION"] = pd.to_datetime(base["fecha_evaluacion"], errors="coerce").dt.date
+        tabla["FECHAS PREVIAS"] = base["fechas_previas"].fillna("").astype(str)
         tabla["RESULTADO"] = base["resultado"].fillna("").astype(str)
 
         tabla = tabla.sort_values(by=["ENSAYO", "CODIGO", "NOMBRE"], na_position="last").reset_index(drop=True)
@@ -2630,7 +2666,7 @@ if seccion_activa == "Citas ojos":
             key="citas_ojos_editor",
             hide_index=True,
             use_container_width=True,
-            disabled=["CODIGO", "NOMBRE", "ESTADO"],
+            disabled=["CODIGO", "NOMBRE", "FECHAS PREVIAS", "ESTADO"],
             column_config={
                 "ENSAYO": st.column_config.SelectboxColumn(
                     "ENSAYO",
