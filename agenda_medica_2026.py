@@ -1568,6 +1568,34 @@ def invalidar_cache_lecturas():
     get_revision_ocular.clear()
     get_revisiones_oculares_df.clear()
 
+
+ENSAYOS_OJOS_PERMITIDOS = ["DREAMM 10", "DREAMM-8", "Fuera de Ensayo"]
+
+
+def _normalizar_ensayo_ojos(valor):
+    txt = normalizar_ensayo(valor)
+    base = re.sub(r"[^A-Z0-9]", "", str(txt or "").upper())
+    if base == "DREAMM10":
+        return "DREAMM 10"
+    if base == "DREAMM8":
+        return "DREAMM-8"
+    if base == "FUERADEENSAYO":
+        return "Fuera de Ensayo"
+    return txt
+
+
+def actualizar_ensayo_visita(id_visita, nuevo_ensayo):
+    nuevo_ensayo = _normalizar_ensayo_ojos(nuevo_ensayo)
+    conn = connect_db()
+    c = conn.cursor()
+    c.execute("UPDATE visitas SET ensayo = ? WHERE id = ?", (nuevo_ensayo, id_visita))
+    sincronizar_pacientes_desde_visitas(c)
+    unificar_pacientes_duplicados(c)
+    eliminar_ensayos_sin_pacientes(c)
+    conn.commit()
+    conn.close()
+    invalidar_cache_lecturas()
+
 def render_print_dialog(texto, titulo):
         texto_html = html.escape(texto).replace("\n", "<br>")
         plantilla = f"""
@@ -2538,106 +2566,117 @@ if seccion_activa == "Citas ojos":
     if df_visitas.empty:
         st.info("No hay visitas registradas.")
     else:
+        df_visitas = df_visitas.copy()
+        df_visitas["ensayo"] = df_visitas["ensayo"].apply(_normalizar_ensayo_ojos)
+        df_visitas = df_visitas[df_visitas["ensayo"].isin(ENSAYOS_OJOS_PERMITIDOS)].copy()
+        if df_visitas.empty:
+            st.info("No hay pacientes de DREAMM 10, DREAMM-8 o Fuera de Ensayo.")
+            st.caption("Puedes asignar una visita a 'Fuera de Ensayo' desde esta misma tabla cuando haya datos visibles.")
+            st.stop()
+
         df_rev = get_revisiones_oculares_df()
         base = df_visitas.copy()
         base = base.merge(df_rev, how="left", left_on="id", right_on="visita_id")
 
-        def valor_o_pendiente(valor):
-            txt = "" if pd.isna(valor) else str(valor).strip()
-            return txt if txt else "PENDIENTE AGENDAR"
+        tabla = pd.DataFrame()
+        tabla["VISITA_ID"] = base["id"].astype(int)
+        tabla["VISITA (FECHA)"] = base["fecha"].apply(formatear_fecha_visita)
+        tabla["CODIGO"] = base["codigo"].fillna("").astype(str)
+        tabla["NOMBRE"] = base["nombre"].fillna("").astype(str)
+        tabla["ENSAYO"] = base["ensayo"].apply(_normalizar_ensayo_ojos)
+        tabla["CICLO"] = base["ciclo"].fillna("").astype(str)
+        tabla["SEDE"] = base["sede"].fillna("").astype(str)
+        tabla["AGENDA HOSPITALARIA"] = base["agenda_hospitalaria"].fillna("").astype(str)
+        tabla["FECHA EVALUACION"] = pd.to_datetime(base["fecha_evaluacion"], errors="coerce").dt.date
+        tabla["RESULTADO"] = base["resultado"].fillna("").astype(str)
 
-        base["VISITA (FECHA)"] = base["fecha"].apply(formatear_fecha_visita)
-        base["CODIGO"] = base["codigo"].fillna("")
-        base["NOMBRE"] = base["nombre"].fillna("")
-        base["ENSAYO"] = base["ensayo"].fillna("")
-        base["CICLO"] = base["ciclo"].fillna("")
-        base["REVISION OCULAR (SEDE)"] = base["sede"].apply(valor_o_pendiente)
-        base["AGENDA HOSPITALARIA (OCULAR)"] = base["agenda_hospitalaria"].apply(valor_o_pendiente)
-        base["REVISION OCULAR (FECHA)"] = base["fecha_evaluacion"].apply(
-            lambda v: formatear_fecha_visita(v) if str(v or "").strip() else "PENDIENTE AGENDAR"
-        )
-        base["RESULTADO OCULAR"] = base["resultado"].apply(valor_o_pendiente)
+        tabla = tabla.sort_values(by=["ENSAYO", "CODIGO", "NOMBRE", "VISITA (FECHA)"], na_position="last").reset_index(drop=True)
 
-        st.caption("Si falta cualquier campo ocular, se muestra 'PENDIENTE AGENDAR'.")
-        st.dataframe(
-            base[
-                [
-                    "VISITA (FECHA)",
-                    "CODIGO",
-                    "NOMBRE",
-                    "ENSAYO",
-                    "CICLO",
-                    "REVISION OCULAR (SEDE)",
-                    "AGENDA HOSPITALARIA (OCULAR)",
-                    "REVISION OCULAR (FECHA)",
-                    "RESULTADO OCULAR",
-                ]
-            ],
+        def _estado_fila(row):
+            faltantes = []
+            if not str(row.get("SEDE") or "").strip():
+                faltantes.append("sede")
+            if not str(row.get("AGENDA HOSPITALARIA") or "").strip():
+                faltantes.append("agenda")
+            if pd.isna(row.get("FECHA EVALUACION")):
+                faltantes.append("fecha")
+            if not str(row.get("RESULTADO") or "").strip():
+                faltantes.append("resultado")
+            if faltantes:
+                return "PENDIENTE AGENDAR"
+            return "OK"
+
+        tabla["ESTADO"] = tabla.apply(_estado_fila, axis=1)
+
+        st.caption("Edición directa en la tabla. Si falta algún campo: PENDIENTE AGENDAR.")
+        editada = st.data_editor(
+            tabla,
+            key="citas_ojos_editor",
+            hide_index=True,
             use_container_width=True,
+            disabled=["VISITA_ID", "VISITA (FECHA)", "CODIGO", "NOMBRE", "CICLO", "ESTADO"],
+            column_config={
+                "ENSAYO": st.column_config.SelectboxColumn(
+                    "ENSAYO",
+                    options=ENSAYOS_OJOS_PERMITIDOS,
+                    required=True,
+                ),
+                "SEDE": st.column_config.SelectboxColumn(
+                    "SEDE",
+                    options=["", "cabueñes", "puerta de la villa", "pumarin"],
+                ),
+                "AGENDA HOSPITALARIA": st.column_config.TextColumn("AGENDA HOSPITALARIA"),
+                "FECHA EVALUACION": st.column_config.DateColumn("FECHA EVALUACION", format="DD/MM/YYYY"),
+                "RESULTADO": st.column_config.TextColumn("RESULTADO"),
+            },
         )
 
-        st.markdown("### Editar cita de ojos")
-        opciones_editar = []
-        mapa_editar = {}
-        for _, row in base.sort_values(by=["ensayo", "codigo", "fecha"], na_position="last").iterrows():
-            visita_id = int(row["id"])
-            etiqueta = (
-                f"{formatear_fecha_visita(row.get('fecha'))} | "
-                f"{str(row.get('codigo') or '').strip()} | "
-                f"{str(row.get('nombre') or '').strip()} | "
-                f"{str(row.get('ensayo') or '').strip()}"
-            ).strip(" |")
-            opciones_editar.append(etiqueta)
-            mapa_editar[etiqueta] = visita_id
+        if st.button("Guardar cambios de la tabla", type="primary", key="guardar_tabla_citas_ojos"):
+            cambios = 0
+            original = tabla.set_index("VISITA_ID")
+            nuevo = editada.set_index("VISITA_ID")
 
-        if opciones_editar:
-            visita_edit_sel = st.selectbox("Selecciona la fila a editar", options=opciones_editar, key="ojos_editar_fila")
-            visita_id_edit = mapa_editar.get(visita_edit_sel)
-            rev_edit = get_revision_ocular(visita_id_edit)
+            for visita_id, fila_nueva in nuevo.iterrows():
+                fila_orig = original.loc[visita_id]
 
-            sedes_disponibles = ["cabueñes", "puerta de la villa", "pumarin"]
-            sede_actual = str(rev_edit.get("sede") or "").strip().lower()
-            sede_index = sedes_disponibles.index(sede_actual) if sede_actual in sedes_disponibles else 0
+                ensayo_nuevo = _normalizar_ensayo_ojos(fila_nueva.get("ENSAYO"))
+                ensayo_orig = _normalizar_ensayo_ojos(fila_orig.get("ENSAYO"))
+                if ensayo_nuevo != ensayo_orig:
+                    actualizar_ensayo_visita(int(visita_id), ensayo_nuevo)
+                    cambios += 1
 
-            fecha_eval_default = parse_fecha_iso(rev_edit.get("fecha_evaluacion"))
-            if fecha_eval_default is None:
-                fila_visita = base[base["id"] == visita_id_edit]
-                fecha_base = fila_visita.iloc[0]["fecha"] if not fila_visita.empty else ""
-                fecha_eval_default = parse_fecha_iso(fecha_base) or fecha_hoy_local()
+                sede_nueva = str(fila_nueva.get("SEDE") or "").strip().lower()
+                agenda_nueva = str(fila_nueva.get("AGENDA HOSPITALARIA") or "").strip()
+                resultado_nueva = str(fila_nueva.get("RESULTADO") or "").strip()
+                fecha_nueva_val = fila_nueva.get("FECHA EVALUACION")
+                fecha_nueva = "" if pd.isna(fecha_nueva_val) else str(fecha_nueva_val)
 
-            with st.form(f"form_editar_ojos_{visita_id_edit}"):
-                tab_campos, tab_texto = st.tabs(["Campos", "Texto libre"])
-                with tab_campos:
-                    sede_sel = st.selectbox(
-                        "Dónde",
-                        options=sedes_disponibles,
-                        index=sede_index,
-                        format_func=lambda v: v.title(),
-                    )
-                    fecha_eval = st.date_input("Fecha de la evaluación", value=fecha_eval_default)
-                with tab_texto:
-                    agenda_hospitalaria = st.text_area(
-                        "Agenda hospitalaria",
-                        value=rev_edit.get("agenda_hospitalaria", ""),
-                        height=90,
-                    )
-                    resultado_eval = st.text_area(
-                        "Resultado",
-                        value=rev_edit.get("resultado", ""),
-                        height=90,
-                    )
+                sede_orig = str(fila_orig.get("SEDE") or "").strip().lower()
+                agenda_orig = str(fila_orig.get("AGENDA HOSPITALARIA") or "").strip()
+                resultado_orig = str(fila_orig.get("RESULTADO") or "").strip()
+                fecha_orig_val = fila_orig.get("FECHA EVALUACION")
+                fecha_orig = "" if pd.isna(fecha_orig_val) else str(fecha_orig_val)
 
-                guardar_ojos = st.form_submit_button("Guardar cambios", type="primary")
-                if guardar_ojos:
+                if (
+                    sede_nueva != sede_orig
+                    or agenda_nueva != agenda_orig
+                    or resultado_nueva != resultado_orig
+                    or fecha_nueva != fecha_orig
+                ):
                     guardar_revision_ocular(
-                        visita_id_edit,
-                        sede_sel,
-                        agenda_hospitalaria,
-                        fecha_eval.isoformat(),
-                        resultado_eval,
+                        int(visita_id),
+                        sede_nueva,
+                        agenda_nueva,
+                        fecha_nueva,
+                        resultado_nueva,
                     )
-                    st.success("Cita de ojos actualizada.")
-                    st.rerun()
+                    cambios += 1
+
+            if cambios:
+                st.success(f"Cambios guardados: {cambios}")
+                st.rerun()
+            else:
+                st.info("No hay cambios para guardar.")
 
 if seccion_activa == "Check list":
     st.subheader("✅ Check List por ensayo")
