@@ -2580,7 +2580,6 @@ if seccion_activa == "Citas ojos":
 
         tabla = pd.DataFrame()
         tabla["VISITA_ID"] = base["id"].astype(int)
-        tabla["VISITA (FECHA)"] = base["fecha"].apply(formatear_fecha_visita)
         tabla["CODIGO"] = base["codigo"].fillna("").astype(str)
         tabla["NOMBRE"] = base["nombre"].fillna("").astype(str)
         tabla["ENSAYO"] = base["ensayo"].apply(_normalizar_ensayo_ojos)
@@ -2590,31 +2589,23 @@ if seccion_activa == "Citas ojos":
         tabla["FECHA EVALUACION"] = pd.to_datetime(base["fecha_evaluacion"], errors="coerce").dt.date
         tabla["RESULTADO"] = base["resultado"].fillna("").astype(str)
 
-        tabla = tabla.sort_values(by=["ENSAYO", "CODIGO", "NOMBRE", "VISITA (FECHA)"], na_position="last").reset_index(drop=True)
+        tabla = tabla.sort_values(by=["ENSAYO", "CODIGO", "NOMBRE"], na_position="last").reset_index(drop=True)
 
         def _estado_fila(row):
-            faltantes = []
-            if not str(row.get("SEDE") or "").strip():
-                faltantes.append("sede")
-            if not str(row.get("AGENDA HOSPITALARIA") or "").strip():
-                faltantes.append("agenda")
             if pd.isna(row.get("FECHA EVALUACION")):
-                faltantes.append("fecha")
-            if not str(row.get("RESULTADO") or "").strip():
-                faltantes.append("resultado")
-            if faltantes:
-                return "PENDIENTE AGENDAR"
-            return "OK"
+                return "PENDIENTE DE CITA"
+            return ""
 
         tabla["ESTADO"] = tabla.apply(_estado_fila, axis=1)
+        tabla = tabla.set_index("VISITA_ID")
 
-        st.caption("Edición directa en la tabla. Si falta algún campo: PENDIENTE AGENDAR.")
+        st.caption("Edición directa en la tabla. Solo aparece 'PENDIENTE DE CITA' cuando falta la fecha de evaluación.")
         editada = st.data_editor(
             tabla,
             key="citas_ojos_editor",
             hide_index=True,
             use_container_width=True,
-            disabled=["VISITA_ID", "VISITA (FECHA)", "CODIGO", "NOMBRE", "CICLO", "ESTADO"],
+            disabled=["CODIGO", "NOMBRE", "CICLO", "ESTADO"],
             column_config={
                 "ENSAYO": st.column_config.SelectboxColumn(
                     "ENSAYO",
@@ -2633,8 +2624,8 @@ if seccion_activa == "Citas ojos":
 
         if st.button("Guardar cambios de la tabla", type="primary", key="guardar_tabla_citas_ojos"):
             cambios = 0
-            original = tabla.set_index("VISITA_ID")
-            nuevo = editada.set_index("VISITA_ID")
+            original = tabla
+            nuevo = editada
 
             for visita_id, fila_nueva in nuevo.iterrows():
                 fila_orig = original.loc[visita_id]
