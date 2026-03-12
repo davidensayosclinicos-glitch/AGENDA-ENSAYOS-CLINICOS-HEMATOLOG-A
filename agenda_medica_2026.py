@@ -2136,6 +2136,13 @@ def extraer_registros_visitas_dreamm10(df, nombre_hoja=""):
     for _, row in trabajo.iterrows():
         codigo = "" if col_codigo is None else str(row.get(col_codigo, "")).strip()
         nombre = "" if col_nombre is None else str(row.get(col_nombre, "")).strip()
+
+        # Regla solicitada: cada pestaña representa un paciente.
+        # Si el Excel no trae nombre/código explícito en columnas, usamos la pestaña.
+        if (not nombre or nombre.lower() == "nan") and nombre_hoja:
+            nombre = str(nombre_hoja).strip()
+        if (not codigo or codigo.lower() == "nan") and nombre_hoja:
+            codigo = str(nombre_hoja).strip()
         ciclo = ""
         if col_c is not None:
             ciclo = str(row.get(col_c, "")).strip()
@@ -2157,6 +2164,8 @@ def extraer_registros_visitas_dreamm10(df, nombre_hoja=""):
         if valor_vmenos and valor_vmenos.lower() != "nan":
             partes_comentario.append(f"Ventana -: {valor_vmenos}")
         comentario = " | ".join(partes_comentario)
+        if nombre_hoja:
+            comentario = (f"Paciente (pestaña): {nombre_hoja}" + (" | " + comentario if comentario else ""))
 
         registros.append(
             {
@@ -2182,6 +2191,7 @@ def extraer_registros_visitas_dreamm10(df, nombre_hoja=""):
             nombre_a_iniciales(r.get("nombre")),
             normalizar_texto_campo(r.get("ciclo")),
             normalizar_texto_campo(r.get("comentarios")),
+            normalizar_texto_campo(r.get("origen_hoja")),
         )
         dedupe[clave] = r
     return list(dedupe.values())
@@ -3328,6 +3338,7 @@ if seccion_activa == "Calendario DREAMM10":
         else:
             nombres_hojas = list(hojas_excel.keys())
             hojas_mostrar = nombres_hojas
+            st.caption(f"Procesando automáticamente todas las pestañas del Excel como pacientes: {len(hojas_mostrar)}")
 
             eventos_dreamm10 = []
             registros_dreamm10 = []
