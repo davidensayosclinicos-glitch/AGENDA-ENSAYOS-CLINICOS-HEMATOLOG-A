@@ -2420,6 +2420,7 @@ def construir_eventos_desde_registros_dreamm10(registros):
 
         eventos.append(
             {
+                "id": str(idx),
                 "title": titulo,
                 "start": fecha,
                 "allDay": True,
@@ -3489,6 +3490,10 @@ if seccion_activa == "Calendario DREAMM10":
                     continue
                 registros_dreamm10.extend(extraer_registros_visitas_dreamm10(df_hoja, nombre_hoja=hoja))
 
+            st.session_state["dreamm10_registros_map"] = {
+                str(i): r for i, r in enumerate(registros_dreamm10)
+            }
+
             eventos_dreamm10 = construir_eventos_desde_registros_dreamm10(registros_dreamm10)
 
             if registros_dreamm10:
@@ -3572,7 +3577,45 @@ if seccion_activa == "Calendario DREAMM10":
                 if estado_cal_dreamm10 and estado_cal_dreamm10.get("eventClick"):
                     evento_click = estado_cal_dreamm10["eventClick"].get("event", {})
                     props_click = evento_click.get("extendedProps", {})
-                    st.session_state["dreamm10_evento_sel"] = props_click
+
+                    registro_idx = props_click.get("registro_idx")
+                    if registro_idx is None:
+                        ev_id = str(evento_click.get("id") or "").strip()
+                        if ev_id:
+                            try:
+                                registro_idx = int(ev_id)
+                            except Exception:
+                                registro_idx = None
+
+                    registro_sel = {}
+                    if registro_idx is not None:
+                        registro_sel = st.session_state.get("dreamm10_registros_map", {}).get(str(registro_idx), {})
+
+                    if not registro_sel:
+                        fecha_evento_fallback = (
+                            evento_click.get("start")
+                            or evento_click.get("startStr")
+                            or ""
+                        )
+                        titulo_fallback = str(evento_click.get("title") or "")
+                        for reg in registros_dreamm10:
+                            if str(reg.get("fecha") or "") != str(fecha_evento_fallback)[:10]:
+                                continue
+                            if str(reg.get("codigo") or "") and str(reg.get("codigo") or "") in titulo_fallback:
+                                registro_sel = reg
+                                break
+
+                    st.session_state["dreamm10_evento_sel"] = {
+                        "paciente": str(registro_sel.get("nombre") or props_click.get("paciente") or ""),
+                        "codigo": str(registro_sel.get("codigo") or props_click.get("codigo") or ""),
+                        "fecha": str(registro_sel.get("fecha") or props_click.get("fecha") or ""),
+                        "week": str(registro_sel.get("w") or props_click.get("week") or ""),
+                        "ciclo": str(registro_sel.get("c") or props_click.get("ciclo") or ""),
+                        "ventana_mas": str(registro_sel.get("ventana_mas") or props_click.get("ventana_mas") or ""),
+                        "ventana_menos": str(registro_sel.get("ventana_menos") or props_click.get("ventana_menos") or ""),
+                        "contenido": str(registro_sel.get("comentarios") or props_click.get("contenido") or ""),
+                        "origen_hoja": str(registro_sel.get("origen_hoja") or props_click.get("origen_hoja") or ""),
+                    }
 
                     fecha_evento = (
                         evento_click.get("start")
