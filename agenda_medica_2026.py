@@ -2291,7 +2291,7 @@ def extraer_registros_visitas_dreamm10(df, nombre_hoja=""):
 
         if usar_tabla_vars:
             valor_w = "" if "week" not in mapa_vars else str(row.get(mapa_vars["week"])).strip()
-            valor_c = "" if "ciclo" not in mapa_vars else _formatear_fecha_es_sin_hora(row.get(mapa_vars["ciclo"]))
+            valor_c = "" if "ciclo" not in mapa_vars else str(row.get(mapa_vars["ciclo"])).strip()
             valor_vmas = "" if "ventana_mas" not in mapa_vars else _formatear_fecha_es_sin_hora(row.get(mapa_vars["ventana_mas"]))
             valor_vmenos = "" if "ventana_menos" not in mapa_vars else _formatear_fecha_es_sin_hora(row.get(mapa_vars["ventana_menos"]))
             valor_dosis = "" if "dosis_lena" not in mapa_vars else _formatear_fecha_es_sin_hora(row.get(mapa_vars["dosis_lena"]))
