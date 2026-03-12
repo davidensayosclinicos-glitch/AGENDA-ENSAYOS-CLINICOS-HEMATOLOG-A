@@ -2069,6 +2069,43 @@ def diagnostico_columnas_fecha(df):
     return pd.DataFrame(filas).sort_values(by="fechas_validas", ascending=False).reset_index(drop=True)
 
 
+def construir_eventos_fallback_todas_fechas(df, nombre_hoja=""):
+    if df.empty:
+        return []
+
+    eventos = []
+    for idx, row in df.iterrows():
+        for col in df.columns:
+            valor = row.get(col)
+            fecha = pd.to_datetime(valor, errors="coerce", dayfirst=True)
+            if pd.isna(fecha):
+                continue
+            titulo = "DREAMM10"
+            if nombre_hoja:
+                titulo = f"{titulo} [{nombre_hoja}]"
+            titulo = f"{titulo} | fila {idx + 1}"
+            eventos.append(
+                {
+                    "title": titulo,
+                    "start": fecha.date().isoformat(),
+                    "allDay": True,
+                    "backgroundColor": "#0ea5e9",
+                    "borderColor": "#0369a1",
+                }
+            )
+
+    dedupe = {}
+    for ev in eventos:
+        clave = f"{ev.get('start','')}|{ev.get('title','')}"
+        dedupe[clave] = ev
+    eventos = list(dedupe.values())
+
+    if len(eventos) > 3000:
+        eventos = eventos[:3000]
+
+    return eventos
+
+
 @st.cache_data(show_spinner=False)
 def extraer_texto_pdf(ruta_pdf):
     if PdfReader is None:
@@ -3094,43 +3131,23 @@ if seccion_activa == "Calendario DREAMM10":
             st.warning("El archivo no contiene hojas con datos legibles.")
         else:
             nombres_hojas = list(hojas_excel.keys())
-            hojas_mostrar = st.multiselect(
-                "Hojas a incluir en el calendario",
-                options=nombres_hojas,
-                default=nombres_hojas,
-                key="dreamm10_hojas_mostrar",
-            )
+            hojas_mostrar = nombres_hojas
 
             eventos_dreamm10 = []
             for hoja in hojas_mostrar:
                 df_hoja = hojas_excel.get(hoja, pd.DataFrame())
                 if df_hoja.empty:
                     continue
-
-                st.markdown(f"**Configuración de hoja:** {hoja}")
-                cols_conf_1, cols_conf_2 = st.columns([1, 1])
-                modo_hoja = cols_conf_1.selectbox(
-                    "Modo de lectura de fechas",
-                    options=["Auto", "Columna fecha", "Encabezados con fecha"],
-                    key=f"dreamm10_modo_{hoja}",
-                )
-
-                mapa_columnas = {str(c): c for c in df_hoja.columns}
-                opciones_columna = ["Auto"] + list(mapa_columnas.keys())
-                col_sel_txt = cols_conf_2.selectbox(
-                    "Columna de fecha (si aplica)",
-                    options=opciones_columna,
-                    key=f"dreamm10_col_fecha_{hoja}",
-                )
-                col_forzada = None if col_sel_txt == "Auto" else mapa_columnas.get(col_sel_txt)
-
                 eventos_hoja = construir_eventos_calendario_dreamm10(
                     df_hoja,
                     nombre_hoja=hoja,
-                    modo_fecha=modo_hoja,
-                    col_fecha_forzada=col_forzada,
+                    modo_fecha="Auto",
+                    col_fecha_forzada=None,
                 )
-                st.caption(f"Eventos detectados en {hoja}: {len(eventos_hoja)}")
+
+                if not eventos_hoja:
+                    eventos_hoja = construir_eventos_fallback_todas_fechas(df_hoja, nombre_hoja=hoja)
+
                 eventos_dreamm10.extend(eventos_hoja)
 
             if not eventos_dreamm10:
