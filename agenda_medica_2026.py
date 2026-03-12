@@ -2113,46 +2113,43 @@ def extraer_registros_visitas_dreamm10(df, nombre_hoja=""):
     col_codigo = _buscar_columna_por_patron(df, [r"codigo", r"id", r"paciente"])
     col_nombre = _buscar_columna_por_patron(df, [r"nombre", r"paciente"])
     col_ciclo = _buscar_columna_por_patron(df, [r"ciclo", r"visit", r"dia", r"día", r"day"])
-    col_fecha = _detectar_columna_fecha(df)
+    col_ventana = _buscar_columna_por_patron(df, [r"ventana", r"window"])
+
+    # Regla solicitada: trasladar las fechas de la columna C del Excel.
+    col_fecha = None
+    if len(df.columns) >= 3:
+        col_fecha = df.columns[2]
+    else:
+        col_fecha = _detectar_columna_fecha(df)
 
     registros = []
+    if col_fecha is None:
+        return registros
 
-    if col_fecha is not None:
-        trabajo = df.copy()
-        trabajo["__fecha__"] = pd.to_datetime(trabajo[col_fecha], errors="coerce", dayfirst=True)
-        trabajo = trabajo[trabajo["__fecha__"].notna()].copy()
+    trabajo = df.copy()
+    trabajo["__fecha__"] = pd.to_datetime(trabajo[col_fecha], errors="coerce", dayfirst=True)
+    trabajo = trabajo[trabajo["__fecha__"].notna()].copy()
 
-        for _, row in trabajo.iterrows():
-            registros.append(
-                {
-                    "fecha": row["__fecha__"].date().isoformat(),
-                    "codigo": "" if col_codigo is None else str(row.get(col_codigo, "")).strip(),
-                    "nombre": "" if col_nombre is None else str(row.get(col_nombre, "")).strip(),
-                    "ensayo": "DREAMM 10",
-                    "ciclo": "" if col_ciclo is None else str(row.get(col_ciclo, "")).strip(),
-                    "origen_hoja": nombre_hoja,
-                }
-            )
+    for _, row in trabajo.iterrows():
+        codigo = "" if col_codigo is None else str(row.get(col_codigo, "")).strip()
+        nombre = "" if col_nombre is None else str(row.get(col_nombre, "")).strip()
+        ciclo = "" if col_ciclo is None else str(row.get(col_ciclo, "")).strip()
+        ventana = "" if col_ventana is None else str(row.get(col_ventana, "")).strip()
+        comentario = ""
+        if ventana and ventana.lower() != "nan":
+            comentario = f"Ventana: {ventana}"
 
-    cols_fecha_headers = _detectar_fechas_en_encabezados(df)
-    if cols_fecha_headers:
-        for _, row in df.iterrows():
-            codigo = "" if col_codigo is None else str(row.get(col_codigo, "")).strip()
-            nombre = "" if col_nombre is None else str(row.get(col_nombre, "")).strip()
-            ciclo = "" if col_ciclo is None else str(row.get(col_ciclo, "")).strip()
-            for col_header, fecha_iso in cols_fecha_headers:
-                if not _celda_indica_visita(row.get(col_header)):
-                    continue
-                registros.append(
-                    {
-                        "fecha": fecha_iso,
-                        "codigo": codigo,
-                        "nombre": nombre,
-                        "ensayo": "DREAMM 10",
-                        "ciclo": ciclo,
-                        "origen_hoja": nombre_hoja,
-                    }
-                )
+        registros.append(
+            {
+                "fecha": row["__fecha__"].date().isoformat(),
+                "codigo": codigo,
+                "nombre": nombre,
+                "ensayo": "DREAMM 10",
+                "ciclo": ciclo,
+                "comentarios": comentario,
+                "origen_hoja": nombre_hoja,
+            }
+        )
 
     dedupe = {}
     for r in registros:
@@ -2161,6 +2158,7 @@ def extraer_registros_visitas_dreamm10(df, nombre_hoja=""):
             normalizar_texto_campo(r.get("codigo")),
             nombre_a_iniciales(r.get("nombre")),
             normalizar_texto_campo(r.get("ciclo")),
+            normalizar_texto_campo(r.get("comentarios")),
         )
         dedupe[clave] = r
     return list(dedupe.values())
@@ -2196,6 +2194,7 @@ def insertar_registros_dreamm10_en_tabla(registros):
         nombre = nombre_a_iniciales(r.get("nombre"))
         ensayo = normalizar_ensayo(r.get("ensayo") or "DREAMM 10")
         ciclo = normalizar_texto_campo(r.get("ciclo"))
+        comentarios = str(r.get("comentarios") or "").strip()
 
         if not fecha:
             continue
@@ -2220,7 +2219,7 @@ def insertar_registros_dreamm10_en_tabla(registros):
                 False,
                 False,
                 "",
-                "Importado desde Excel DREAMM10",
+                comentarios if comentarios else "Importado desde Excel DREAMM10",
             ),
         )
         guardar_o_actualizar_paciente(c, codigo, nombre, ensayo)
