@@ -1938,7 +1938,7 @@ def _detectar_columna_fecha(df):
     mejor_col = None
     mejor_score = 0
     for col in candidatas:
-        serie_fecha = pd.to_datetime(df[col], errors="coerce", dayfirst=True)
+        serie_fecha = _convertir_serie_a_fecha_excel(df[col])
         score = int(serie_fecha.notna().sum())
         if score > mejor_score:
             mejor_score = score
@@ -1952,13 +1952,33 @@ def _detectar_columna_fecha(df):
 def _detectar_fechas_en_encabezados(df):
     columnas_fecha = []
     for col in df.columns:
-        texto_col = str(col).strip()
-        if not texto_col:
-            continue
-        dt = pd.to_datetime(texto_col, errors="coerce", dayfirst=True)
+        dt = _convertir_valor_a_fecha_excel(col)
         if pd.notna(dt):
             columnas_fecha.append((col, dt.date().isoformat()))
     return columnas_fecha
+
+
+def _convertir_serie_a_fecha_excel(serie):
+    numerico = pd.to_numeric(serie, errors="coerce")
+    fecha_texto = pd.to_datetime(serie, errors="coerce", dayfirst=True)
+    fecha_serial = pd.to_datetime(numerico, unit="D", origin="1899-12-30", errors="coerce")
+
+    resultado = fecha_texto.copy()
+    mascara_excel_serial = numerico.notna() & numerico.between(20000, 80000)
+    if hasattr(resultado, "loc"):
+        resultado.loc[mascara_excel_serial] = fecha_serial.loc[mascara_excel_serial]
+    return resultado
+
+
+def _convertir_valor_a_fecha_excel(valor):
+    if pd.isna(valor):
+        return pd.NaT
+
+    if isinstance(valor, (int, float)):
+        if 20000 <= float(valor) <= 80000:
+            return pd.to_datetime(float(valor), unit="D", origin="1899-12-30", errors="coerce")
+
+    return pd.to_datetime(valor, errors="coerce", dayfirst=True)
 
 
 def _celda_indica_visita(valor):
@@ -2060,7 +2080,7 @@ def construir_eventos_calendario_dreamm10(
 def diagnostico_columnas_fecha(df):
     filas = []
     for col in df.columns:
-        serie_fecha = pd.to_datetime(df[col], errors="coerce", dayfirst=True)
+        serie_fecha = _convertir_serie_a_fecha_excel(df[col])
         score = int(serie_fecha.notna().sum())
         if score > 0:
             filas.append({"columna": str(col), "fechas_validas": score})
@@ -2077,7 +2097,7 @@ def construir_eventos_fallback_todas_fechas(df, nombre_hoja=""):
     for idx, row in df.iterrows():
         for col in df.columns:
             valor = row.get(col)
-            fecha = pd.to_datetime(valor, errors="coerce", dayfirst=True)
+            fecha = _convertir_valor_a_fecha_excel(valor)
             if pd.isna(fecha):
                 continue
             titulo = "DREAMM10"
@@ -2130,7 +2150,7 @@ def extraer_registros_visitas_dreamm10(df, nombre_hoja=""):
         return registros
 
     trabajo = df.copy()
-    trabajo["__fecha__"] = pd.to_datetime(trabajo[col_fecha], errors="coerce", dayfirst=True)
+    trabajo["__fecha__"] = _convertir_serie_a_fecha_excel(trabajo[col_fecha])
     trabajo = trabajo[trabajo["__fecha__"].notna()].copy()
 
     for _, row in trabajo.iterrows():
