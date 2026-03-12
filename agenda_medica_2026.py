@@ -2401,7 +2401,7 @@ def insertar_registros_dreamm10_en_tabla(registros):
 
 def construir_eventos_desde_registros_dreamm10(registros):
     eventos = []
-    for r in registros:
+    for idx, r in enumerate(registros):
         fecha = str(r.get("fecha") or "").strip()
         if not fecha:
             continue
@@ -2423,6 +2423,18 @@ def construir_eventos_desde_registros_dreamm10(registros):
                 "title": titulo,
                 "start": fecha,
                 "allDay": True,
+                "extendedProps": {
+                    "registro_idx": idx,
+                    "paciente": nombre,
+                    "codigo": codigo,
+                    "week": str(r.get("w") or "").strip(),
+                    "ciclo": str(r.get("c") or "").strip(),
+                    "ventana_mas": str(r.get("ventana_mas") or "").strip(),
+                    "ventana_menos": str(r.get("ventana_menos") or "").strip(),
+                    "contenido": detalle,
+                    "origen_hoja": str(r.get("origen_hoja") or "").strip(),
+                    "fecha": fecha,
+                },
                 "backgroundColor": "#0ea5e9",
                 "borderColor": "#0369a1",
             }
@@ -3549,6 +3561,8 @@ if seccion_activa == "Calendario DREAMM10":
 
                 if "dreamm10_fecha_detalle" not in st.session_state:
                     st.session_state["dreamm10_fecha_detalle"] = fecha_hoy_local()
+                if "dreamm10_evento_sel" not in st.session_state:
+                    st.session_state["dreamm10_evento_sel"] = {}
 
                 if estado_cal_dreamm10 and estado_cal_dreamm10.get("dateClick"):
                     fecha_click = estado_cal_dreamm10["dateClick"].get("date", "")
@@ -3556,13 +3570,31 @@ if seccion_activa == "Calendario DREAMM10":
                         st.session_state["dreamm10_fecha_detalle"] = pd.to_datetime(fecha_click, errors="coerce").date()
 
                 if estado_cal_dreamm10 and estado_cal_dreamm10.get("eventClick"):
+                    evento_click = estado_cal_dreamm10["eventClick"].get("event", {})
+                    props_click = evento_click.get("extendedProps", {})
+                    st.session_state["dreamm10_evento_sel"] = props_click
+
                     fecha_evento = (
-                        estado_cal_dreamm10["eventClick"].get("event", {}).get("start")
-                        or estado_cal_dreamm10["eventClick"].get("event", {}).get("startStr")
+                        evento_click.get("start")
+                        or evento_click.get("startStr")
                         or ""
                     )
                     if fecha_evento:
                         st.session_state["dreamm10_fecha_detalle"] = pd.to_datetime(fecha_evento, errors="coerce").date()
+
+                evento_sel = st.session_state.get("dreamm10_evento_sel", {})
+                if evento_sel:
+                    st.markdown("### 👤 Paciente seleccionado")
+                    c1, c2 = st.columns(2)
+                    c1.write(f"Paciente: {evento_sel.get('paciente', '')}")
+                    c1.write(f"Código: {evento_sel.get('codigo', '')}")
+                    c1.write(f"Fecha: {evento_sel.get('fecha', '')}")
+                    c2.write(f"Week: {evento_sel.get('week', '')}")
+                    c2.write(f"Ciclo: {evento_sel.get('ciclo', '')}")
+                    c2.write(f"Origen (pestaña): {evento_sel.get('origen_hoja', '')}")
+                    st.write(f"Ventana +: {evento_sel.get('ventana_mas', '')}")
+                    st.write(f"Ventana -: {evento_sel.get('ventana_menos', '')}")
+                    st.write(f"Contenido: {evento_sel.get('contenido', '')}")
 
                 if not tabla_registros.empty:
                     st.markdown("### 📌 Contenido del día")
