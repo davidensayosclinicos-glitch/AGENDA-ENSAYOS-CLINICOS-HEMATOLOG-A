@@ -2021,7 +2021,6 @@ def _normalizar_etiqueta_excel(valor):
     txt = str(valor or "").strip().lower()
     txt = txt.replace("á", "a").replace("é", "e").replace("í", "i").replace("ó", "o").replace("ú", "u")
     txt = txt.replace(" ", "")
-    txt = re.sub(r"[^a-z0-9+\-]", "", txt)
     return txt
 
 
@@ -2083,7 +2082,7 @@ def _mapear_columnas_variables_desde_headers(df):
             mapa["ventana_mas"] = col
         elif token in {"ventana-", "ventanamenos", "window-", "windowminus"}:
             mapa["ventana_menos"] = col
-        elif token.startswith("dosislena") or token in {"dosis", "lenalidomida", "dosislenalidomida"}:
+        elif token in {"dosislena", "lenalidomida", "dosislenalidomida"}:
             mapa["dosis_lena"] = col
     return mapa
 
@@ -2295,7 +2294,7 @@ def extraer_registros_visitas_dreamm10(df, nombre_hoja=""):
             valor_c = "" if "ciclo" not in mapa_vars else str(row.get(mapa_vars["ciclo"])).strip()
             valor_vmas = "" if "ventana_mas" not in mapa_vars else _formatear_fecha_es_sin_hora(row.get(mapa_vars["ventana_mas"]))
             valor_vmenos = "" if "ventana_menos" not in mapa_vars else _formatear_fecha_es_sin_hora(row.get(mapa_vars["ventana_menos"]))
-            valor_dosis = "" if "dosis_lena" not in mapa_vars else _formatear_fecha_es_sin_hora(row.get(mapa_vars["dosis_lena"]))
+            valor_dosis = "" if "dosis_lena" not in mapa_vars else str(row.get(mapa_vars["dosis_lena"]) or "").strip()
         else:
             col_w_idx = 22 if len(row) > 22 else None
             col_ventana_mas_idx = _detectar_columna_por_texto_en_hoja(df, r"ventana\s*\+")
@@ -2443,8 +2442,7 @@ def construir_eventos_desde_registros_dreamm10(registros):
         week_visible = week or "-"
         ciclo_visible = ciclo or "-"
         dosis_visible = dosis or "-"
-        # El recuadro del calendario recorta texto; ponemos D al inicio para que siempre se vea.
-        titulo = f"D {dosis_visible} | W {week_visible} | C {ciclo_visible} | {paciente_visible}"
+        titulo = f"{paciente_visible} | W {week_visible} | C {ciclo_visible} | D {dosis_visible}"
 
         eventos.append(
             {
