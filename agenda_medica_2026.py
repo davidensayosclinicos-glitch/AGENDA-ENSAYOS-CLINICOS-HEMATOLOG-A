@@ -11,6 +11,7 @@ import streamlit.components.v1 as components
 import os
 import re
 import base64
+import io
 import webbrowser
 import tempfile
 import importlib
@@ -1893,6 +1894,19 @@ def cargar_excel_por_hojas(ruta_excel):
     return hojas
 
 
+@st.cache_data(show_spinner=False)
+def cargar_excel_desde_bytes(bytes_excel):
+    buffer = io.BytesIO(bytes_excel)
+    libro = pd.ExcelFile(buffer)
+    hojas = {}
+    for hoja in libro.sheet_names:
+        df_hoja = pd.read_excel(libro, sheet_name=hoja)
+        if isinstance(df_hoja, pd.DataFrame):
+            df_hoja = df_hoja.dropna(how="all").dropna(how="all", axis=1)
+        hojas[hoja] = df_hoja
+    return hojas
+
+
 def _buscar_columna_por_patron(df, patrones):
     columnas = list(df.columns)
     if not columnas:
@@ -2919,6 +2933,9 @@ if seccion_activa == "Calendario DREAMM10":
     os.makedirs(DREAMM10_XLSX_DIR, exist_ok=True)
     st.caption(f"Carpeta de trabajo: {DREAMM10_XLSX_DIR}")
 
+    if "dreamm10_archivos_memoria" not in st.session_state:
+        st.session_state["dreamm10_archivos_memoria"] = {}
+
     archivos_subidos = st.file_uploader(
         "Adjuntar tablas Excel (.xlsx)",
         type=["xlsx"],
@@ -2927,37 +2944,73 @@ if seccion_activa == "Calendario DREAMM10":
     )
 
     if archivos_subidos:
+        cargados = 0
         guardados = 0
         for archivo in archivos_subidos:
             nombre_seguro = os.path.basename(archivo.name)
+            contenido = archivo.getvalue()
+            st.session_state["dreamm10_archivos_memoria"][nombre_seguro] = contenido
+            cargados += 1
+
             destino = os.path.join(DREAMM10_XLSX_DIR, nombre_seguro)
-            with open(destino, "wb") as salida:
-                salida.write(archivo.getbuffer())
-            guardados += 1
+            try:
+                with open(destino, "wb") as salida:
+                    salida.write(contenido)
+                guardados += 1
+            except Exception:
+                # En Streamlit Cloud puede fallar escritura en disco; mantenemos uso en memoria.
+                pass
 
+        st.cache_data.clear()
         if guardados:
-            st.cache_data.clear()
-            st.success(f"Archivos guardados en carpeta: {guardados}")
-            st.rerun()
+            st.success(f"Excel cargado en memoria ({cargados}) y guardado en carpeta ({guardados}).")
+        else:
+            st.success(f"Excel cargado en memoria: {cargados}.")
 
+    archivos_memoria = dict(st.session_state.get("dreamm10_archivos_memoria", {}))
     excels = listar_excels(DREAMM10_XLSX_DIR)
-    if not excels:
+    fuentes = []
+    for nombre in sorted(archivos_memoria.keys()):
+        fuentes.append((f"🟢 Subido ahora | {nombre}", "memoria", nombre))
+    for nombre in excels:
+        fuentes.append((f"📁 Carpeta | {nombre}", "carpeta", nombre))
+
+    if not fuentes:
         st.info("No hay archivos .xlsx en la carpeta DREAMM10. Sube al menos uno para generar el calendario.")
     else:
-        archivo_sel = st.selectbox("Archivo Excel", options=excels, key="dreamm10_excel_sel")
-        ruta_excel_sel = os.path.join(DREAMM10_XLSX_DIR, archivo_sel)
+        mapa_fuentes = {etiqueta: (origen, nombre) for etiqueta, origen, nombre in fuentes}
+        etiqueta_sel = st.selectbox(
+            "Archivo Excel",
+            options=list(mapa_fuentes.keys()),
+            key="dreamm10_excel_sel",
+        )
+        origen_sel, archivo_sel = mapa_fuentes[etiqueta_sel]
 
-        with open(ruta_excel_sel, "rb") as f_excel:
+        bytes_excel = b""
+        if origen_sel == "memoria":
+            bytes_excel = archivos_memoria.get(archivo_sel, b"")
+        else:
+            ruta_excel_sel = os.path.join(DREAMM10_XLSX_DIR, archivo_sel)
+            try:
+                with open(ruta_excel_sel, "rb") as f_excel:
+                    bytes_excel = f_excel.read()
+            except Exception as e:
+                st.error(f"No se pudo abrir el Excel de carpeta: {e}")
+
+        if bytes_excel:
             st.download_button(
                 "Descargar Excel seleccionado",
-                data=f_excel,
+                data=bytes_excel,
                 file_name=archivo_sel,
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 key="dreamm10_descargar_excel",
             )
 
         try:
-            hojas_excel = cargar_excel_por_hojas(ruta_excel_sel)
+            if not bytes_excel:
+                hojas_excel = {}
+            else:
+                hojas_excel = cargar_excel_desde_bytes(bytes_excel)
         except Exception as e:
             st.error(f"No se pudo leer el Excel seleccionado: {e}")
             hojas_excel = {}
