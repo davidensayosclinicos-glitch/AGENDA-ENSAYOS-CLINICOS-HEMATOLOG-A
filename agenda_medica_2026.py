@@ -2106,6 +2106,139 @@ def construir_eventos_fallback_todas_fechas(df, nombre_hoja=""):
     return eventos
 
 
+def extraer_registros_visitas_dreamm10(df, nombre_hoja=""):
+    if df.empty:
+        return []
+
+    col_codigo = _buscar_columna_por_patron(df, [r"codigo", r"id", r"paciente"])
+    col_nombre = _buscar_columna_por_patron(df, [r"nombre", r"paciente"])
+    col_ciclo = _buscar_columna_por_patron(df, [r"ciclo", r"visit", r"dia", r"día", r"day"])
+    col_fecha = _detectar_columna_fecha(df)
+
+    registros = []
+
+    if col_fecha is not None:
+        trabajo = df.copy()
+        trabajo["__fecha__"] = pd.to_datetime(trabajo[col_fecha], errors="coerce", dayfirst=True)
+        trabajo = trabajo[trabajo["__fecha__"].notna()].copy()
+
+        for _, row in trabajo.iterrows():
+            registros.append(
+                {
+                    "fecha": row["__fecha__"].date().isoformat(),
+                    "codigo": "" if col_codigo is None else str(row.get(col_codigo, "")).strip(),
+                    "nombre": "" if col_nombre is None else str(row.get(col_nombre, "")).strip(),
+                    "ensayo": "DREAMM 10",
+                    "ciclo": "" if col_ciclo is None else str(row.get(col_ciclo, "")).strip(),
+                    "origen_hoja": nombre_hoja,
+                }
+            )
+
+    cols_fecha_headers = _detectar_fechas_en_encabezados(df)
+    if cols_fecha_headers:
+        for _, row in df.iterrows():
+            codigo = "" if col_codigo is None else str(row.get(col_codigo, "")).strip()
+            nombre = "" if col_nombre is None else str(row.get(col_nombre, "")).strip()
+            ciclo = "" if col_ciclo is None else str(row.get(col_ciclo, "")).strip()
+            for col_header, fecha_iso in cols_fecha_headers:
+                if not _celda_indica_visita(row.get(col_header)):
+                    continue
+                registros.append(
+                    {
+                        "fecha": fecha_iso,
+                        "codigo": codigo,
+                        "nombre": nombre,
+                        "ensayo": "DREAMM 10",
+                        "ciclo": ciclo,
+                        "origen_hoja": nombre_hoja,
+                    }
+                )
+
+    dedupe = {}
+    for r in registros:
+        clave = (
+            str(r.get("fecha") or "").strip(),
+            normalizar_texto_campo(r.get("codigo")),
+            nombre_a_iniciales(r.get("nombre")),
+            normalizar_texto_campo(r.get("ciclo")),
+        )
+        dedupe[clave] = r
+    return list(dedupe.values())
+
+
+def insertar_registros_dreamm10_en_tabla(registros):
+    if not registros:
+        return 0, 0
+
+    conn = connect_db()
+    c = conn.cursor()
+
+    c.execute("SELECT fecha, codigo, nombre, ensayo, ciclo FROM visitas")
+    existentes_raw = c.fetchall()
+
+    existentes = set()
+    for fecha, codigo, nombre, ensayo, ciclo in existentes_raw:
+        clave = (
+            str(fecha or "").strip(),
+            normalizar_texto_campo(codigo),
+            nombre_a_iniciales(nombre),
+            normalizar_ensayo(ensayo),
+            normalizar_texto_campo(ciclo),
+        )
+        existentes.add(clave)
+
+    insertados = 0
+    duplicados = 0
+
+    for r in registros:
+        fecha = str(r.get("fecha") or "").strip()
+        codigo = normalizar_texto_campo(r.get("codigo"))
+        nombre = nombre_a_iniciales(r.get("nombre"))
+        ensayo = normalizar_ensayo(r.get("ensayo") or "DREAMM 10")
+        ciclo = normalizar_texto_campo(r.get("ciclo"))
+
+        if not fecha:
+            continue
+
+        clave = (fecha, codigo, nombre, ensayo, ciclo)
+        if clave in existentes:
+            duplicados += 1
+            continue
+
+        c.execute(
+            """
+            INSERT INTO visitas (fecha, nombre, codigo, ensayo, ciclo, kits, tablet, medula, otras_pruebas, comentarios)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                fecha,
+                nombre,
+                codigo,
+                ensayo,
+                ciclo,
+                "",
+                False,
+                False,
+                "",
+                "Importado desde Excel DREAMM10",
+            ),
+        )
+        guardar_o_actualizar_paciente(c, codigo, nombre, ensayo)
+        existentes.add(clave)
+        insertados += 1
+
+    unificar_pacientes_duplicados(c)
+    eliminar_ensayos_sin_pacientes(c)
+    conn.commit()
+    conn.close()
+
+    if insertados:
+        invalidar_cache_lecturas()
+        snapshot_db("pacientes")
+
+    return insertados, duplicados
+
+
 @st.cache_data(show_spinner=False)
 def extraer_texto_pdf(ruta_pdf):
     if PdfReader is None:
@@ -3126,6 +3259,7 @@ if seccion_activa == "Calendario DREAMM10":
         except Exception as e:
             st.error(f"No se pudo leer el Excel seleccionado: {e}")
             hojas_excel = {}
+                registros_dreamm10 = []
 
         if not hojas_excel:
             st.warning("El archivo no contiene hojas con datos legibles.")
@@ -3149,6 +3283,29 @@ if seccion_activa == "Calendario DREAMM10":
                     eventos_hoja = construir_eventos_fallback_todas_fechas(df_hoja, nombre_hoja=hoja)
 
                 eventos_dreamm10.extend(eventos_hoja)
+                registros_dreamm10.extend(extraer_registros_visitas_dreamm10(df_hoja, nombre_hoja=hoja))
+
+            if registros_dreamm10:
+                tabla_registros = pd.DataFrame(registros_dreamm10)
+                columnas_tabla = ["fecha", "codigo", "nombre", "ensayo", "ciclo", "origen_hoja"]
+                for col in columnas_tabla:
+                    if col not in tabla_registros.columns:
+                        tabla_registros[col] = ""
+                tabla_registros = tabla_registros[columnas_tabla].sort_values(by=["fecha", "codigo", "nombre"]).reset_index(drop=True)
+
+                st.markdown("### 📥 Traslado a tabla")
+                st.caption(f"Fechas detectadas para importar: {len(tabla_registros)}")
+                st.dataframe(tabla_registros, use_container_width=True, height=240)
+
+                if st.button("Trasladar todas las fechas del Excel a la tabla", type="primary", key="dreamm10_trasladar_tabla"):
+                    insertados, duplicados = insertar_registros_dreamm10_en_tabla(registros_dreamm10)
+                    if insertados:
+                        st.success(f"Registros trasladados: {insertados}. Duplicados omitidos: {duplicados}.")
+                    else:
+                        st.info(f"No se añadieron filas nuevas. Duplicados detectados: {duplicados}.")
+                    st.rerun()
+            else:
+                st.info("No se detectaron registros de fechas para trasladar a la tabla.")
 
             if not eventos_dreamm10:
                 st.warning("No se detectaron fechas válidas en las hojas seleccionadas para construir el calendario.")
