@@ -1090,6 +1090,52 @@ def borrar_visita(id_visita):
     invalidar_cache_lecturas()
     snapshot_db("pacientes")
 
+
+def borrar_paciente_citas_ojos(codigo, nombre):
+    codigo_norm_ref = normalizar_clave_paciente(codigo)
+    nombre_norm_ref = normalizar_clave_paciente(nombre)
+    if not codigo_norm_ref and not nombre_norm_ref:
+        return 0
+
+    conn = connect_db()
+    c = conn.cursor()
+    filas = c.execute("SELECT id, codigo, nombre, ensayo FROM visitas").fetchall()
+
+    ids_borrar = []
+    for fila_id, codigo_db, nombre_db, ensayo_db in filas:
+        ensayo_norm = _normalizar_ensayo_ojos(ensayo_db)
+        if ensayo_norm not in ENSAYOS_OJOS_PERMITIDOS:
+            continue
+
+        codigo_norm = normalizar_clave_paciente(codigo_db)
+        nombre_norm = normalizar_clave_paciente(nombre_db)
+
+        coincide = False
+        if codigo_norm_ref:
+            coincide = codigo_norm == codigo_norm_ref
+        elif nombre_norm_ref:
+            coincide = nombre_norm == nombre_norm_ref
+
+        if coincide:
+            ids_borrar.append(int(fila_id))
+
+    if not ids_borrar:
+        conn.close()
+        return 0
+
+    placeholders = ",".join(["?"] * len(ids_borrar))
+    c.execute(f"DELETE FROM revision_ocular WHERE visita_id IN ({placeholders})", tuple(ids_borrar))
+    c.execute(f"DELETE FROM visitas WHERE id IN ({placeholders})", tuple(ids_borrar))
+
+    sincronizar_pacientes_desde_visitas(c)
+    eliminar_ensayos_sin_pacientes(c)
+    conn.commit()
+    conn.close()
+
+    invalidar_cache_lecturas()
+    snapshot_db("pacientes")
+    return len(ids_borrar)
+
 @st.cache_data(show_spinner=False)
 def get_checklist_items(ensayo):
     ensayo = normalizar_ensayo(ensayo)
@@ -3304,6 +3350,47 @@ if seccion_activa == "Citas ojos":
         sin_clave = df_visitas[df_visitas["_clave_paciente"].astype(str).str.strip() == ""]
         con_clave = con_clave.drop_duplicates(subset=["_clave_paciente"], keep="first")
         df_visitas = pd.concat([con_clave, sin_clave], ignore_index=True)
+
+        with st.expander("🗑️ Eliminar paciente de Citas de ojos", expanded=False):
+            opciones_borrado = []
+            mapa_borrado = {}
+            df_borrado = df_visitas.sort_values(by=["ensayo", "codigo", "nombre"], na_position="last")
+            for _, row in df_borrado.iterrows():
+                codigo_b = "" if pd.isna(row.get("codigo")) else str(row.get("codigo"))
+                nombre_b = "" if pd.isna(row.get("nombre")) else str(row.get("nombre"))
+                ensayo_b = "" if pd.isna(row.get("ensayo")) else str(row.get("ensayo"))
+                etiqueta_b = f"{codigo_b} | {nombre_b} | {ensayo_b}".strip(" |")
+                if etiqueta_b in mapa_borrado:
+                    continue
+                opciones_borrado.append(etiqueta_b)
+                mapa_borrado[etiqueta_b] = {
+                    "codigo": codigo_b,
+                    "nombre": nombre_b,
+                }
+
+            if not opciones_borrado:
+                st.caption("No hay pacientes para eliminar.")
+            else:
+                sel_borrar = st.selectbox(
+                    "Paciente a eliminar",
+                    options=opciones_borrado,
+                    key="ojos_paciente_borrar",
+                )
+                confirmar_borrado = st.checkbox(
+                    "Confirmo eliminación del paciente en Citas de ojos",
+                    key="ojos_confirmar_borrado",
+                )
+                if st.button("Eliminar paciente", type="primary", key="ojos_btn_borrar_paciente"):
+                    if not confirmar_borrado:
+                        st.warning("Marca la confirmación antes de eliminar.")
+                    else:
+                        datos_b = mapa_borrado.get(sel_borrar, {})
+                        borradas = borrar_paciente_citas_ojos(datos_b.get("codigo", ""), datos_b.get("nombre", ""))
+                        if borradas > 0:
+                            st.success(f"Visitas eliminadas: {borradas}")
+                            st.rerun()
+                        else:
+                            st.info("No se encontraron visitas para eliminar.")
 
         df_rev = get_revisiones_oculares_df()
         base = df_visitas.copy()
