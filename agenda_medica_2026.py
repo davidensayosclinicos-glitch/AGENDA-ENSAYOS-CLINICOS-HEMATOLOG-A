@@ -2261,6 +2261,47 @@ def insertar_registros_dreamm10_en_tabla(registros):
     return insertados, duplicados
 
 
+def construir_eventos_desde_registros_dreamm10(registros):
+    eventos = []
+    for r in registros:
+        fecha = str(r.get("fecha") or "").strip()
+        if not fecha:
+            continue
+
+        codigo = str(r.get("codigo") or "").strip()
+        nombre = str(r.get("nombre") or "").strip()
+        detalle = str(r.get("comentarios") or "").strip()
+
+        titulo = "DREAMM10"
+        if codigo:
+            titulo += f" | {codigo}"
+        if nombre:
+            titulo += f" | {nombre}"
+        if detalle:
+            titulo += f" | {detalle}"
+
+        eventos.append(
+            {
+                "title": titulo,
+                "start": fecha,
+                "allDay": True,
+                "backgroundColor": "#0ea5e9",
+                "borderColor": "#0369a1",
+            }
+        )
+
+    dedupe = {}
+    for ev in eventos:
+        clave = f"{ev.get('start','')}|{ev.get('title','')}"
+        dedupe[clave] = ev
+    eventos = list(dedupe.values())
+
+    if len(eventos) > 3000:
+        eventos = eventos[:3000]
+
+    return eventos
+
+
 @st.cache_data(show_spinner=False)
 def extraer_texto_pdf(ruta_pdf):
     if PdfReader is None:
@@ -4143,43 +4184,6 @@ if seccion_activa == "Agenda":
                         f"Tablet: {'Si' if paciente['tablet'] else 'No'}\n"
                         f"Medula: {'Si' if paciente['medula'] else 'No'}\n"
                         f"Otras pruebas: {paciente['otras_pruebas']}\n"
-                        f"Comentarios: {paciente['comentarios']}\n"
-                        f"Revision ocular (sede): {rev_informe.get('sede', '')}\n"
-                        f"Medico ocular: {rev_informe.get('medico', '')}\n"
-                        f"Agenda hospitalaria ocular: {rev_informe.get('agenda_hospitalaria', '')}\n"
-                        f"Fecha evaluacion ocular: {formatear_fecha_visita(rev_informe.get('fecha_evaluacion', ''))}\n"
-                        f"Resultado ocular: {rev_informe.get('resultado', '')}\n"
-                        f"Adenda paciente: {adenda_paciente_info.get('texto', '')}\n"
-                    )
-                    st.download_button(
-                        "Descargar informe",
-                        data=informe,
-                        file_name=f"informe_{paciente['codigo']}_{fecha_visita}.txt",
-                        mime="text/plain"
-                    )
-                    if st.button("Imprimir informe"):
-                        titulo = f"Informe {paciente['codigo']} - {fecha_visita}"
-                        render_print_dialog(informe, titulo)
-
-                    st.divider()
-                    col_del, col_close = st.columns(2)
-                    if col_del.button("🗑️ Borrar Cita", type="primary"):
-                        borrar_visita(id_evento)
-                        st.session_state['modo_formulario'] = None
-                        st.rerun()
-
-                    if col_close.button("Cerrar Ficha"):
-                        st.session_state['modo_formulario'] = None
-                        st.rerun()
-                else:
-                    st.warning("No se encontraron datos (quizás se borró).")
-                    if st.button("Volver"):
-                        st.session_state['modo_formulario'] = None
-                        st.rerun()
-
-        else:
-            st.info("👈 Haz clic en un día para añadir pacientes.")
-            st.caption("Los días con '🩸' indican punción de médula.")
                         f"Comentarios: {paciente['comentarios']}\n"
                         f"Revision ocular (sede): {rev_informe.get('sede', '')}\n"
                         f"Medico ocular: {rev_informe.get('medico', '')}\n"
