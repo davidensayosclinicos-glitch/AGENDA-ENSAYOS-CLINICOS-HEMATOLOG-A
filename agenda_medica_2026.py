@@ -2432,15 +2432,14 @@ def construir_eventos_desde_registros_dreamm10(registros):
 
         codigo = str(r.get("codigo") or "").strip()
         nombre = str(r.get("nombre") or "").strip()
+        week = str(r.get("w") or "").strip()
+        ciclo = str(r.get("c") or "").strip()
         detalle = str(r.get("comentarios") or "").strip()
 
-        titulo = "DREAMM10"
-        if codigo:
-            titulo += f" | {codigo}"
-        if nombre:
-            titulo += f" | {nombre}"
-        if detalle:
-            titulo += f" | {detalle}"
+        paciente_visible = nombre or codigo or "Paciente"
+        week_visible = week or "-"
+        ciclo_visible = ciclo or "-"
+        titulo = f"{paciente_visible} | W {week_visible} | C {ciclo_visible}"
 
         eventos.append(
             {
@@ -2452,8 +2451,8 @@ def construir_eventos_desde_registros_dreamm10(registros):
                     "registro_idx": idx,
                     "paciente": nombre,
                     "codigo": codigo,
-                    "week": str(r.get("w") or "").strip(),
-                    "ciclo": str(r.get("c") or "").strip(),
+                    "week": week,
+                    "ciclo": ciclo,
                     "ventana_mas": str(r.get("ventana_mas") or "").strip(),
                     "ventana_menos": str(r.get("ventana_menos") or "").strip(),
                     "contenido": detalle,
