@@ -1993,6 +1993,57 @@ def _detectar_columna_por_texto_en_hoja(df, patron):
     return None
 
 
+def _normalizar_etiqueta_excel(valor):
+    txt = str(valor or "").strip().lower()
+    txt = txt.replace("á", "a").replace("é", "e").replace("í", "i").replace("ó", "o").replace("ú", "u")
+    txt = txt.replace(" ", "")
+    return txt
+
+
+def _extraer_tabla_variables_dreamm10(df):
+    if df.empty:
+        return pd.DataFrame(), {}
+
+    esperadas = {"w", "c", "fecha", "ventana+", "ventana-", "dosislena"}
+    mejor_fila = None
+    mejor_score = 0
+    filas_max = min(len(df), 40)
+
+    for i in range(filas_max):
+        fila = df.iloc[i].tolist()
+        tokens = {_normalizar_etiqueta_excel(v) for v in fila if str(v).strip() and str(v).strip().lower() != "nan"}
+        score = len(tokens.intersection(esperadas))
+        if score > mejor_score:
+            mejor_score = score
+            mejor_fila = i
+
+    if mejor_fila is None or mejor_score < 3:
+        return pd.DataFrame(), {}
+
+    encabezados_raw = [str(v).strip() for v in df.iloc[mejor_fila].tolist()]
+    tabla = df.iloc[mejor_fila + 1 :].copy().reset_index(drop=True)
+    tabla.columns = encabezados_raw
+    tabla = tabla.dropna(how="all")
+
+    mapa = {}
+    for col in tabla.columns:
+        token = _normalizar_etiqueta_excel(col)
+        if token == "w":
+            mapa["w"] = col
+        elif token == "c":
+            mapa["c"] = col
+        elif token == "fecha":
+            mapa["fecha"] = col
+        elif token == "ventana+":
+            mapa["ventana_mas"] = col
+        elif token == "ventana-":
+            mapa["ventana_menos"] = col
+        elif token == "dosislena":
+            mapa["dosis_lena"] = col
+
+    return tabla, mapa
+
+
 def _celda_indica_visita(valor):
     if pd.isna(valor):
         return False
@@ -2142,30 +2193,62 @@ def extraer_registros_visitas_dreamm10(df, nombre_hoja=""):
     if df.empty:
         return []
 
-    # Regla solicitada: usar columna C real (índice 2) como fecha.
-    col_fecha_idx = 2 if df.shape[1] > 2 else None
-    col_w_idx = 22 if df.shape[1] > 22 else None  # Columna W real
-    col_ventana_mas_idx = _detectar_columna_por_texto_en_hoja(df, r"ventana\s*\+")
-    col_ventana_menos_idx = _detectar_columna_por_texto_en_hoja(df, r"ventana\s*-")
-
     registros = []
-    if col_fecha_idx is None:
-        return registros
+    tabla_vars, mapa_vars = _extraer_tabla_variables_dreamm10(df)
 
-    trabajo = df.copy()
-    trabajo["__fecha__"] = _convertir_serie_a_fecha_excel(trabajo.iloc[:, col_fecha_idx])
-    trabajo = trabajo[trabajo["__fecha__"].notna()].copy()
+    # Si detectamos encabezados de variables, usamos esa tabla (contenido por fila).
+    if not tabla_vars.empty and "fecha" in mapa_vars:
+        iterable = tabla_vars.iterrows()
+        usar_tabla_vars = True
+    else:
+        iterable = df.iterrows()
+        usar_tabla_vars = False
 
-    for _, row in trabajo.iterrows():
+    for _, row in iterable:
+        fecha_dt = pd.NaT
+        valor_c = ""
+
+        if usar_tabla_vars:
+            valor_fecha_raw = row.get(mapa_vars.get("fecha"))
+            valor_c_raw = row.get(mapa_vars.get("c"))
+            valor_c = "" if pd.isna(valor_c_raw) else str(valor_c_raw).strip()
+            fecha_dt = _convertir_valor_a_fecha_excel(valor_fecha_raw)
+        else:
+            col_fecha_idx = 2 if len(row) > 2 else None
+            if col_fecha_idx is not None:
+                valor_c_raw = row.iloc[col_fecha_idx]
+                valor_c = "" if pd.isna(valor_c_raw) else str(valor_c_raw).strip()
+                fecha_dt = _convertir_valor_a_fecha_excel(valor_c_raw)
+
+        if pd.isna(fecha_dt):
+            for valor in row.tolist():
+                fecha_test = _convertir_valor_a_fecha_excel(valor)
+                if pd.notna(fecha_test):
+                    fecha_dt = fecha_test
+                    break
+
+        if pd.isna(fecha_dt):
+            continue
+
         # Cada pestaña es un paciente.
         codigo = str(nombre_hoja or "").strip()
         nombre = str(nombre_hoja or "").strip()
         ciclo = ""
 
-        valor_w = "" if col_w_idx is None else str(row.iloc[col_w_idx]).strip()
-        valor_c = str(row.iloc[col_fecha_idx]).strip()
-        valor_vmas = "" if col_ventana_mas_idx is None else str(row.iloc[col_ventana_mas_idx]).strip()
-        valor_vmenos = "" if col_ventana_menos_idx is None else str(row.iloc[col_ventana_menos_idx]).strip()
+        if usar_tabla_vars:
+            valor_w = "" if "w" not in mapa_vars else str(row.get(mapa_vars["w"])).strip()
+            valor_c = "" if "c" not in mapa_vars else str(row.get(mapa_vars["c"])).strip()
+            valor_vmas = "" if "ventana_mas" not in mapa_vars else str(row.get(mapa_vars["ventana_mas"])).strip()
+            valor_vmenos = "" if "ventana_menos" not in mapa_vars else str(row.get(mapa_vars["ventana_menos"])).strip()
+            valor_dosis = "" if "dosis_lena" not in mapa_vars else str(row.get(mapa_vars["dosis_lena"])).strip()
+        else:
+            col_w_idx = 22 if len(row) > 22 else None
+            col_ventana_mas_idx = _detectar_columna_por_texto_en_hoja(df, r"ventana\s*\+")
+            col_ventana_menos_idx = _detectar_columna_por_texto_en_hoja(df, r"ventana\s*-")
+            valor_w = "" if col_w_idx is None else str(row.iloc[col_w_idx]).strip()
+            valor_vmas = "" if col_ventana_mas_idx is None else str(row.iloc[col_ventana_mas_idx]).strip()
+            valor_vmenos = "" if col_ventana_menos_idx is None else str(row.iloc[col_ventana_menos_idx]).strip()
+            valor_dosis = ""
 
         partes_comentario = []
         if valor_w and valor_w.lower() != "nan":
@@ -2176,13 +2259,15 @@ def extraer_registros_visitas_dreamm10(df, nombre_hoja=""):
             partes_comentario.append(f"Ventana +: {valor_vmas}")
         if valor_vmenos and valor_vmenos.lower() != "nan":
             partes_comentario.append(f"Ventana -: {valor_vmenos}")
+        if valor_dosis and valor_dosis.lower() != "nan":
+            partes_comentario.append(f"Dosis lena: {valor_dosis}")
         comentario = " | ".join(partes_comentario)
         if nombre_hoja:
             comentario = (f"Paciente (pestaña): {nombre_hoja}" + (" | " + comentario if comentario else ""))
 
         registros.append(
             {
-                "fecha": row["__fecha__"].date().isoformat(),
+                "fecha": fecha_dt.date().isoformat(),
                 "codigo": codigo,
                 "nombre": nombre,
                 "ensayo": "DREAMM 10",
