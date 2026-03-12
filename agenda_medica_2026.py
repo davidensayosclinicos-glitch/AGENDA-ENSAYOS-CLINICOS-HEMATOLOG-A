@@ -184,6 +184,7 @@ IMG_DIR_ESQUEMAS = resolver_directorio(
     r"N:\ENSAYOS\ENSAYOS\ESQUEMAS TRATAMIENTOS",
     r"H:\ENSAYOS\ENSAYOS\ESQUEMAS TRATAMIENTOS"
 )
+DREAMM10_XLSX_DIR = os.path.join(SCRIPT_DIR, "DREAMM10 calendario pacientes")
 APP_TIMEZONE = "Europe/Madrid"
 DB_PATH = os.path.join(SCRIPT_DIR, "agenda_ensayos.db")
 DB_BACKUP_DIR = os.path.join(SCRIPT_DIR, "backups_db")
@@ -1870,6 +1871,115 @@ def listar_imagenes(directorio):
     ]
     return sorted(archivos)
 
+def listar_excels(directorio):
+    if not os.path.isdir(directorio):
+        return []
+    archivos = [
+        f for f in os.listdir(directorio)
+        if f.lower().endswith(".xlsx") and os.path.isfile(os.path.join(directorio, f))
+    ]
+    return sorted(archivos)
+
+
+@st.cache_data(show_spinner=False)
+def cargar_excel_por_hojas(ruta_excel):
+    libro = pd.ExcelFile(ruta_excel)
+    hojas = {}
+    for hoja in libro.sheet_names:
+        df_hoja = pd.read_excel(libro, sheet_name=hoja)
+        if isinstance(df_hoja, pd.DataFrame):
+            df_hoja = df_hoja.dropna(how="all").dropna(how="all", axis=1)
+        hojas[hoja] = df_hoja
+    return hojas
+
+
+def _buscar_columna_por_patron(df, patrones):
+    columnas = list(df.columns)
+    if not columnas:
+        return None
+
+    for patron in patrones:
+        for col in columnas:
+            col_txt = str(col).strip().lower()
+            if re.search(patron, col_txt):
+                return col
+    return None
+
+
+def _detectar_columna_fecha(df):
+    if df.empty:
+        return None
+
+    prioridad = [r"fecha", r"date", r"dia", r"día"]
+    candidatas = []
+
+    for col in df.columns:
+        col_txt = str(col).strip().lower()
+        if any(re.search(p, col_txt) for p in prioridad):
+            candidatas.append(col)
+
+    if not candidatas:
+        candidatas = list(df.columns)
+
+    mejor_col = None
+    mejor_score = 0
+    for col in candidatas:
+        serie_fecha = pd.to_datetime(df[col], errors="coerce", dayfirst=True)
+        score = int(serie_fecha.notna().sum())
+        if score > mejor_score:
+            mejor_score = score
+            mejor_col = col
+
+    if mejor_score == 0:
+        return None
+    return mejor_col
+
+
+def construir_eventos_calendario_dreamm10(df, nombre_hoja=""):
+    if df.empty:
+        return []
+
+    col_fecha = _detectar_columna_fecha(df)
+    if col_fecha is None:
+        return []
+
+    col_codigo = _buscar_columna_por_patron(df, [r"codigo", r"paciente", r"nombre", r"id"])
+    col_ciclo = _buscar_columna_por_patron(df, [r"ciclo", r"visit", r"dia", r"día", r"day"])
+
+    trabajo = df.copy()
+    trabajo["__fecha__"] = pd.to_datetime(trabajo[col_fecha], errors="coerce", dayfirst=True)
+    trabajo = trabajo[trabajo["__fecha__"].notna()].copy()
+
+    eventos = []
+    for _, row in trabajo.iterrows():
+        fecha = row["__fecha__"].date().isoformat()
+
+        piezas_titulo = ["DREAMM10"]
+        if col_codigo is not None:
+            codigo = str(row.get(col_codigo, "")).strip()
+            if codigo and codigo.lower() != "nan":
+                piezas_titulo.append(codigo)
+        if col_ciclo is not None:
+            ciclo = str(row.get(col_ciclo, "")).strip()
+            if ciclo and ciclo.lower() != "nan":
+                piezas_titulo.append(ciclo)
+
+        titulo = " | ".join(piezas_titulo)
+        if nombre_hoja:
+            titulo = f"{titulo} [{nombre_hoja}]"
+
+        eventos.append(
+            {
+                "title": titulo,
+                "start": fecha,
+                "allDay": True,
+                "backgroundColor": "#0ea5e9",
+                "borderColor": "#0369a1",
+            }
+        )
+
+    return eventos
+
 @st.cache_data(show_spinner=False)
 def extraer_texto_pdf(ruta_pdf):
     if PdfReader is None:
@@ -2117,6 +2227,7 @@ st.sidebar.markdown("### 📅 Agenda de Pacientes - Ensayos Clínicos 2026")
 secciones_principales = [
     "Agenda",
     "Citas ojos",
+    "Calendario DREAMM10",
     "Prot. ensayo",
     "Ficha paciente",
     "Check list",
@@ -2802,6 +2913,101 @@ if seccion_activa == "Citas ojos":
                 st.rerun()
             else:
                 st.info("No hay cambios para guardar.")
+
+if seccion_activa == "Calendario DREAMM10":
+    st.subheader("🗓️ Calendario ciclos DREAMM10")
+    os.makedirs(DREAMM10_XLSX_DIR, exist_ok=True)
+    st.caption(f"Carpeta de trabajo: {DREAMM10_XLSX_DIR}")
+
+    archivos_subidos = st.file_uploader(
+        "Adjuntar tablas Excel (.xlsx)",
+        type=["xlsx"],
+        accept_multiple_files=True,
+        key="dreamm10_xlsx_uploader",
+    )
+
+    if archivos_subidos:
+        guardados = 0
+        for archivo in archivos_subidos:
+            nombre_seguro = os.path.basename(archivo.name)
+            destino = os.path.join(DREAMM10_XLSX_DIR, nombre_seguro)
+            with open(destino, "wb") as salida:
+                salida.write(archivo.getbuffer())
+            guardados += 1
+
+        if guardados:
+            st.cache_data.clear()
+            st.success(f"Archivos guardados en carpeta: {guardados}")
+            st.rerun()
+
+    excels = listar_excels(DREAMM10_XLSX_DIR)
+    if not excels:
+        st.info("No hay archivos .xlsx en la carpeta DREAMM10. Sube al menos uno para generar el calendario.")
+    else:
+        archivo_sel = st.selectbox("Archivo Excel", options=excels, key="dreamm10_excel_sel")
+        ruta_excel_sel = os.path.join(DREAMM10_XLSX_DIR, archivo_sel)
+
+        with open(ruta_excel_sel, "rb") as f_excel:
+            st.download_button(
+                "Descargar Excel seleccionado",
+                data=f_excel,
+                file_name=archivo_sel,
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="dreamm10_descargar_excel",
+            )
+
+        try:
+            hojas_excel = cargar_excel_por_hojas(ruta_excel_sel)
+        except Exception as e:
+            st.error(f"No se pudo leer el Excel seleccionado: {e}")
+            hojas_excel = {}
+
+        if not hojas_excel:
+            st.warning("El archivo no contiene hojas con datos legibles.")
+        else:
+            nombres_hojas = list(hojas_excel.keys())
+            hojas_mostrar = st.multiselect(
+                "Hojas a incluir en el calendario",
+                options=nombres_hojas,
+                default=nombres_hojas,
+                key="dreamm10_hojas_mostrar",
+            )
+
+            eventos_dreamm10 = []
+            for hoja in hojas_mostrar:
+                df_hoja = hojas_excel.get(hoja, pd.DataFrame())
+                eventos_dreamm10.extend(construir_eventos_calendario_dreamm10(df_hoja, nombre_hoja=hoja))
+
+            if not eventos_dreamm10:
+                st.warning("No se detectaron fechas válidas en las hojas seleccionadas para construir el calendario.")
+            else:
+                opciones_cal_dreamm10 = {
+                    "editable": False,
+                    "navLinks": True,
+                    "initialView": "dayGridMonth",
+                    "headerToolbar": {
+                        "left": "today prev,next",
+                        "center": "title",
+                        "right": "dayGridMonth,listWeek",
+                    },
+                    "initialDate": fecha_hoy_local().isoformat(),
+                    "firstDay": 1,
+                    "selectable": False,
+                }
+                calendar(
+                    events=eventos_dreamm10,
+                    options=opciones_cal_dreamm10,
+                    key="calendar_dreamm10",
+                )
+
+            with st.expander("Vista previa de tablas", expanded=False):
+                hoja_preview = st.selectbox(
+                    "Hoja para previsualizar",
+                    options=nombres_hojas,
+                    key="dreamm10_preview_sheet",
+                )
+                df_preview = hojas_excel.get(hoja_preview, pd.DataFrame())
+                st.dataframe(df_preview, use_container_width=True, height=340)
 
 if seccion_activa == "Check list":
     st.subheader("✅ Check List por ensayo")
