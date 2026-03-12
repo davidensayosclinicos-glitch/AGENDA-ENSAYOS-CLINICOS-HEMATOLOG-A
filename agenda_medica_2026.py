@@ -1887,8 +1887,8 @@ def cargar_excel_por_hojas(ruta_excel):
     libro = pd.ExcelFile(ruta_excel)
     hojas = {}
     for hoja in libro.sheet_names:
-        # Leemos en crudo para preservar posiciones físicas de columnas (A,B,C,...)
-        df_hoja = pd.read_excel(libro, sheet_name=hoja, header=None)
+        # Formato actual: variables como encabezados de columna.
+        df_hoja = pd.read_excel(libro, sheet_name=hoja, header=0)
         hojas[hoja] = df_hoja
     return hojas
 
@@ -1899,8 +1899,8 @@ def cargar_excel_desde_bytes(bytes_excel):
     libro = pd.ExcelFile(buffer)
     hojas = {}
     for hoja in libro.sheet_names:
-        # Leemos en crudo para preservar posiciones físicas de columnas (A,B,C,...)
-        df_hoja = pd.read_excel(libro, sheet_name=hoja, header=None)
+        # Formato actual: variables como encabezados de columna.
+        df_hoja = pd.read_excel(libro, sheet_name=hoja, header=0)
         hojas[hoja] = df_hoja
     return hojas
 
@@ -2004,7 +2004,7 @@ def _extraer_tabla_variables_dreamm10(df):
     if df.empty:
         return pd.DataFrame(), {}
 
-    esperadas = {"w", "c", "fecha", "ventana+", "ventana-", "dosislena"}
+    esperadas = {"w", "week", "c", "ciclo", "fecha", "ventana+", "ventana-", "dosislena"}
     mejor_fila = None
     mejor_score = 0
     filas_max = min(len(df), 40)
@@ -2028,10 +2028,10 @@ def _extraer_tabla_variables_dreamm10(df):
     mapa = {}
     for col in tabla.columns:
         token = _normalizar_etiqueta_excel(col)
-        if token == "w":
-            mapa["w"] = col
-        elif token == "c":
-            mapa["c"] = col
+        if token in {"w", "week", "semana"}:
+            mapa["week"] = col
+        elif token in {"c", "ciclo"}:
+            mapa["ciclo"] = col
         elif token == "fecha":
             mapa["fecha"] = col
         elif token == "ventana+":
@@ -2042,6 +2042,25 @@ def _extraer_tabla_variables_dreamm10(df):
             mapa["dosis_lena"] = col
 
     return tabla, mapa
+
+
+def _mapear_columnas_variables_desde_headers(df):
+    mapa = {}
+    for col in df.columns:
+        token = _normalizar_etiqueta_excel(col)
+        if token in {"w", "week", "semana"}:
+            mapa["week"] = col
+        elif token in {"c", "ciclo"}:
+            mapa["ciclo"] = col
+        elif token in {"fecha", "date"}:
+            mapa["fecha"] = col
+        elif token in {"ventana+", "ventanamas", "window+", "windowplus"}:
+            mapa["ventana_mas"] = col
+        elif token in {"ventana-", "ventanamenos", "window-", "windowminus"}:
+            mapa["ventana_menos"] = col
+        elif token in {"dosislena", "lenalidomida", "dosislenalidomida"}:
+            mapa["dosis_lena"] = col
+    return mapa
 
 
 def _celda_indica_visita(valor):
@@ -2194,15 +2213,26 @@ def extraer_registros_visitas_dreamm10(df, nombre_hoja=""):
         return []
 
     registros = []
-    tabla_vars, mapa_vars = _extraer_tabla_variables_dreamm10(df)
+    tabla_vars = pd.DataFrame()
+    mapa_vars = {}
 
-    # Si detectamos encabezados de variables, usamos esa tabla (contenido por fila).
-    if not tabla_vars.empty and "fecha" in mapa_vars:
+    # 1) Formato preferente: variables ya son encabezados de columna.
+    mapa_headers = _mapear_columnas_variables_desde_headers(df)
+    if "fecha" in mapa_headers:
+        tabla_vars = df.copy().dropna(how="all")
+        mapa_vars = mapa_headers
         iterable = tabla_vars.iterrows()
         usar_tabla_vars = True
     else:
-        iterable = df.iterrows()
-        usar_tabla_vars = False
+        # 2) Fallback: detectar una fila que contiene los nombres de variables.
+        tabla_vars, mapa_vars = _extraer_tabla_variables_dreamm10(df)
+        if not tabla_vars.empty and "fecha" in mapa_vars:
+            iterable = tabla_vars.iterrows()
+            usar_tabla_vars = True
+        else:
+            # 3) Fallback final por linea, prioridad columna C.
+            iterable = df.iterrows()
+            usar_tabla_vars = False
 
     for _, row in iterable:
         fecha_dt = pd.NaT
@@ -2210,7 +2240,7 @@ def extraer_registros_visitas_dreamm10(df, nombre_hoja=""):
 
         if usar_tabla_vars:
             valor_fecha_raw = row.get(mapa_vars.get("fecha"))
-            valor_c_raw = row.get(mapa_vars.get("c"))
+            valor_c_raw = row.get(mapa_vars.get("ciclo"))
             valor_c = "" if pd.isna(valor_c_raw) else str(valor_c_raw).strip()
             fecha_dt = _convertir_valor_a_fecha_excel(valor_fecha_raw)
         else:
@@ -2236,8 +2266,8 @@ def extraer_registros_visitas_dreamm10(df, nombre_hoja=""):
         ciclo = ""
 
         if usar_tabla_vars:
-            valor_w = "" if "w" not in mapa_vars else str(row.get(mapa_vars["w"])).strip()
-            valor_c = "" if "c" not in mapa_vars else str(row.get(mapa_vars["c"])).strip()
+            valor_w = "" if "week" not in mapa_vars else str(row.get(mapa_vars["week"])).strip()
+            valor_c = "" if "ciclo" not in mapa_vars else str(row.get(mapa_vars["ciclo"])).strip()
             valor_vmas = "" if "ventana_mas" not in mapa_vars else str(row.get(mapa_vars["ventana_mas"])).strip()
             valor_vmenos = "" if "ventana_menos" not in mapa_vars else str(row.get(mapa_vars["ventana_menos"])).strip()
             valor_dosis = "" if "dosis_lena" not in mapa_vars else str(row.get(mapa_vars["dosis_lena"])).strip()
