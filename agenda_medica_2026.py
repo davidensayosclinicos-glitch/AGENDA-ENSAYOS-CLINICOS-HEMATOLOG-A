@@ -2021,6 +2021,7 @@ def _normalizar_etiqueta_excel(valor):
     txt = str(valor or "").strip().lower()
     txt = txt.replace("á", "a").replace("é", "e").replace("í", "i").replace("ó", "o").replace("ú", "u")
     txt = txt.replace(" ", "")
+    txt = re.sub(r"[^a-z0-9+\-]", "", txt)
     return txt
 
 
@@ -2082,7 +2083,7 @@ def _mapear_columnas_variables_desde_headers(df):
             mapa["ventana_mas"] = col
         elif token in {"ventana-", "ventanamenos", "window-", "windowminus"}:
             mapa["ventana_menos"] = col
-        elif token in {"dosislena", "lenalidomida", "dosislenalidomida"}:
+        elif token.startswith("dosislena") or token in {"dosis", "lenalidomida", "dosislenalidomida"}:
             mapa["dosis_lena"] = col
     return mapa
 
@@ -2442,7 +2443,8 @@ def construir_eventos_desde_registros_dreamm10(registros):
         week_visible = week or "-"
         ciclo_visible = ciclo or "-"
         dosis_visible = dosis or "-"
-        titulo = f"{paciente_visible} | W {week_visible} | C {ciclo_visible} | D {dosis_visible}"
+        # El recuadro del calendario recorta texto; ponemos D al inicio para que siempre se vea.
+        titulo = f"D {dosis_visible} | W {week_visible} | C {ciclo_visible} | {paciente_visible}"
 
         eventos.append(
             {
