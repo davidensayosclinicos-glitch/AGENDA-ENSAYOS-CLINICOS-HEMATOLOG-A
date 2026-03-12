@@ -2328,6 +2328,7 @@ def extraer_registros_visitas_dreamm10(df, nombre_hoja=""):
                 "ciclo": ciclo,
                 "w": valor_w,
                 "c": valor_c,
+                "dosis_lena": valor_dosis,
                 "ventana_mas": valor_vmas,
                 "ventana_menos": valor_vmenos,
                 "comentarios": comentario,
@@ -2434,12 +2435,14 @@ def construir_eventos_desde_registros_dreamm10(registros):
         nombre = str(r.get("nombre") or "").strip()
         week = str(r.get("w") or "").strip()
         ciclo = str(r.get("c") or "").strip()
+        dosis = str(r.get("dosis_lena") or "").strip()
         detalle = str(r.get("comentarios") or "").strip()
 
         paciente_visible = nombre or codigo or "Paciente"
         week_visible = week or "-"
         ciclo_visible = ciclo or "-"
-        titulo = f"{paciente_visible} | W {week_visible} | C {ciclo_visible}"
+        dosis_visible = dosis or "-"
+        titulo = f"{paciente_visible} | W {week_visible} | C {ciclo_visible} | D {dosis_visible}"
 
         eventos.append(
             {
@@ -2453,6 +2456,7 @@ def construir_eventos_desde_registros_dreamm10(registros):
                     "codigo": codigo,
                     "week": week,
                     "ciclo": ciclo,
+                    "dosis_lena": dosis,
                     "ventana_mas": str(r.get("ventana_mas") or "").strip(),
                     "ventana_menos": str(r.get("ventana_menos") or "").strip(),
                     "contenido": detalle,
@@ -3635,6 +3639,7 @@ if seccion_activa == "Calendario DREAMM10":
                         "fecha": str(registro_sel.get("fecha") or props_click.get("fecha") or ""),
                         "week": str(registro_sel.get("w") or props_click.get("week") or ""),
                         "ciclo": str(registro_sel.get("c") or props_click.get("ciclo") or ""),
+                        "dosis_lena": str(registro_sel.get("dosis_lena") or props_click.get("dosis_lena") or ""),
                         "ventana_mas": str(registro_sel.get("ventana_mas") or props_click.get("ventana_mas") or ""),
                         "ventana_menos": str(registro_sel.get("ventana_menos") or props_click.get("ventana_menos") or ""),
                         "contenido": str(registro_sel.get("comentarios") or props_click.get("contenido") or ""),
@@ -3658,6 +3663,7 @@ if seccion_activa == "Calendario DREAMM10":
                     c1.write(f"Fecha: {_formatear_fecha_es_sin_hora(evento_sel.get('fecha', ''))}")
                     c2.write(f"Week: {evento_sel.get('week', '')}")
                     c2.write(f"Ciclo: {evento_sel.get('ciclo', '')}")
+                    c2.write(f"Dosis: {evento_sel.get('dosis_lena', '')}")
                     c2.write(f"Origen (pestaña): {evento_sel.get('origen_hoja', '')}")
                     st.write(f"Ventana +: {evento_sel.get('ventana_mas', '')}")
                     st.write(f"Ventana -: {evento_sel.get('ventana_menos', '')}")
@@ -3677,12 +3683,13 @@ if seccion_activa == "Calendario DREAMM10":
                     if dia_df.empty:
                         st.info("No hay contenido para este día.")
                     else:
-                        dia_df = dia_df[["nombre", "w", "c", "ventana_mas", "ventana_menos", "comentarios"]].reset_index(drop=True)
+                        dia_df = dia_df[["nombre", "w", "c", "dosis_lena", "ventana_mas", "ventana_menos", "comentarios"]].reset_index(drop=True)
                         dia_df = dia_df.rename(
                             columns={
                                 "nombre": "PACIENTE",
                                 "w": "WEEK",
                                 "c": "CICLO",
+                                "dosis_lena": "DOSIS",
                                 "ventana_mas": "VENTANA +",
                                 "ventana_menos": "VENTANA -",
                                 "comentarios": "CONTENIDO",
