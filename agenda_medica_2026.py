@@ -2021,14 +2021,21 @@ def _normalizar_etiqueta_excel(valor):
     txt = str(valor or "").strip().lower()
     txt = txt.replace("á", "a").replace("é", "e").replace("í", "i").replace("ó", "o").replace("ú", "u")
     txt = txt.replace(" ", "")
+    txt = re.sub(r"[^a-z0-9+\-]", "", txt)
     return txt
+
+
+def _valor_texto_celda(valor):
+    if pd.isna(valor):
+        return ""
+    return str(valor).strip()
 
 
 def _extraer_tabla_variables_dreamm10(df):
     if df.empty:
         return pd.DataFrame(), {}
 
-    esperadas = {"w", "week", "c", "ciclo", "fecha", "ventana+", "ventana-", "dosislena"}
+    esperadas = {"w", "week", "c", "ciclo", "fecha", "ventana+", "ventana-", "dosislena", "dosis"}
     mejor_fila = None
     mejor_score = 0
     filas_max = min(len(df), 40)
@@ -2062,7 +2069,7 @@ def _extraer_tabla_variables_dreamm10(df):
             mapa["ventana_mas"] = col
         elif token == "ventana-":
             mapa["ventana_menos"] = col
-        elif token == "dosislena":
+        elif token.startswith("dosis") or token in {"lenalidomida", "dosislenalidomida"}:
             mapa["dosis_lena"] = col
 
     return tabla, mapa
@@ -2082,7 +2089,7 @@ def _mapear_columnas_variables_desde_headers(df):
             mapa["ventana_mas"] = col
         elif token in {"ventana-", "ventanamenos", "window-", "windowminus"}:
             mapa["ventana_menos"] = col
-        elif token in {"dosislena", "lenalidomida", "dosislenalidomida"}:
+        elif token.startswith("dosis") or token in {"lenalidomida", "dosislenalidomida"}:
             mapa["dosis_lena"] = col
     return mapa
 
@@ -2290,16 +2297,16 @@ def extraer_registros_visitas_dreamm10(df, nombre_hoja=""):
         ciclo = ""
 
         if usar_tabla_vars:
-            valor_w = "" if "week" not in mapa_vars else str(row.get(mapa_vars["week"])).strip()
-            valor_c = "" if "ciclo" not in mapa_vars else str(row.get(mapa_vars["ciclo"])).strip()
+            valor_w = "" if "week" not in mapa_vars else _valor_texto_celda(row.get(mapa_vars["week"]))
+            valor_c = "" if "ciclo" not in mapa_vars else _valor_texto_celda(row.get(mapa_vars["ciclo"]))
             valor_vmas = "" if "ventana_mas" not in mapa_vars else _formatear_fecha_es_sin_hora(row.get(mapa_vars["ventana_mas"]))
             valor_vmenos = "" if "ventana_menos" not in mapa_vars else _formatear_fecha_es_sin_hora(row.get(mapa_vars["ventana_menos"]))
-            valor_dosis = "" if "dosis_lena" not in mapa_vars else str(row.get(mapa_vars["dosis_lena"]) or "").strip()
+            valor_dosis = "" if "dosis_lena" not in mapa_vars else _valor_texto_celda(row.get(mapa_vars["dosis_lena"]))
         else:
             col_w_idx = 22 if len(row) > 22 else None
             col_ventana_mas_idx = _detectar_columna_por_texto_en_hoja(df, r"ventana\s*\+")
             col_ventana_menos_idx = _detectar_columna_por_texto_en_hoja(df, r"ventana\s*-")
-            valor_w = "" if col_w_idx is None else str(row.iloc[col_w_idx]).strip()
+            valor_w = "" if col_w_idx is None else _valor_texto_celda(row.iloc[col_w_idx])
             valor_vmas = "" if col_ventana_mas_idx is None else _formatear_fecha_es_sin_hora(row.iloc[col_ventana_mas_idx])
             valor_vmenos = "" if col_ventana_menos_idx is None else _formatear_fecha_es_sin_hora(row.iloc[col_ventana_menos_idx])
             valor_dosis = ""
