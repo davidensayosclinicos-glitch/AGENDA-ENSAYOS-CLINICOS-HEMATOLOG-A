@@ -1949,50 +1949,125 @@ def _detectar_columna_fecha(df):
     return mejor_col
 
 
-def construir_eventos_calendario_dreamm10(df, nombre_hoja=""):
-    if df.empty:
-        return []
+def _detectar_fechas_en_encabezados(df):
+    columnas_fecha = []
+    for col in df.columns:
+        texto_col = str(col).strip()
+        if not texto_col:
+            continue
+        dt = pd.to_datetime(texto_col, errors="coerce", dayfirst=True)
+        if pd.notna(dt):
+            columnas_fecha.append((col, dt.date().isoformat()))
+    return columnas_fecha
 
-    col_fecha = _detectar_columna_fecha(df)
-    if col_fecha is None:
+
+def _celda_indica_visita(valor):
+    if pd.isna(valor):
+        return False
+
+    if isinstance(valor, (int, float)):
+        return float(valor) != 0.0
+
+    txt = str(valor).strip().lower()
+    if not txt:
+        return False
+    if txt in {"0", "no", "nan", "none", "false", "-"}:
+        return False
+    return True
+
+
+def construir_eventos_calendario_dreamm10(
+    df,
+    nombre_hoja="",
+    modo_fecha="Auto",
+    col_fecha_forzada=None,
+):
+    if df.empty:
         return []
 
     col_codigo = _buscar_columna_por_patron(df, [r"codigo", r"paciente", r"nombre", r"id"])
     col_ciclo = _buscar_columna_por_patron(df, [r"ciclo", r"visit", r"dia", r"día", r"day"])
 
-    trabajo = df.copy()
-    trabajo["__fecha__"] = pd.to_datetime(trabajo[col_fecha], errors="coerce", dayfirst=True)
-    trabajo = trabajo[trabajo["__fecha__"].notna()].copy()
-
     eventos = []
-    for _, row in trabajo.iterrows():
-        fecha = row["__fecha__"].date().isoformat()
 
-        piezas_titulo = ["DREAMM10"]
+    def _titulo_base(row):
+        piezas = ["DREAMM10"]
         if col_codigo is not None:
             codigo = str(row.get(col_codigo, "")).strip()
             if codigo and codigo.lower() != "nan":
-                piezas_titulo.append(codigo)
+                piezas.append(codigo)
         if col_ciclo is not None:
             ciclo = str(row.get(col_ciclo, "")).strip()
             if ciclo and ciclo.lower() != "nan":
-                piezas_titulo.append(ciclo)
-
-        titulo = " | ".join(piezas_titulo)
+                piezas.append(ciclo)
+        titulo_base = " | ".join(piezas)
         if nombre_hoja:
-            titulo = f"{titulo} [{nombre_hoja}]"
+            titulo_base = f"{titulo_base} [{nombre_hoja}]"
+        return titulo_base
 
-        eventos.append(
-            {
-                "title": titulo,
-                "start": fecha,
-                "allDay": True,
-                "backgroundColor": "#0ea5e9",
-                "borderColor": "#0369a1",
-            }
-        )
+    usar_columna_fecha = modo_fecha in {"Auto", "Columna fecha"}
+    usar_fechas_encabezado = modo_fecha in {"Auto", "Encabezados con fecha"}
+
+    if usar_columna_fecha:
+        col_fecha = col_fecha_forzada or _detectar_columna_fecha(df)
+        if col_fecha is not None:
+            trabajo = df.copy()
+            trabajo["__fecha__"] = pd.to_datetime(trabajo[col_fecha], errors="coerce", dayfirst=True)
+            trabajo = trabajo[trabajo["__fecha__"].notna()].copy()
+
+            for _, row in trabajo.iterrows():
+                eventos.append(
+                    {
+                        "title": _titulo_base(row),
+                        "start": row["__fecha__"].date().isoformat(),
+                        "allDay": True,
+                        "backgroundColor": "#0ea5e9",
+                        "borderColor": "#0369a1",
+                    }
+                )
+
+    if usar_fechas_encabezado:
+        cols_fecha = _detectar_fechas_en_encabezados(df)
+        if cols_fecha:
+            for _, row in df.iterrows():
+                titulo_base = _titulo_base(row)
+                for col_fecha, fecha_iso in cols_fecha:
+                    valor = row.get(col_fecha)
+                    if not _celda_indica_visita(valor):
+                        continue
+                    eventos.append(
+                        {
+                            "title": titulo_base,
+                            "start": fecha_iso,
+                            "allDay": True,
+                            "backgroundColor": "#0ea5e9",
+                            "borderColor": "#0369a1",
+                        }
+                    )
+
+    dedupe = {}
+    for ev in eventos:
+        clave = f"{ev.get('start','')}|{ev.get('title','')}"
+        dedupe[clave] = ev
+    eventos = list(dedupe.values())
+
+    if len(eventos) > 3000:
+        eventos = eventos[:3000]
 
     return eventos
+
+
+def diagnostico_columnas_fecha(df):
+    filas = []
+    for col in df.columns:
+        serie_fecha = pd.to_datetime(df[col], errors="coerce", dayfirst=True)
+        score = int(serie_fecha.notna().sum())
+        if score > 0:
+            filas.append({"columna": str(col), "fechas_validas": score})
+    if not filas:
+        return pd.DataFrame(columns=["columna", "fechas_validas"])
+    return pd.DataFrame(filas).sort_values(by="fechas_validas", ascending=False).reset_index(drop=True)
+
 
 @st.cache_data(show_spinner=False)
 def extraer_texto_pdf(ruta_pdf):
@@ -3029,11 +3104,50 @@ if seccion_activa == "Calendario DREAMM10":
             eventos_dreamm10 = []
             for hoja in hojas_mostrar:
                 df_hoja = hojas_excel.get(hoja, pd.DataFrame())
-                eventos_dreamm10.extend(construir_eventos_calendario_dreamm10(df_hoja, nombre_hoja=hoja))
+                if df_hoja.empty:
+                    continue
+
+                st.markdown(f"**Configuración de hoja:** {hoja}")
+                cols_conf_1, cols_conf_2 = st.columns([1, 1])
+                modo_hoja = cols_conf_1.selectbox(
+                    "Modo de lectura de fechas",
+                    options=["Auto", "Columna fecha", "Encabezados con fecha"],
+                    key=f"dreamm10_modo_{hoja}",
+                )
+
+                mapa_columnas = {str(c): c for c in df_hoja.columns}
+                opciones_columna = ["Auto"] + list(mapa_columnas.keys())
+                col_sel_txt = cols_conf_2.selectbox(
+                    "Columna de fecha (si aplica)",
+                    options=opciones_columna,
+                    key=f"dreamm10_col_fecha_{hoja}",
+                )
+                col_forzada = None if col_sel_txt == "Auto" else mapa_columnas.get(col_sel_txt)
+
+                eventos_hoja = construir_eventos_calendario_dreamm10(
+                    df_hoja,
+                    nombre_hoja=hoja,
+                    modo_fecha=modo_hoja,
+                    col_fecha_forzada=col_forzada,
+                )
+                st.caption(f"Eventos detectados en {hoja}: {len(eventos_hoja)}")
+                eventos_dreamm10.extend(eventos_hoja)
 
             if not eventos_dreamm10:
                 st.warning("No se detectaron fechas válidas en las hojas seleccionadas para construir el calendario.")
+                with st.expander("Diagnóstico de fechas detectadas", expanded=True):
+                    for hoja in hojas_mostrar:
+                        df_diag = hojas_excel.get(hoja, pd.DataFrame())
+                        if df_diag.empty:
+                            continue
+                        st.markdown(f"**{hoja}**")
+                        diag = diagnostico_columnas_fecha(df_diag)
+                        if diag.empty:
+                            st.caption("Sin columnas con valores convertibles a fecha.")
+                        else:
+                            st.dataframe(diag, use_container_width=True, height=180)
             else:
+                st.success(f"Eventos totales en calendario: {len(eventos_dreamm10)}")
                 opciones_cal_dreamm10 = {
                     "editable": False,
                     "navLinks": True,
