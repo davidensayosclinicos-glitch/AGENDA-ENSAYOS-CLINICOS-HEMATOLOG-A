@@ -1887,9 +1887,8 @@ def cargar_excel_por_hojas(ruta_excel):
     libro = pd.ExcelFile(ruta_excel)
     hojas = {}
     for hoja in libro.sheet_names:
-        df_hoja = pd.read_excel(libro, sheet_name=hoja)
-        if isinstance(df_hoja, pd.DataFrame):
-            df_hoja = df_hoja.dropna(how="all").dropna(how="all", axis=1)
+        # Leemos en crudo para preservar posiciones físicas de columnas (A,B,C,...)
+        df_hoja = pd.read_excel(libro, sheet_name=hoja, header=None)
         hojas[hoja] = df_hoja
     return hojas
 
@@ -1900,9 +1899,8 @@ def cargar_excel_desde_bytes(bytes_excel):
     libro = pd.ExcelFile(buffer)
     hojas = {}
     for hoja in libro.sheet_names:
-        df_hoja = pd.read_excel(libro, sheet_name=hoja)
-        if isinstance(df_hoja, pd.DataFrame):
-            df_hoja = df_hoja.dropna(how="all").dropna(how="all", axis=1)
+        # Leemos en crudo para preservar posiciones físicas de columnas (A,B,C,...)
+        df_hoja = pd.read_excel(libro, sheet_name=hoja, header=None)
         hojas[hoja] = df_hoja
     return hojas
 
@@ -1979,6 +1977,20 @@ def _convertir_valor_a_fecha_excel(valor):
             return pd.to_datetime(float(valor), unit="D", origin="1899-12-30", errors="coerce")
 
     return pd.to_datetime(valor, errors="coerce", dayfirst=True)
+
+
+def _detectar_columna_por_texto_en_hoja(df, patron):
+    if df.empty:
+        return None
+    filas_max = min(len(df), 25)
+    for i in range(filas_max):
+        for j, valor in enumerate(df.iloc[i].tolist()):
+            texto = str(valor).strip().lower()
+            if not texto or texto == "nan":
+                continue
+            if re.search(patron, texto):
+                return j
+    return None
 
 
 def _celda_indica_visita(valor):
@@ -2130,49 +2142,30 @@ def extraer_registros_visitas_dreamm10(df, nombre_hoja=""):
     if df.empty:
         return []
 
-    col_codigo = _buscar_columna_por_patron(df, [r"codigo", r"id", r"paciente"])
-    col_nombre = _buscar_columna_por_patron(df, [r"nombre", r"paciente"])
-    col_ciclo = _buscar_columna_por_patron(df, [r"ciclo", r"visit", r"dia", r"día", r"day"])
-    col_w = _buscar_columna_por_patron(df, [r"^w$", r"semana", r"week"])
-    col_c = _buscar_columna_por_patron(df, [r"^c$", r"ciclo"])
-    col_ventana_mas = _buscar_columna_por_patron(df, [r"ventana\s*\+", r"window\s*\+"])
-    col_ventana_menos = _buscar_columna_por_patron(df, [r"ventana\s*-", r"window\s*-"])
-
-    # Regla solicitada: trasladar las fechas de la columna C del Excel.
-    col_fecha = None
-    if len(df.columns) >= 3:
-        col_fecha = df.columns[2]
-    else:
-        col_fecha = _detectar_columna_fecha(df)
+    # Regla solicitada: usar columna C real (índice 2) como fecha.
+    col_fecha_idx = 2 if df.shape[1] > 2 else None
+    col_w_idx = 22 if df.shape[1] > 22 else None  # Columna W real
+    col_ventana_mas_idx = _detectar_columna_por_texto_en_hoja(df, r"ventana\s*\+")
+    col_ventana_menos_idx = _detectar_columna_por_texto_en_hoja(df, r"ventana\s*-")
 
     registros = []
-    if col_fecha is None:
+    if col_fecha_idx is None:
         return registros
 
     trabajo = df.copy()
-    trabajo["__fecha__"] = _convertir_serie_a_fecha_excel(trabajo[col_fecha])
+    trabajo["__fecha__"] = _convertir_serie_a_fecha_excel(trabajo.iloc[:, col_fecha_idx])
     trabajo = trabajo[trabajo["__fecha__"].notna()].copy()
 
     for _, row in trabajo.iterrows():
-        codigo = "" if col_codigo is None else str(row.get(col_codigo, "")).strip()
-        nombre = "" if col_nombre is None else str(row.get(col_nombre, "")).strip()
-
-        # Regla solicitada: cada pestaña representa un paciente.
-        # Si el Excel no trae nombre/código explícito en columnas, usamos la pestaña.
-        if (not nombre or nombre.lower() == "nan") and nombre_hoja:
-            nombre = str(nombre_hoja).strip()
-        if (not codigo or codigo.lower() == "nan") and nombre_hoja:
-            codigo = str(nombre_hoja).strip()
+        # Cada pestaña es un paciente.
+        codigo = str(nombre_hoja or "").strip()
+        nombre = str(nombre_hoja or "").strip()
         ciclo = ""
-        if col_c is not None:
-            ciclo = str(row.get(col_c, "")).strip()
-        elif col_ciclo is not None:
-            ciclo = str(row.get(col_ciclo, "")).strip()
 
-        valor_w = "" if col_w is None else str(row.get(col_w, "")).strip()
-        valor_c = "" if col_c is None else str(row.get(col_c, "")).strip()
-        valor_vmas = "" if col_ventana_mas is None else str(row.get(col_ventana_mas, "")).strip()
-        valor_vmenos = "" if col_ventana_menos is None else str(row.get(col_ventana_menos, "")).strip()
+        valor_w = "" if col_w_idx is None else str(row.iloc[col_w_idx]).strip()
+        valor_c = str(row.iloc[col_fecha_idx]).strip()
+        valor_vmas = "" if col_ventana_mas_idx is None else str(row.iloc[col_ventana_mas_idx]).strip()
+        valor_vmenos = "" if col_ventana_menos_idx is None else str(row.iloc[col_ventana_menos_idx]).strip()
 
         partes_comentario = []
         if valor_w and valor_w.lower() != "nan":
