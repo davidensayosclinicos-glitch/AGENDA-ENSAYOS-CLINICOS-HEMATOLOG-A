@@ -3259,7 +3259,6 @@ if seccion_activa == "Calendario DREAMM10":
         except Exception as e:
             st.error(f"No se pudo leer el Excel seleccionado: {e}")
             hojas_excel = {}
-                registros_dreamm10 = []
 
         if not hojas_excel:
             st.warning("El archivo no contiene hojas con datos legibles.")
@@ -3268,6 +3267,7 @@ if seccion_activa == "Calendario DREAMM10":
             hojas_mostrar = nombres_hojas
 
             eventos_dreamm10 = []
+            registros_dreamm10 = []
             for hoja in hojas_mostrar:
                 df_hoja = hojas_excel.get(hoja, pd.DataFrame())
                 if df_hoja.empty:
