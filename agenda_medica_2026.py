@@ -2113,7 +2113,10 @@ def extraer_registros_visitas_dreamm10(df, nombre_hoja=""):
     col_codigo = _buscar_columna_por_patron(df, [r"codigo", r"id", r"paciente"])
     col_nombre = _buscar_columna_por_patron(df, [r"nombre", r"paciente"])
     col_ciclo = _buscar_columna_por_patron(df, [r"ciclo", r"visit", r"dia", r"día", r"day"])
-    col_ventana = _buscar_columna_por_patron(df, [r"ventana", r"window"])
+    col_w = _buscar_columna_por_patron(df, [r"^w$", r"semana", r"week"])
+    col_c = _buscar_columna_por_patron(df, [r"^c$", r"ciclo"])
+    col_ventana_mas = _buscar_columna_por_patron(df, [r"ventana\s*\+", r"window\s*\+"])
+    col_ventana_menos = _buscar_columna_por_patron(df, [r"ventana\s*-", r"window\s*-"])
 
     # Regla solicitada: trasladar las fechas de la columna C del Excel.
     col_fecha = None
@@ -2133,11 +2136,27 @@ def extraer_registros_visitas_dreamm10(df, nombre_hoja=""):
     for _, row in trabajo.iterrows():
         codigo = "" if col_codigo is None else str(row.get(col_codigo, "")).strip()
         nombre = "" if col_nombre is None else str(row.get(col_nombre, "")).strip()
-        ciclo = "" if col_ciclo is None else str(row.get(col_ciclo, "")).strip()
-        ventana = "" if col_ventana is None else str(row.get(col_ventana, "")).strip()
-        comentario = ""
-        if ventana and ventana.lower() != "nan":
-            comentario = f"Ventana: {ventana}"
+        ciclo = ""
+        if col_c is not None:
+            ciclo = str(row.get(col_c, "")).strip()
+        elif col_ciclo is not None:
+            ciclo = str(row.get(col_ciclo, "")).strip()
+
+        valor_w = "" if col_w is None else str(row.get(col_w, "")).strip()
+        valor_c = "" if col_c is None else str(row.get(col_c, "")).strip()
+        valor_vmas = "" if col_ventana_mas is None else str(row.get(col_ventana_mas, "")).strip()
+        valor_vmenos = "" if col_ventana_menos is None else str(row.get(col_ventana_menos, "")).strip()
+
+        partes_comentario = []
+        if valor_w and valor_w.lower() != "nan":
+            partes_comentario.append(f"W: {valor_w}")
+        if valor_c and valor_c.lower() != "nan":
+            partes_comentario.append(f"C: {valor_c}")
+        if valor_vmas and valor_vmas.lower() != "nan":
+            partes_comentario.append(f"Ventana +: {valor_vmas}")
+        if valor_vmenos and valor_vmenos.lower() != "nan":
+            partes_comentario.append(f"Ventana -: {valor_vmenos}")
+        comentario = " | ".join(partes_comentario)
 
         registros.append(
             {
@@ -2146,6 +2165,10 @@ def extraer_registros_visitas_dreamm10(df, nombre_hoja=""):
                 "nombre": nombre,
                 "ensayo": "DREAMM 10",
                 "ciclo": ciclo,
+                "w": valor_w,
+                "c": valor_c,
+                "ventana_mas": valor_vmas,
+                "ventana_menos": valor_vmenos,
                 "comentarios": comentario,
                 "origen_hoja": nombre_hoja,
             }
@@ -3271,22 +3294,25 @@ if seccion_activa == "Calendario DREAMM10":
                 df_hoja = hojas_excel.get(hoja, pd.DataFrame())
                 if df_hoja.empty:
                     continue
-                eventos_hoja = construir_eventos_calendario_dreamm10(
-                    df_hoja,
-                    nombre_hoja=hoja,
-                    modo_fecha="Auto",
-                    col_fecha_forzada=None,
-                )
-
-                if not eventos_hoja:
-                    eventos_hoja = construir_eventos_fallback_todas_fechas(df_hoja, nombre_hoja=hoja)
-
-                eventos_dreamm10.extend(eventos_hoja)
                 registros_dreamm10.extend(extraer_registros_visitas_dreamm10(df_hoja, nombre_hoja=hoja))
+
+            eventos_dreamm10 = construir_eventos_desde_registros_dreamm10(registros_dreamm10)
 
             if registros_dreamm10:
                 tabla_registros = pd.DataFrame(registros_dreamm10)
-                columnas_tabla = ["fecha", "codigo", "nombre", "ensayo", "ciclo", "origen_hoja"]
+                columnas_tabla = [
+                    "fecha",
+                    "codigo",
+                    "nombre",
+                    "ensayo",
+                    "ciclo",
+                    "w",
+                    "c",
+                    "ventana_mas",
+                    "ventana_menos",
+                    "comentarios",
+                    "origen_hoja",
+                ]
                 for col in columnas_tabla:
                     if col not in tabla_registros.columns:
                         tabla_registros[col] = ""
@@ -3307,7 +3333,7 @@ if seccion_activa == "Calendario DREAMM10":
                 st.info("No se detectaron registros de fechas para trasladar a la tabla.")
 
             if not eventos_dreamm10:
-                st.warning("No se detectaron fechas válidas en las hojas seleccionadas para construir el calendario.")
+                st.warning("No se detectaron fechas válidas en columna C para construir el calendario.")
                 with st.expander("Diagnóstico de fechas detectadas", expanded=True):
                     for hoja in hojas_mostrar:
                         df_diag = hojas_excel.get(hoja, pd.DataFrame())
@@ -4117,6 +4143,43 @@ if seccion_activa == "Agenda":
                         f"Tablet: {'Si' if paciente['tablet'] else 'No'}\n"
                         f"Medula: {'Si' if paciente['medula'] else 'No'}\n"
                         f"Otras pruebas: {paciente['otras_pruebas']}\n"
+                        f"Comentarios: {paciente['comentarios']}\n"
+                        f"Revision ocular (sede): {rev_informe.get('sede', '')}\n"
+                        f"Medico ocular: {rev_informe.get('medico', '')}\n"
+                        f"Agenda hospitalaria ocular: {rev_informe.get('agenda_hospitalaria', '')}\n"
+                        f"Fecha evaluacion ocular: {formatear_fecha_visita(rev_informe.get('fecha_evaluacion', ''))}\n"
+                        f"Resultado ocular: {rev_informe.get('resultado', '')}\n"
+                        f"Adenda paciente: {adenda_paciente_info.get('texto', '')}\n"
+                    )
+                    st.download_button(
+                        "Descargar informe",
+                        data=informe,
+                        file_name=f"informe_{paciente['codigo']}_{fecha_visita}.txt",
+                        mime="text/plain"
+                    )
+                    if st.button("Imprimir informe"):
+                        titulo = f"Informe {paciente['codigo']} - {fecha_visita}"
+                        render_print_dialog(informe, titulo)
+
+                    st.divider()
+                    col_del, col_close = st.columns(2)
+                    if col_del.button("🗑️ Borrar Cita", type="primary"):
+                        borrar_visita(id_evento)
+                        st.session_state['modo_formulario'] = None
+                        st.rerun()
+
+                    if col_close.button("Cerrar Ficha"):
+                        st.session_state['modo_formulario'] = None
+                        st.rerun()
+                else:
+                    st.warning("No se encontraron datos (quizás se borró).")
+                    if st.button("Volver"):
+                        st.session_state['modo_formulario'] = None
+                        st.rerun()
+
+        else:
+            st.info("👈 Haz clic en un día para añadir pacientes.")
+            st.caption("Los días con '🩸' indican punción de médula.")
                         f"Comentarios: {paciente['comentarios']}\n"
                         f"Revision ocular (sede): {rev_informe.get('sede', '')}\n"
                         f"Medico ocular: {rev_informe.get('medico', '')}\n"
