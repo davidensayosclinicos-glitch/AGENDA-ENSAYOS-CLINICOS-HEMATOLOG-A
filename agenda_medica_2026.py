@@ -1979,6 +1979,30 @@ def _convertir_valor_a_fecha_excel(valor):
     return pd.to_datetime(valor, errors="coerce", dayfirst=True)
 
 
+def _formatear_fecha_es_sin_hora(valor):
+    if pd.isna(valor):
+        return ""
+
+    dt = _convertir_valor_a_fecha_excel(valor)
+    if pd.notna(dt):
+        return dt.strftime("%d/%m/%Y")
+
+    txt = str(valor or "").strip()
+    if not txt or txt.lower() == "nan":
+        return ""
+
+    # Si viene como texto con hora, nos quedamos con la parte de fecha.
+    if " " in txt and ":" in txt.split(" ", 1)[1]:
+        txt = txt.split(" ", 1)[0].strip()
+
+    # Intento final de parseo para devolver siempre formato español cuando sea fecha.
+    dt2 = pd.to_datetime(txt, errors="coerce", dayfirst=True)
+    if pd.notna(dt2):
+        return dt2.strftime("%d/%m/%Y")
+
+    return txt
+
+
 def _detectar_columna_por_texto_en_hoja(df, patron):
     if df.empty:
         return None
@@ -2267,17 +2291,17 @@ def extraer_registros_visitas_dreamm10(df, nombre_hoja=""):
 
         if usar_tabla_vars:
             valor_w = "" if "week" not in mapa_vars else str(row.get(mapa_vars["week"])).strip()
-            valor_c = "" if "ciclo" not in mapa_vars else str(row.get(mapa_vars["ciclo"])).strip()
-            valor_vmas = "" if "ventana_mas" not in mapa_vars else str(row.get(mapa_vars["ventana_mas"])).strip()
-            valor_vmenos = "" if "ventana_menos" not in mapa_vars else str(row.get(mapa_vars["ventana_menos"])).strip()
-            valor_dosis = "" if "dosis_lena" not in mapa_vars else str(row.get(mapa_vars["dosis_lena"])).strip()
+            valor_c = "" if "ciclo" not in mapa_vars else _formatear_fecha_es_sin_hora(row.get(mapa_vars["ciclo"]))
+            valor_vmas = "" if "ventana_mas" not in mapa_vars else _formatear_fecha_es_sin_hora(row.get(mapa_vars["ventana_mas"]))
+            valor_vmenos = "" if "ventana_menos" not in mapa_vars else _formatear_fecha_es_sin_hora(row.get(mapa_vars["ventana_menos"]))
+            valor_dosis = "" if "dosis_lena" not in mapa_vars else _formatear_fecha_es_sin_hora(row.get(mapa_vars["dosis_lena"]))
         else:
             col_w_idx = 22 if len(row) > 22 else None
             col_ventana_mas_idx = _detectar_columna_por_texto_en_hoja(df, r"ventana\s*\+")
             col_ventana_menos_idx = _detectar_columna_por_texto_en_hoja(df, r"ventana\s*-")
             valor_w = "" if col_w_idx is None else str(row.iloc[col_w_idx]).strip()
-            valor_vmas = "" if col_ventana_mas_idx is None else str(row.iloc[col_ventana_mas_idx]).strip()
-            valor_vmenos = "" if col_ventana_menos_idx is None else str(row.iloc[col_ventana_menos_idx]).strip()
+            valor_vmas = "" if col_ventana_mas_idx is None else _formatear_fecha_es_sin_hora(row.iloc[col_ventana_mas_idx])
+            valor_vmenos = "" if col_ventana_menos_idx is None else _formatear_fecha_es_sin_hora(row.iloc[col_ventana_menos_idx])
             valor_dosis = ""
 
         partes_comentario = []
@@ -3515,6 +3539,7 @@ if seccion_activa == "Calendario DREAMM10":
                     if col not in tabla_registros.columns:
                         tabla_registros[col] = ""
                 tabla_registros = tabla_registros[columnas_tabla].sort_values(by=["fecha", "codigo", "nombre"]).reset_index(drop=True)
+                tabla_registros["fecha"] = tabla_registros["fecha"].apply(_formatear_fecha_es_sin_hora)
 
                 st.markdown("### 📥 Traslado a tabla")
                 st.caption(f"Fechas detectadas para importar: {len(tabla_registros)}")
@@ -3631,7 +3656,7 @@ if seccion_activa == "Calendario DREAMM10":
                     c1, c2 = st.columns(2)
                     c1.write(f"Paciente: {evento_sel.get('paciente', '')}")
                     c1.write(f"Código: {evento_sel.get('codigo', '')}")
-                    c1.write(f"Fecha: {evento_sel.get('fecha', '')}")
+                    c1.write(f"Fecha: {_formatear_fecha_es_sin_hora(evento_sel.get('fecha', ''))}")
                     c2.write(f"Week: {evento_sel.get('week', '')}")
                     c2.write(f"Ciclo: {evento_sel.get('ciclo', '')}")
                     c2.write(f"Origen (pestaña): {evento_sel.get('origen_hoja', '')}")
@@ -3648,7 +3673,7 @@ if seccion_activa == "Calendario DREAMM10":
                     )
                     st.session_state["dreamm10_fecha_detalle"] = fecha_detalle
 
-                    fecha_txt = fecha_detalle.isoformat()
+                    fecha_txt = fecha_detalle.strftime("%d/%m/%Y")
                     dia_df = tabla_registros[tabla_registros["fecha"].astype(str) == fecha_txt].copy()
                     if dia_df.empty:
                         st.info("No hay contenido para este día.")
