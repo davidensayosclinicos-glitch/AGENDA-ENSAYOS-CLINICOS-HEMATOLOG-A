@@ -3470,6 +3470,7 @@ if seccion_activa == "Calendario DREAMM10":
 
             eventos_dreamm10 = []
             registros_dreamm10 = []
+            tabla_registros = pd.DataFrame()
             for hoja in hojas_mostrar:
                 df_hoja = hojas_excel.get(hoja, pd.DataFrame())
                 if df_hoja.empty:
@@ -3538,13 +3539,57 @@ if seccion_activa == "Calendario DREAMM10":
                     },
                     "initialDate": fecha_hoy_local().isoformat(),
                     "firstDay": 1,
-                    "selectable": False,
+                    "selectable": True,
                 }
-                calendar(
+                estado_cal_dreamm10 = calendar(
                     events=eventos_dreamm10,
                     options=opciones_cal_dreamm10,
                     key="calendar_dreamm10",
                 )
+
+                if "dreamm10_fecha_detalle" not in st.session_state:
+                    st.session_state["dreamm10_fecha_detalle"] = fecha_hoy_local()
+
+                if estado_cal_dreamm10 and estado_cal_dreamm10.get("dateClick"):
+                    fecha_click = estado_cal_dreamm10["dateClick"].get("date", "")
+                    if fecha_click:
+                        st.session_state["dreamm10_fecha_detalle"] = pd.to_datetime(fecha_click, errors="coerce").date()
+
+                if estado_cal_dreamm10 and estado_cal_dreamm10.get("eventClick"):
+                    fecha_evento = (
+                        estado_cal_dreamm10["eventClick"].get("event", {}).get("start")
+                        or estado_cal_dreamm10["eventClick"].get("event", {}).get("startStr")
+                        or ""
+                    )
+                    if fecha_evento:
+                        st.session_state["dreamm10_fecha_detalle"] = pd.to_datetime(fecha_evento, errors="coerce").date()
+
+                if not tabla_registros.empty:
+                    st.markdown("### 📌 Contenido del día")
+                    fecha_detalle = st.date_input(
+                        "Selecciona día",
+                        value=st.session_state.get("dreamm10_fecha_detalle", fecha_hoy_local()),
+                        key="dreamm10_fecha_detalle_input",
+                    )
+                    st.session_state["dreamm10_fecha_detalle"] = fecha_detalle
+
+                    fecha_txt = fecha_detalle.isoformat()
+                    dia_df = tabla_registros[tabla_registros["fecha"].astype(str) == fecha_txt].copy()
+                    if dia_df.empty:
+                        st.info("No hay contenido para este día.")
+                    else:
+                        dia_df = dia_df[["nombre", "w", "c", "ventana_mas", "ventana_menos", "comentarios"]].reset_index(drop=True)
+                        dia_df = dia_df.rename(
+                            columns={
+                                "nombre": "PACIENTE",
+                                "w": "WEEK",
+                                "c": "CICLO",
+                                "ventana_mas": "VENTANA +",
+                                "ventana_menos": "VENTANA -",
+                                "comentarios": "CONTENIDO",
+                            }
+                        )
+                        st.dataframe(dia_df, use_container_width=True, height=220)
 
             with st.expander("Vista previa de tablas", expanded=False):
                 hoja_preview = st.selectbox(
