@@ -1503,18 +1503,31 @@ def get_pacientes_con_adenda(ensayo):
     try:
         df = pd.read_sql(
             """
-            SELECT codigo, nombre, fecha_modificacion
+            SELECT codigo, nombre, texto, fecha_modificacion
             FROM adendas_paciente
             WHERE ensayo = ?
-              AND TRIM(COALESCE(texto, '')) <> ''
             ORDER BY codigo ASC, nombre ASC
             """,
             conn,
             params=(ensayo,)
         )
     except Exception:
-        df = pd.DataFrame(columns=["codigo", "nombre", "fecha_modificacion"])
+        df = pd.DataFrame(columns=["codigo", "nombre", "texto", "fecha_modificacion"])
     conn.close()
+
+    if df.empty:
+        return df
+
+    if "texto" in df.columns:
+        texto_limpio = (
+            df["texto"]
+            .fillna("")
+            .astype(str)
+            .str.replace(r"\s+", "", regex=True)
+        )
+        df = df[texto_limpio != ""].copy()
+        df = df[["codigo", "nombre", "fecha_modificacion"]]
+
     return df
 
 
@@ -1539,22 +1552,80 @@ def get_adendas_ensayo():
 @st.cache_data(show_spinner=False)
 def get_ensayos_con_adendas_pendientes():
     conn = connect_db()
+
+    def _filtrar_texto_no_vacio(df_in):
+        if df_in is None or df_in.empty or "texto" not in df_in.columns:
+            return pd.DataFrame(columns=["ensayo", "codigo", "nombre", "texto"])
+        df_local = df_in.copy()
+        texto_limpio = (
+            df_local["texto"]
+            .fillna("")
+            .astype(str)
+            .str.replace(r"\s+", "", regex=True)
+        )
+        df_local = df_local[texto_limpio != ""].copy()
+        for col in ["ensayo", "codigo", "nombre"]:
+            if col not in df_local.columns:
+                df_local[col] = ""
+        return df_local[["ensayo", "codigo", "nombre", "texto"]]
+
     try:
-        df = pd.read_sql(
+        df_paciente = pd.read_sql(
             """
-            SELECT ensayo
+            SELECT ensayo, codigo, nombre, texto
+            FROM adendas_paciente
+            ORDER BY ensayo ASC, codigo ASC, nombre ASC
+            """,
+            conn
+        )
+    except Exception:
+        df_paciente = pd.DataFrame(columns=["ensayo", "codigo", "nombre", "texto"])
+
+    try:
+        df_ensayo = pd.read_sql(
+            """
+            SELECT ensayo, '' AS codigo, '' AS nombre, texto
             FROM adendas_ensayo
-            WHERE TRIM(COALESCE(texto, '')) <> ''
             ORDER BY ensayo ASC
             """,
             conn
         )
     except Exception:
-        df = pd.DataFrame(columns=["ensayo"])
+        df_ensayo = pd.DataFrame(columns=["ensayo", "codigo", "nombre", "texto"])
+
     conn.close()
+
+    df_paciente = _filtrar_texto_no_vacio(df_paciente)
+    df_ensayo = _filtrar_texto_no_vacio(df_ensayo)
+
+    if df_paciente.empty and df_ensayo.empty:
+        return []
+
+    df = pd.concat([df_paciente, df_ensayo], ignore_index=True)
     if df.empty or "ensayo" not in df.columns:
         return []
-    return [str(e) for e in df["ensayo"].dropna().tolist() if str(e).strip()]
+
+    vistos = set()
+
+    pendientes = []
+    for _, row in df.iterrows():
+        ensayo = "" if pd.isna(row.get("ensayo")) else str(row.get("ensayo")).strip()
+        codigo = "" if pd.isna(row.get("codigo")) else str(row.get("codigo")).strip()
+        nombre = "" if pd.isna(row.get("nombre")) else str(row.get("nombre")).strip()
+        if not ensayo:
+            continue
+        paciente = f"{codigo} | {nombre}".strip(" |")
+        etiqueta = f"{ensayo} • {paciente}" if paciente else ensayo
+        clave = (ensayo.lower(), paciente.lower())
+        if clave in vistos:
+            continue
+        vistos.add(clave)
+        pendientes.append({
+            "ensayo": ensayo,
+            "paciente": paciente,
+            "etiqueta": etiqueta,
+        })
+    return pendientes
 
 
 def parse_datetime_iso(valor):
@@ -2971,9 +3042,23 @@ seccion_activa = st.sidebar.radio("Navegación", options=secciones_principales, 
 ensayos_con_adendas = get_ensayos_con_adendas_pendientes()
 if ensayos_con_adendas:
     st.sidebar.markdown("#### 📌 Adendas pendientes")
-    st.sidebar.caption(f"{len(ensayos_con_adendas)} ensayo(s)")
-    for ensayo_p in ensayos_con_adendas:
-        st.sidebar.markdown(f"• {ensayo_p}")
+    pendientes_paciente = [
+        item for item in ensayos_con_adendas
+        if str(item.get("paciente", "")).strip()
+    ]
+    pendientes_ensayo = [
+        item for item in ensayos_con_adendas
+        if not str(item.get("paciente", "")).strip()
+    ]
+    st.sidebar.caption(
+        f"{len(ensayos_con_adendas)} pendiente(s): "
+        f"{len(pendientes_paciente)} paciente(s), "
+        f"{len(pendientes_ensayo)} ensayo(s)"
+    )
+    for item in ensayos_con_adendas:
+        etiqueta = str(item.get("etiqueta", "")).strip()
+        if etiqueta:
+            st.sidebar.markdown(f"• {etiqueta}")
 
 if seccion_activa == "Prot. ensayo":
     st.subheader("📄 Protocolos de Ensayo")
