@@ -1090,7 +1090,7 @@ def actualizar_visita(id_visita, fecha, data):
     invalidar_cache_lecturas()
     snapshot_db("pacientes")
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, ttl=3)
 def get_visitas():
     conn = connect_db()
     try:
@@ -1098,13 +1098,11 @@ def get_visitas():
     except:
         df = pd.DataFrame()
     conn.close()
-    # Excluir visitas del Calendario DREAMM10 (pestaña aislada)
     if not df.empty and "ensayo" in df.columns:
-        mask_dreamm10 = df["ensayo"].str.upper().str.replace(r"[\s\-_]", "", regex=True).str.contains("DREAMM10", na=False)
-        df = df[~mask_dreamm10].reset_index(drop=True)
+        df["ensayo"] = df["ensayo"].fillna("").astype(str).apply(normalizar_ensayo)
     return df
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, ttl=3)
 def get_pacientes_unicos():
     conn = connect_db()
     try:
@@ -1112,10 +1110,6 @@ def get_pacientes_unicos():
     except Exception:
         df = pd.DataFrame()
     conn.close()
-    # Excluir pacientes del Calendario DREAMM10 (pestaña aislada)
-    if not df.empty and "ensayo" in df.columns:
-        mask_d10 = df["ensayo"].str.upper().str.replace(r"[\s\-_]", "", regex=True).str.contains("DREAMM10", na=False)
-        df = df[~mask_d10].reset_index(drop=True)
 
     def deduplicar_pacientes(df_in):
         if df_in.empty:
@@ -1151,7 +1145,7 @@ def get_pacientes_unicos():
     return deduplicar_pacientes(df.dropna(how='all'))
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, ttl=3)
 def get_ensayos_existentes():
     ensayos = set()
 
@@ -2681,18 +2675,13 @@ def limpiar_arrastre_dreamm10_en_agenda():
 
     filas = c.execute(
         """
-        SELECT id, ensayo, comentarios
+        SELECT id
         FROM visitas
-        WHERE ensayo = ?
+        WHERE UPPER(REPLACE(REPLACE(REPLACE(COALESCE(ensayo,''), '-', ''), ' ', ''), '_', '')) = 'DREAMM10'
         """,
-        ("DREAMM 10",)
     ).fetchall()
 
-    ids_borrar = []
-    for fila_id, _ensayo, comentarios in filas:
-        txt = "" if comentarios is None else str(comentarios).strip()
-        if txt.startswith("Paciente (pestaña):") or txt == "Importado desde Excel DREAMM10":
-            ids_borrar.append(int(fila_id))
+    ids_borrar = [int(fila_id) for (fila_id,) in filas]
 
     if not ids_borrar:
         conn.close()
