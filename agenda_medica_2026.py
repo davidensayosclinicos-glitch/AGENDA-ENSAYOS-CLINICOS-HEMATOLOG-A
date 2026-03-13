@@ -554,6 +554,19 @@ def normalizar_ensayo(valor):
     return ensayo
 
 
+def es_ensayo_dreamm10(valor):
+    ensayo_norm = normalizar_ensayo(valor)
+    clave = re.sub(r"[\s\-_/]+", "", ensayo_norm)
+    return clave == "DREAMM10"
+
+
+def filtrar_fuera_dreamm10(df):
+    if df is None or df.empty or "ensayo" not in df.columns:
+        return df
+    mask = ~df["ensayo"].fillna("").astype(str).apply(es_ensayo_dreamm10)
+    return df[mask].copy()
+
+
 def normalizar_clave_paciente(valor):
     texto = normalizar_texto_campo(valor).lower()
     return re.sub(r"[\s\-_/]+", "", texto)
@@ -1100,6 +1113,7 @@ def get_visitas():
     conn.close()
     if not df.empty and "ensayo" in df.columns:
         df["ensayo"] = df["ensayo"].fillna("").astype(str).apply(normalizar_ensayo)
+        df = filtrar_fuera_dreamm10(df)
     return df
 
 @st.cache_data(show_spinner=False, ttl=3)
@@ -1110,6 +1124,9 @@ def get_pacientes_unicos():
     except Exception:
         df = pd.DataFrame()
     conn.close()
+
+    if not df.empty and "ensayo" in df.columns:
+        df = filtrar_fuera_dreamm10(df)
 
     def deduplicar_pacientes(df_in):
         if df_in.empty:
@@ -1153,7 +1170,7 @@ def get_ensayos_existentes():
     if not df_pacientes.empty and "ensayo" in df_pacientes.columns:
         for ensayo in df_pacientes["ensayo"].tolist():
             ensayo_norm = normalizar_ensayo(ensayo)
-            if ensayo_norm:
+            if ensayo_norm and not es_ensayo_dreamm10(ensayo_norm):
                 ensayos.add(ensayo_norm)
 
     if not ensayos:
@@ -1161,7 +1178,7 @@ def get_ensayos_existentes():
         if not df_visitas.empty and "ensayo" in df_visitas.columns:
             for ensayo in df_visitas["ensayo"].tolist():
                 ensayo_norm = normalizar_ensayo(ensayo)
-                if ensayo_norm:
+                if ensayo_norm and not es_ensayo_dreamm10(ensayo_norm):
                     ensayos.add(ensayo_norm)
 
     return sorted(ensayos)
