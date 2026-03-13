@@ -37,8 +37,8 @@ except ImportError:
 # Icono para la pestaña del navegador (disponible antes de set_page_config).
 BOOT_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 BOOT_LOGO_CANDIDATOS = [
-    os.path.join(BOOT_SCRIPT_DIR, "ChatGPT Image 10 mar 2026, 09_22_55.png"),
     os.path.join(BOOT_SCRIPT_DIR, "ChatGPT Image 10 mar 2026, 09_32_03.png"),
+    os.path.join(BOOT_SCRIPT_DIR, "ChatGPT Image 10 mar 2026, 09_22_55.png"),
 ]
 BOOT_PAGE_ICON = ""
 for _ruta_logo in BOOT_LOGO_CANDIDATOS:
@@ -207,8 +207,8 @@ DB_PATH = os.path.join(SCRIPT_DIR, "agenda_ensayos.db")
 DB_BACKUP_DIR = os.path.join(SCRIPT_DIR, "backups_db")
 APP_BUILD = datetime.fromtimestamp(os.path.getmtime(__file__)).strftime("%Y-%m-%d %H:%M")
 LOGO_PATH = resolver_archivo(
-    os.path.join(SCRIPT_DIR, "ChatGPT Image 10 mar 2026, 09_22_55.png"),
-    os.path.join(SCRIPT_DIR, "ChatGPT Image 10 mar 2026, 09_32_03.png")
+    os.path.join(SCRIPT_DIR, "ChatGPT Image 10 mar 2026, 09_32_03.png"),
+    os.path.join(SCRIPT_DIR, "ChatGPT Image 10 mar 2026, 09_22_55.png")
 )
 
 
