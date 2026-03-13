@@ -1523,7 +1523,7 @@ def get_pacientes_con_adenda(ensayo):
             df["texto"]
             .fillna("")
             .astype(str)
-            .str.replace(r"\s+", "", regex=True)
+            .str.replace(r"[\s\u200b\u200c\u200d\ufeff]+", "", regex=True)
         )
         df = df[texto_limpio != ""].copy()
         df = df[["codigo", "nombre", "fecha_modificacion"]]
@@ -1561,7 +1561,7 @@ def get_ensayos_con_adendas_pendientes():
             df_local["texto"]
             .fillna("")
             .astype(str)
-            .str.replace(r"\s+", "", regex=True)
+            .str.replace(r"[\s\u200b\u200c\u200d\ufeff]+", "", regex=True)
         )
         df_local = df_local[texto_limpio != ""].copy()
         for col in ["ensayo", "codigo", "nombre"]:
@@ -1581,27 +1581,13 @@ def get_ensayos_con_adendas_pendientes():
     except Exception:
         df_paciente = pd.DataFrame(columns=["ensayo", "codigo", "nombre", "texto"])
 
-    try:
-        df_ensayo = pd.read_sql(
-            """
-            SELECT ensayo, '' AS codigo, '' AS nombre, texto
-            FROM adendas_ensayo
-            ORDER BY ensayo ASC
-            """,
-            conn
-        )
-    except Exception:
-        df_ensayo = pd.DataFrame(columns=["ensayo", "codigo", "nombre", "texto"])
-
     conn.close()
 
     df_paciente = _filtrar_texto_no_vacio(df_paciente)
-    df_ensayo = _filtrar_texto_no_vacio(df_ensayo)
-
-    if df_paciente.empty and df_ensayo.empty:
+    if df_paciente.empty:
         return []
 
-    df = pd.concat([df_paciente, df_ensayo], ignore_index=True)
+    df = df_paciente.copy()
     if df.empty or "ensayo" not in df.columns:
         return []
 
@@ -3046,14 +3032,8 @@ if ensayos_con_adendas:
         item for item in ensayos_con_adendas
         if str(item.get("paciente", "")).strip()
     ]
-    pendientes_ensayo = [
-        item for item in ensayos_con_adendas
-        if not str(item.get("paciente", "")).strip()
-    ]
     st.sidebar.caption(
-        f"{len(ensayos_con_adendas)} pendiente(s): "
-        f"{len(pendientes_paciente)} paciente(s), "
-        f"{len(pendientes_ensayo)} ensayo(s)"
+        f"{len(pendientes_paciente)} paciente(s) con adenda pendiente"
     )
     for item in ensayos_con_adendas:
         etiqueta = str(item.get("etiqueta", "")).strip()
