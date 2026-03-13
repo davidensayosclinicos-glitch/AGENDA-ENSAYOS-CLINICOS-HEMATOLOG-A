@@ -35,7 +35,7 @@ except ImportError:
     ZoneInfo = None
 
 # --- CONFIGURACIÓN DE PÁGINA ---
-st.set_page_config(page_title="Agenda Ensayos 2026", layout="wide")
+st.set_page_config(page_title="Agenda Ensayos Clinicos 2026", page_icon="🩺", layout="wide")
 
 if calendar is None:
     st.error(
@@ -191,8 +191,8 @@ DB_PATH = os.path.join(SCRIPT_DIR, "agenda_ensayos.db")
 DB_BACKUP_DIR = os.path.join(SCRIPT_DIR, "backups_db")
 APP_BUILD = datetime.fromtimestamp(os.path.getmtime(__file__)).strftime("%Y-%m-%d %H:%M")
 LOGO_PATH = resolver_archivo(
-    os.path.join(SCRIPT_DIR, "ChatGPT Image 10 mar 2026, 09_32_03.png"),
-    os.path.join(SCRIPT_DIR, "ChatGPT Image 10 mar 2026, 09_22_55.png")
+    os.path.join(SCRIPT_DIR, "ChatGPT Image 10 mar 2026, 09_22_55.png"),
+    os.path.join(SCRIPT_DIR, "ChatGPT Image 10 mar 2026, 09_32_03.png")
 )
 
 
