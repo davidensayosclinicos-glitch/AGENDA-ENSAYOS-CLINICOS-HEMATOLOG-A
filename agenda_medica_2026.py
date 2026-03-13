@@ -34,8 +34,24 @@ try:
 except ImportError:
     ZoneInfo = None
 
+# Icono para la pestaña del navegador (disponible antes de set_page_config).
+BOOT_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+BOOT_LOGO_CANDIDATOS = [
+    os.path.join(BOOT_SCRIPT_DIR, "ChatGPT Image 10 mar 2026, 09_22_55.png"),
+    os.path.join(BOOT_SCRIPT_DIR, "ChatGPT Image 10 mar 2026, 09_32_03.png"),
+]
+BOOT_PAGE_ICON = ""
+for _ruta_logo in BOOT_LOGO_CANDIDATOS:
+    if os.path.isfile(_ruta_logo):
+        BOOT_PAGE_ICON = _ruta_logo
+        break
+
 # --- CONFIGURACIÓN DE PÁGINA ---
-st.set_page_config(page_title="Agenda Ensayos Clinicos 2026", page_icon="🩺", layout="wide")
+st.set_page_config(
+    page_title="Agenda Ensayos Clinicos 2026",
+    page_icon=BOOT_PAGE_ICON if BOOT_PAGE_ICON else "🩺",
+    layout="wide",
+)
 
 if calendar is None:
     st.error(
@@ -72,10 +88,10 @@ def construir_estilos_app():
                 background-color: rgba(219, 234, 254, 0.9) !important;
             }}
             section[data-testid="stSidebar"] {{
-                width: 240px !important;
+                width: 360px !important;
             }}
             section[data-testid="stSidebar"] > div {{
-                width: 240px !important;
+                width: 360px !important;
                 background: rgba(234, 244, 255, 0.9) !important;
                 padding-top: 0.4rem !important;
                 padding-left: 0.45rem !important;
@@ -100,7 +116,7 @@ def construir_estilos_app():
             @media (max-width: 900px) {{
                 section[data-testid="stSidebar"],
                 section[data-testid="stSidebar"] > div {{
-                    width: 220px !important;
+                    width: 260px !important;
                 }}
             }}
             .fc, .fc .fc-scrollgrid, .fc .fc-view-harness {{
@@ -194,6 +210,57 @@ LOGO_PATH = resolver_archivo(
     os.path.join(SCRIPT_DIR, "ChatGPT Image 10 mar 2026, 09_22_55.png"),
     os.path.join(SCRIPT_DIR, "ChatGPT Image 10 mar 2026, 09_32_03.png")
 )
+
+
+def aplicar_marca_pestana(titulo_objetivo, ruta_logo):
+    if not ruta_logo or not os.path.isfile(ruta_logo):
+        return
+    try:
+        with open(ruta_logo, "rb") as f_logo:
+            icono_b64 = base64.b64encode(f_logo.read()).decode("utf-8")
+    except Exception:
+        return
+
+    icono_data_url = f"data:image/png;base64,{icono_b64}"
+    components.html(
+        f"""
+        <script>
+            const tituloObjetivo = {titulo_objetivo!r};
+            const iconoObjetivo = {icono_data_url!r};
+
+            function aplicarMarca() {{
+                try {{
+                    const doc = (window.parent && window.parent.document) ? window.parent.document : document;
+                    if (doc.title !== tituloObjetivo) {{
+                        doc.title = tituloObjetivo;
+                    }}
+
+                    const rels = ["icon", "shortcut icon", "apple-touch-icon"];
+                    rels.forEach((rel) => {{
+                        let icono = doc.querySelector(`link[rel='${{rel}}']`);
+                        if (!icono) {{
+                            icono = doc.createElement("link");
+                            icono.setAttribute("rel", rel);
+                            doc.head.appendChild(icono);
+                        }}
+                        if (icono.getAttribute("href") !== iconoObjetivo) {{
+                            icono.setAttribute("href", iconoObjetivo);
+                        }}
+                    }});
+                }} catch (e) {{}}
+            }}
+
+            aplicarMarca();
+            setTimeout(aplicarMarca, 300);
+            setTimeout(aplicarMarca, 1200);
+            setTimeout(aplicarMarca, 3000);
+        </script>
+        """,
+        height=0,
+    )
+
+
+aplicar_marca_pestana("Agenda Ensayos Clinicos 2026", LOGO_PATH)
 
 
 def leer_config(clave, default=None):
@@ -2772,7 +2839,7 @@ if not st.session_state.get("_db_inicializada", False):
 
 # --- INTERFAZ PRINCIPAL ---
 if LOGO_PATH:
-    st.sidebar.image(LOGO_PATH, use_container_width=True)
+    st.sidebar.image(LOGO_PATH, width=340)
 else:
     st.sidebar.caption("Logo no encontrado")
 st.sidebar.markdown("### 📅 Agenda de Pacientes - Ensayos Clínicos 2026")
