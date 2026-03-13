@@ -3707,7 +3707,7 @@ if seccion_activa == "Calendario DREAMM10":
                     if registro_idx is not None:
                         registro_sel = st.session_state.get("dreamm10_registros_map", {}).get(str(registro_idx), {})
 
-    f not registro_sel:
+                    if not registro_sel:
                         fecha_evento_fallback = (
                             evento_click.get("start")
                             or evento_click.get("startStr")
