@@ -2638,77 +2638,70 @@ def extraer_registros_visitas_dreamm10(df, nombre_hoja=""):
 
 
 def insertar_registros_dreamm10_en_tabla(registros):
+    # DREAMM10 es una pestaña aislada: no persiste registros en la agenda general.
     if not registros:
         return 0, 0
 
+    normalizadas = set()
+    duplicados = 0
+    for r in registros:
+        clave = (
+            str(r.get("fecha") or "").strip(),
+            normalizar_texto_campo(r.get("codigo")),
+            nombre_a_iniciales(r.get("nombre")),
+            normalizar_ensayo(r.get("ensayo") or "DREAMM 10"),
+            normalizar_texto_campo(r.get("ciclo")),
+        )
+        if not clave[0]:
+            continue
+        if clave in normalizadas:
+            duplicados += 1
+            continue
+        normalizadas.add(clave)
+
+    return 0, duplicados
+
+
+def limpiar_arrastre_dreamm10_en_agenda():
+    """Elimina de visitas los registros importados desde la pestaña DREAMM10.
+
+    Mantiene la agenda general limpia de sincronizaciones históricas y
+    reconstruye la tabla de pacientes a partir de las visitas restantes.
+    """
     conn = connect_db()
     c = conn.cursor()
 
-    c.execute("SELECT fecha, codigo, nombre, ensayo, ciclo FROM visitas")
-    existentes_raw = c.fetchall()
+    filas = c.execute(
+        """
+        SELECT id, ensayo, comentarios
+        FROM visitas
+        WHERE ensayo = ?
+        """,
+        ("DREAMM 10",)
+    ).fetchall()
 
-    existentes = set()
-    for fecha, codigo, nombre, ensayo, ciclo in existentes_raw:
-        clave = (
-            str(fecha or "").strip(),
-            normalizar_texto_campo(codigo),
-            nombre_a_iniciales(nombre),
-            normalizar_ensayo(ensayo),
-            normalizar_texto_campo(ciclo),
-        )
-        existentes.add(clave)
+    ids_borrar = []
+    for fila_id, _ensayo, comentarios in filas:
+        txt = "" if comentarios is None else str(comentarios).strip()
+        if txt.startswith("Paciente (pestaña):") or txt == "Importado desde Excel DREAMM10":
+            ids_borrar.append(int(fila_id))
 
-    insertados = 0
-    duplicados = 0
+    if not ids_borrar:
+        conn.close()
+        return 0
 
-    for r in registros:
-        fecha = str(r.get("fecha") or "").strip()
-        codigo = normalizar_texto_campo(r.get("codigo"))
-        nombre = nombre_a_iniciales(r.get("nombre"))
-        ensayo = normalizar_ensayo(r.get("ensayo") or "DREAMM 10")
-        ciclo = normalizar_texto_campo(r.get("ciclo"))
-        comentarios = str(r.get("comentarios") or "").strip()
+    placeholders = ",".join(["?"] * len(ids_borrar))
+    c.execute(f"DELETE FROM revision_ocular WHERE visita_id IN ({placeholders})", tuple(ids_borrar))
+    c.execute(f"DELETE FROM visitas WHERE id IN ({placeholders})", tuple(ids_borrar))
 
-        if not fecha:
-            continue
-
-        clave = (fecha, codigo, nombre, ensayo, ciclo)
-        if clave in existentes:
-            duplicados += 1
-            continue
-
-        c.execute(
-            """
-            INSERT INTO visitas (fecha, nombre, codigo, ensayo, ciclo, kits, tablet, medula, otras_pruebas, comentarios)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                fecha,
-                nombre,
-                codigo,
-                ensayo,
-                ciclo,
-                "",
-                False,
-                False,
-                "",
-                comentarios if comentarios else "Importado desde Excel DREAMM10",
-            ),
-        )
-        guardar_o_actualizar_paciente(c, codigo, nombre, ensayo)
-        existentes.add(clave)
-        insertados += 1
-
-    unificar_pacientes_duplicados(c)
+    sincronizar_pacientes_desde_visitas(c)
     eliminar_ensayos_sin_pacientes(c)
     conn.commit()
     conn.close()
 
-    if insertados:
-        invalidar_cache_lecturas()
-        snapshot_db("pacientes")
-
-    return insertados, duplicados
+    invalidar_cache_lecturas()
+    snapshot_db("pacientes")
+    return len(ids_borrar)
 
 
 def construir_eventos_desde_registros_dreamm10(registros):
@@ -3905,11 +3898,11 @@ if seccion_activa == "Calendario DREAMM10":
                 tabla_registros = tabla_registros[columnas_tabla].sort_values(by=["fecha", "codigo", "nombre"]).reset_index(drop=True)
                 tabla_registros["fecha"] = tabla_registros["fecha"].apply(_formatear_fecha_es_sin_hora)
 
-                insertados, duplicados = insertar_registros_dreamm10_en_tabla(registros_dreamm10)
-                if insertados:
-                    st.success(f"Traslado automático a tabla: {insertados} nuevos y {duplicados} duplicados omitidos.")
-                else:
-                    st.caption(f"Traslado automático: sin filas nuevas ({duplicados} duplicados).")
+                _, duplicados = insertar_registros_dreamm10_en_tabla(registros_dreamm10)
+                st.caption(
+                    "DREAMM10 aislado: estos registros no se guardan en Agenda/Ficha paciente. "
+                    f"Duplicados detectados en el propio Excel: {duplicados}."
+                )
             else:
                 st.info("No se detectaron registros de fechas para trasladar a la tabla.")
 
