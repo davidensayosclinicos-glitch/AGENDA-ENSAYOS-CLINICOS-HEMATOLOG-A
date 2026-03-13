@@ -3638,17 +3638,11 @@ if seccion_activa == "Calendario DREAMM10":
                 tabla_registros = tabla_registros[columnas_tabla].sort_values(by=["fecha", "codigo", "nombre"]).reset_index(drop=True)
                 tabla_registros["fecha"] = tabla_registros["fecha"].apply(_formatear_fecha_es_sin_hora)
 
-                st.markdown("### 📥 Traslado a tabla")
-                st.caption(f"Fechas detectadas para importar: {len(tabla_registros)}")
-                st.dataframe(tabla_registros, use_container_width=True, height=240)
-
-                if st.button("Trasladar todas las fechas del Excel a la tabla", type="primary", key="dreamm10_trasladar_tabla"):
-                    insertados, duplicados = insertar_registros_dreamm10_en_tabla(registros_dreamm10)
-                    if insertados:
-                        st.success(f"Registros trasladados: {insertados}. Duplicados omitidos: {duplicados}.")
-                    else:
-                        st.info(f"No se añadieron filas nuevas. Duplicados detectados: {duplicados}.")
-                    st.rerun()
+                insertados, duplicados = insertar_registros_dreamm10_en_tabla(registros_dreamm10)
+                if insertados:
+                    st.success(f"Traslado automático a tabla: {insertados} nuevos y {duplicados} duplicados omitidos.")
+                else:
+                    st.caption(f"Traslado automático: sin filas nuevas ({duplicados} duplicados).")
             else:
                 st.info("No se detectaron registros de fechas para trasladar a la tabla.")
 
@@ -3713,7 +3707,7 @@ if seccion_activa == "Calendario DREAMM10":
                     if registro_idx is not None:
                         registro_sel = st.session_state.get("dreamm10_registros_map", {}).get(str(registro_idx), {})
 
-                    if not registro_sel:
+    f not registro_sel:
                         fecha_evento_fallback = (
                             evento_click.get("start")
                             or evento_click.get("startStr")
