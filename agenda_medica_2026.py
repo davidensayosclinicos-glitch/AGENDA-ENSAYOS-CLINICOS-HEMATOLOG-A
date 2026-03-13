@@ -3694,6 +3694,7 @@ if seccion_activa == "Calendario DREAMM10":
                     "ciclo",
                     "w",
                     "c",
+                    "dosis_lena",
                     "ventana_mas",
                     "ventana_menos",
                     "comentarios",
