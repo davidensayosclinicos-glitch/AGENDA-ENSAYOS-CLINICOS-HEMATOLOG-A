@@ -1221,6 +1221,40 @@ def borrar_paciente_citas_ojos(codigo, nombre):
     snapshot_db("pacientes")
     return len(ids_borrar)
 
+
+def borrar_visitas_sin_paciente_citas_ojos():
+    conn = connect_db()
+    c = conn.cursor()
+    filas = c.execute("SELECT id, codigo, nombre, ensayo FROM visitas").fetchall()
+
+    ids_borrar = []
+    for fila_id, codigo_db, nombre_db, ensayo_db in filas:
+        ensayo_norm = _normalizar_ensayo_ojos(ensayo_db)
+        if ensayo_norm not in ENSAYOS_OJOS_PERMITIDOS:
+            continue
+
+        codigo_norm = normalizar_clave_paciente(codigo_db)
+        nombre_norm = normalizar_clave_paciente(nombre_db)
+        if not codigo_norm and not nombre_norm:
+            ids_borrar.append(int(fila_id))
+
+    if not ids_borrar:
+        conn.close()
+        return 0
+
+    placeholders = ",".join(["?"] * len(ids_borrar))
+    c.execute(f"DELETE FROM revision_ocular WHERE visita_id IN ({placeholders})", tuple(ids_borrar))
+    c.execute(f"DELETE FROM visitas WHERE id IN ({placeholders})", tuple(ids_borrar))
+
+    sincronizar_pacientes_desde_visitas(c)
+    eliminar_ensayos_sin_pacientes(c)
+    conn.commit()
+    conn.close()
+
+    invalidar_cache_lecturas()
+    snapshot_db("pacientes")
+    return len(ids_borrar)
+
 @st.cache_data(show_spinner=False)
 def get_checklist_items(ensayo):
     ensayo = normalizar_ensayo(ensayo)
@@ -3474,6 +3508,16 @@ if seccion_activa == "Citas ojos":
             st.caption("Puedes crear un paciente en 'Fuera de Ensayo' con el formulario superior.")
             st.stop()
 
+        with st.expander("🧹 Limpiar filas sin paciente", expanded=False):
+            st.caption("Elimina filas de Citas ojos que no tienen ni código ni nombre.")
+            if st.button("Eliminar filas vacías", key="ojos_btn_limpiar_vacios"):
+                borradas_vacias = borrar_visitas_sin_paciente_citas_ojos()
+                if borradas_vacias:
+                    st.success(f"Filas vacías eliminadas: {borradas_vacias}")
+                    st.rerun()
+                else:
+                    st.info("No se encontraron filas vacías para eliminar.")
+
         # Dejamos una sola fila por paciente en Citas ojos (la visita mas reciente),
         # deduplicando por codigo/nombre sin depender del ensayo.
         df_visitas["_fecha_dt"] = pd.to_datetime(df_visitas["fecha"], errors="coerce")
@@ -3490,9 +3534,12 @@ if seccion_activa == "Citas ojos":
         df_visitas["_clave_paciente"] = df_visitas.apply(_clave_paciente_ojos, axis=1)
         df_visitas = df_visitas.sort_values(by=["_fecha_dt", "id"], ascending=[False, False])
         con_clave = df_visitas[df_visitas["_clave_paciente"].astype(str).str.strip() != ""]
-        sin_clave = df_visitas[df_visitas["_clave_paciente"].astype(str).str.strip() == ""]
         con_clave = con_clave.drop_duplicates(subset=["_clave_paciente"], keep="first")
-        df_visitas = pd.concat([con_clave, sin_clave], ignore_index=True)
+        df_visitas = con_clave.copy()
+
+        if df_visitas.empty:
+            st.info("No hay pacientes válidos en Citas de ojos (con código o nombre).")
+            st.stop()
 
         with st.expander("🗑️ Eliminar paciente de Citas de ojos", expanded=False):
             opciones_borrado = []
