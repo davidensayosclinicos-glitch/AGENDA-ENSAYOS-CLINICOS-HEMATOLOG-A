@@ -560,10 +560,32 @@ def es_ensayo_dreamm10(valor):
     return clave == "DREAMM10"
 
 
-def filtrar_fuera_dreamm10(df):
+def es_visita_importada_dreamm10(ensayo, comentarios):
+    if not es_ensayo_dreamm10(ensayo):
+        return False
+
+    comentario_norm = normalizar_texto_campo(comentarios).lower()
+    marcadores = (
+        "paciente (pestaña):",
+        "paciente (pestana):",
+        "importado desde excel dreamm10",
+    )
+    return any(marcador in comentario_norm for marcador in marcadores)
+
+
+def filtrar_visitas_importadas_dreamm10(df):
     if df is None or df.empty or "ensayo" not in df.columns:
         return df
-    mask = ~df["ensayo"].fillna("").astype(str).apply(es_ensayo_dreamm10)
+    if "comentarios" not in df.columns:
+        return df
+
+    mask = ~df.apply(
+        lambda row: es_visita_importada_dreamm10(
+            row.get("ensayo", ""),
+            row.get("comentarios", ""),
+        ),
+        axis=1,
+    )
     return df[mask].copy()
 
 
@@ -1113,7 +1135,7 @@ def get_visitas():
     conn.close()
     if not df.empty and "ensayo" in df.columns:
         df["ensayo"] = df["ensayo"].fillna("").astype(str).apply(normalizar_ensayo)
-        df = filtrar_fuera_dreamm10(df)
+        df = filtrar_visitas_importadas_dreamm10(df)
     return df
 
 @st.cache_data(show_spinner=False, ttl=3)
@@ -1124,9 +1146,6 @@ def get_pacientes_unicos():
     except Exception:
         df = pd.DataFrame()
     conn.close()
-
-    if not df.empty and "ensayo" in df.columns:
-        df = filtrar_fuera_dreamm10(df)
 
     def deduplicar_pacientes(df_in):
         if df_in.empty:
@@ -1170,7 +1189,7 @@ def get_ensayos_existentes():
     if not df_pacientes.empty and "ensayo" in df_pacientes.columns:
         for ensayo in df_pacientes["ensayo"].tolist():
             ensayo_norm = normalizar_ensayo(ensayo)
-            if ensayo_norm and not es_ensayo_dreamm10(ensayo_norm):
+            if ensayo_norm:
                 ensayos.add(ensayo_norm)
 
     if not ensayos:
@@ -1178,7 +1197,7 @@ def get_ensayos_existentes():
         if not df_visitas.empty and "ensayo" in df_visitas.columns:
             for ensayo in df_visitas["ensayo"].tolist():
                 ensayo_norm = normalizar_ensayo(ensayo)
-                if ensayo_norm and not es_ensayo_dreamm10(ensayo_norm):
+                if ensayo_norm:
                     ensayos.add(ensayo_norm)
 
     return sorted(ensayos)
@@ -2692,13 +2711,16 @@ def limpiar_arrastre_dreamm10_en_agenda():
 
     filas = c.execute(
         """
-        SELECT id
+        SELECT id, ensayo, comentarios
         FROM visitas
-        WHERE UPPER(REPLACE(REPLACE(REPLACE(COALESCE(ensayo,''), '-', ''), ' ', ''), '_', '')) = 'DREAMM10'
         """,
     ).fetchall()
 
-    ids_borrar = [int(fila_id) for (fila_id,) in filas]
+    ids_borrar = [
+        int(fila_id)
+        for (fila_id, ensayo, comentarios) in filas
+        if es_visita_importada_dreamm10(ensayo, comentarios)
+    ]
 
     if not ids_borrar:
         conn.close()
