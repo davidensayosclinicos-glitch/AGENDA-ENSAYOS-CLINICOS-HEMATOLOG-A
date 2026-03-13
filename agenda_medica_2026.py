@@ -875,6 +875,16 @@ def init_db():
             )
             '''
         )
+        c.execute(
+            '''
+            CREATE TABLE IF NOT EXISTS dreamm10_excels (
+                id BIGSERIAL PRIMARY KEY,
+                nombre_archivo TEXT UNIQUE,
+                contenido BYTEA,
+                actualizado_en TEXT
+            )
+            '''
+        )
     else:
         c.execute('''
             CREATE TABLE IF NOT EXISTS visitas (
@@ -966,6 +976,14 @@ def init_db():
                 ensayo TEXT,
                 texto TEXT,
                 fecha_modificacion TEXT
+            )
+        ''')
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS dreamm10_excels (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                nombre_archivo TEXT UNIQUE,
+                contenido BLOB,
+                actualizado_en TEXT
             )
         ''')
 
@@ -1993,6 +2011,64 @@ def listar_excels(directorio):
         if f.lower().endswith(".xlsx") and os.path.isfile(os.path.join(directorio, f))
     ]
     return sorted(archivos)
+
+
+def guardar_excel_dreamm10_en_db(nombre_archivo, contenido):
+    nombre = os.path.basename(str(nombre_archivo or "")).strip()
+    if not nombre or not contenido:
+        return False
+
+    marca_tiempo = ahora_local().isoformat(timespec="seconds")
+    conn = connect_db()
+    c = conn.cursor()
+    try:
+        c.execute(
+            "UPDATE dreamm10_excels SET contenido = ?, actualizado_en = ? WHERE nombre_archivo = ?",
+            (contenido, marca_tiempo, nombre),
+        )
+        if not getattr(c, "rowcount", 0):
+            c.execute(
+                "INSERT INTO dreamm10_excels (nombre_archivo, contenido, actualizado_en) VALUES (?, ?, ?)",
+                (nombre, contenido, marca_tiempo),
+            )
+        conn.commit()
+        return True
+    except Exception:
+        conn.rollback()
+        return False
+    finally:
+        conn.close()
+
+
+def obtener_excels_dreamm10_db():
+    conn = connect_db()
+    c = conn.cursor()
+    try:
+        filas = c.execute(
+            "SELECT nombre_archivo, contenido FROM dreamm10_excels ORDER BY nombre_archivo ASC"
+        ).fetchall()
+    except Exception:
+        conn.close()
+        return {}
+
+    resultado = {}
+    for nombre, contenido in filas:
+        nombre_txt = os.path.basename(str(nombre or "")).strip()
+        if not nombre_txt:
+            continue
+        if contenido is None:
+            continue
+        if isinstance(contenido, memoryview):
+            contenido = contenido.tobytes()
+        elif not isinstance(contenido, (bytes, bytearray)):
+            try:
+                contenido = bytes(contenido)
+            except Exception:
+                continue
+        resultado[nombre_txt] = bytes(contenido)
+
+    conn.close()
+    return resultado
 
 
 @st.cache_data(show_spinner=False)
@@ -3593,11 +3669,15 @@ if seccion_activa == "Calendario DREAMM10":
     if archivos_subidos:
         cargados = 0
         guardados = 0
+        guardados_db = 0
         for archivo in archivos_subidos:
             nombre_seguro = os.path.basename(archivo.name)
             contenido = archivo.getvalue()
             st.session_state["dreamm10_archivos_memoria"][nombre_seguro] = contenido
             cargados += 1
+
+            if guardar_excel_dreamm10_en_db(nombre_seguro, contenido):
+                guardados_db += 1
 
             destino = os.path.join(DREAMM10_XLSX_DIR, nombre_seguro)
             try:
@@ -3610,15 +3690,20 @@ if seccion_activa == "Calendario DREAMM10":
 
         st.cache_data.clear()
         if guardados:
-            st.success(f"Excel cargado en memoria ({cargados}) y guardado en carpeta ({guardados}).")
+            st.success(
+                f"Excel cargado en memoria ({cargados}), guardado en BD ({guardados_db}) y en carpeta ({guardados})."
+            )
         else:
-            st.success(f"Excel cargado en memoria: {cargados}.")
+            st.success(f"Excel cargado en memoria ({cargados}) y guardado en BD ({guardados_db}).")
 
     archivos_memoria = dict(st.session_state.get("dreamm10_archivos_memoria", {}))
+    archivos_db = obtener_excels_dreamm10_db()
     excels = listar_excels(DREAMM10_XLSX_DIR)
     fuentes = []
     for nombre in sorted(archivos_memoria.keys()):
         fuentes.append((f"🟢 Subido ahora | {nombre}", "memoria", nombre))
+    for nombre in sorted(archivos_db.keys()):
+        fuentes.append((f"🗄️ Permanente (BD) | {nombre}", "db", nombre))
     for nombre in excels:
         fuentes.append((f"📁 Carpeta | {nombre}", "carpeta", nombre))
 
@@ -3636,6 +3721,8 @@ if seccion_activa == "Calendario DREAMM10":
         bytes_excel = b""
         if origen_sel == "memoria":
             bytes_excel = archivos_memoria.get(archivo_sel, b"")
+        elif origen_sel == "db":
+            bytes_excel = archivos_db.get(archivo_sel, b"")
         else:
             ruta_excel_sel = os.path.join(DREAMM10_XLSX_DIR, archivo_sel)
             try:
