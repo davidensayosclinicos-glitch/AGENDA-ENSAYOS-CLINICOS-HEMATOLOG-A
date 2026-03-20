@@ -98,7 +98,7 @@ def construir_estilos_app():
                 padding-right: 0.45rem !important;
             }}
             section[data-testid="stSidebar"] .sidebar-logo-frame {{
-                height: 170px !important;
+                height: 130px !important;
                 width: 100% !important;
                 max-width: 100% !important;
                 overflow: hidden !important;
@@ -117,7 +117,7 @@ def construir_estilos_app():
                 max-width: 100% !important;
                 height: auto !important;
                 display: block !important;
-                transform: scale(2.2) !important;
+                transform: scale(1.6) !important;
                 transform-origin: center center !important;
                 border-radius: 0 !important;
                 box-shadow: none !important;
