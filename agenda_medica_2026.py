@@ -97,16 +97,26 @@ def construir_estilos_app():
                 padding-left: 0.45rem !important;
                 padding-right: 0.45rem !important;
             }}
-            section[data-testid="stSidebar"] [data-testid="stImage"] {{
-                overflow: visible !important;
+            section[data-testid="stSidebar"] .sidebar-logo-frame {{
+                height: 170px !important;
+                overflow: hidden !important;
+                background: transparent !important;
+                display: flex !important;
+                align-items: center !important;
+                justify-content: center !important;
+                margin: -0.15rem -0.2rem 0.45rem -0.2rem !important;
+                padding: 0 !important;
+                border: none !important;
+                box-shadow: none !important;
             }}
-            section[data-testid="stSidebar"] [data-testid="stImage"] img {{
-                width: 120% !important;
+            section[data-testid="stSidebar"] .sidebar-logo-frame img {{
+                width: 245% !important;
                 max-width: none !important;
-                margin-left: -10% !important;
                 height: auto !important;
-                border-radius: 10px;
-                box-shadow: 0 6px 16px rgba(30, 58, 138, 0.18);
+                display: block !important;
+                margin: 0 !important;
+                border-radius: 0 !important;
+                box-shadow: none !important;
             }}
             section[data-testid="stSidebar"] label[data-testid="stWidgetLabel"] p {{
                 font-size: 1.1rem !important;
@@ -265,6 +275,28 @@ def aplicar_marca_pestana(titulo_objetivo, ruta_logo):
 
 
 aplicar_marca_pestana("Agenda Ensayos Clinicos 2026", LOGO_PATH)
+
+
+def renderizar_logo_sidebar(ruta_logo):
+    if not ruta_logo or not os.path.isfile(ruta_logo):
+        st.sidebar.caption("Logo no encontrado")
+        return
+
+    try:
+        with open(ruta_logo, "rb") as f_logo:
+            logo_b64 = base64.b64encode(f_logo.read()).decode("utf-8")
+    except OSError:
+        st.sidebar.caption("Logo no encontrado")
+        return
+
+    st.sidebar.markdown(
+        f"""
+        <div class="sidebar-logo-frame">
+            <img src="data:image/png;base64,{logo_b64}" alt="Logo Hematologia" />
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def leer_config(clave, default=None):
@@ -3039,7 +3071,7 @@ if not st.session_state.get("_db_inicializada", False):
 
 # --- INTERFAZ PRINCIPAL ---
 if LOGO_PATH:
-    st.sidebar.image(LOGO_PATH, use_container_width=True)
+    renderizar_logo_sidebar(LOGO_PATH)
 else:
     st.sidebar.caption("Logo no encontrado")
 st.sidebar.markdown("### 📅 Agenda de Pacientes - Ensayos Clínicos 2026")
