@@ -3286,35 +3286,9 @@ if _ruta_backup_mostrada:
 else:
     st.sidebar.warning("Backup diario sin ruta accesible (revisar unidad H: o BACKUP_ENSAYOS_DIR)")
 
-if st.sidebar.button("Forzar backup ahora", key="btn_forzar_backup"):
-    _ok_forzado, _ruta_forzada = backup_diario_ensayos(forzar=True)
-    if _ok_forzado:
-        st.session_state["_backup_diario_ruta"] = _ruta_forzada
-        st.sidebar.success(f"Backup generado en: {_ruta_forzada}")
-    else:
-        st.sidebar.error("No se pudo generar el backup ahora. Revisa la ruta de destino.")
-
-if st.sidebar.button("Preparar descarga backup", key="btn_preparar_backup_pc"):
-    _bytes_backup, _nombre_backup, _mime_backup = construir_backup_descargable()
-    if _bytes_backup:
-        st.session_state["_backup_descarga_bytes"] = _bytes_backup
-        st.session_state["_backup_descarga_nombre"] = _nombre_backup
-        st.session_state["_backup_descarga_mime"] = _mime_backup
-        st.sidebar.success("Backup listo para descargar")
-    else:
-        st.sidebar.error("No se pudo preparar el backup para descarga")
-
-if st.session_state.get("_backup_descarga_bytes"):
-    st.sidebar.download_button(
-        "Descargar backup al PC",
-        data=st.session_state["_backup_descarga_bytes"],
-        file_name=st.session_state.get("_backup_descarga_nombre", "backup.db"),
-        mime=st.session_state.get("_backup_descarga_mime", "application/octet-stream"),
-        key="btn_descargar_backup_pc",
-    )
-
 secciones_principales = [
     "Agenda",
+    "Backups",
     "Citas ojos",
     "Calendario DREAMM10",
     "Prot. ensayo",
@@ -3341,6 +3315,41 @@ if ensayos_con_adendas:
         etiqueta = str(item.get("etiqueta", "")).strip()
         if etiqueta:
             st.sidebar.markdown(f"• {etiqueta}")
+
+if seccion_activa == "Backups":
+    st.subheader("🗂️ Copias de seguridad")
+    if _ruta_backup_mostrada:
+        st.info(f"Ruta activa de backup: {_ruta_backup_mostrada}")
+    else:
+        st.warning("No hay ruta de backup accesible. Revisa BACKUP_ENSAYOS_DIR.")
+
+    if st.button("Forzar backup ahora", key="btn_forzar_backup_tab"):
+        _ok_forzado, _ruta_forzada = backup_diario_ensayos(forzar=True)
+        if _ok_forzado:
+            st.session_state["_backup_diario_ruta"] = _ruta_forzada
+            _ruta_backup_mostrada = _ruta_forzada
+            st.success(f"Backup generado en: {_ruta_forzada}")
+        else:
+            st.error("No se pudo generar el backup ahora. Revisa la ruta de destino.")
+
+    if st.button("Preparar descarga backup", key="btn_preparar_backup_pc_tab"):
+        _bytes_backup, _nombre_backup, _mime_backup = construir_backup_descargable()
+        if _bytes_backup:
+            st.session_state["_backup_descarga_bytes"] = _bytes_backup
+            st.session_state["_backup_descarga_nombre"] = _nombre_backup
+            st.session_state["_backup_descarga_mime"] = _mime_backup
+            st.success("Backup listo para descargar")
+        else:
+            st.error("No se pudo preparar el backup para descarga")
+
+    if st.session_state.get("_backup_descarga_bytes"):
+        st.download_button(
+            "Descargar backup al PC",
+            data=st.session_state["_backup_descarga_bytes"],
+            file_name=st.session_state.get("_backup_descarga_nombre", "backup.db"),
+            mime=st.session_state.get("_backup_descarga_mime", "application/octet-stream"),
+            key="btn_descargar_backup_pc_tab",
+        )
 
 if seccion_activa == "Prot. ensayo":
     st.subheader("📄 Protocolos de Ensayo")
