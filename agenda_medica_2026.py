@@ -325,15 +325,20 @@ def leer_config(clave, default=None):
 def _auth_configurada():
     pwd_hash = str(leer_config("APP_PASSWORD_HASH_SHA256", "")).strip().lower()
     pwd_plano = str(leer_config("APP_PASSWORD", "")).strip()
-    return bool(pwd_hash or pwd_plano)
+    pwd_hash_fallback = "c1a96bdc66e356a5d4edf39ba4a4ebc365013fc29ea990f53148d86be74c33ad"  # Ensayos*
+    return bool(pwd_hash or pwd_plano or pwd_hash_fallback)
 
 
 def _validar_password(password_ingresada):
     pwd_hash = str(leer_config("APP_PASSWORD_HASH_SHA256", "")).strip().lower()
     pwd_plano = str(leer_config("APP_PASSWORD", "")).strip()
+    pwd_hash_fallback = "c1a96bdc66e356a5d4edf39ba4a4ebc365013fc29ea990f53148d86be74c33ad"  # Ensayos*
 
     if not password_ingresada:
         return False
+
+    if not pwd_hash and not pwd_plano:
+        pwd_hash = pwd_hash_fallback
 
     if pwd_hash:
         hash_ingresado = hashlib.sha256(password_ingresada.encode("utf-8")).hexdigest().lower()
