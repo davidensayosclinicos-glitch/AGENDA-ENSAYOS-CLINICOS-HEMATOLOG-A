@@ -224,6 +224,7 @@ DREAMM10_XLSX_DIR = os.path.join(SCRIPT_DIR, "DREAMM10 calendario pacientes")
 APP_TIMEZONE = "Europe/Madrid"
 DB_PATH = os.path.join(SCRIPT_DIR, "agenda_ensayos.db")
 DB_BACKUP_DIR = os.path.join(SCRIPT_DIR, "backups_db")
+BACKUP_ENSAYOS_DIR = r"H:\ENSAYOS\ENSAYOS\BASE DE DATOS APP ENSAYOS"
 APP_BUILD = datetime.fromtimestamp(os.path.getmtime(__file__)).strftime("%Y-%m-%d %H:%M")
 LOGO_PATH = resolver_archivo(
     os.path.join(SCRIPT_DIR, "cabuenes_corregido.png"),
@@ -518,6 +519,99 @@ def snapshot_db(tag="autosave"):
     except Exception:
         # Un fallo de backup no debe impedir el guardado principal.
         pass
+
+
+def backup_diario_ensayos():
+    """Exporta una copia diaria de todas las tablas a BACKUP_ENSAYOS_DIR.
+
+    - SQLite  → copia el archivo .db con fecha en el nombre.
+    - PostgreSQL → exporta cada tabla como CSV en una subcarpeta con fecha.
+    La carpeta destino solo existe en el equipo local; si no es accesible
+    (modo cloud) la función termina silenciosamente.
+    Se conservan los 60 últimos backups diarios.
+    """
+    import shutil
+
+    carpeta = BACKUP_ENSAYOS_DIR
+    try:
+        os.makedirs(carpeta, exist_ok=True)
+    except OSError:
+        return  # Ruta no disponible (cloud)
+
+    hoy = datetime.now().strftime("%Y%m%d")
+
+    if DB_BACKEND == "sqlite":
+        if not os.path.exists(DB_PATH):
+            return
+        destino = os.path.join(carpeta, f"agenda_ensayos_{hoy}.db")
+        if os.path.exists(destino):
+            return  # Ya se hizo el backup de hoy
+        try:
+            src = connect_db()
+            dst = sqlite3.connect(destino)
+            try:
+                src.backup(dst)
+            finally:
+                dst.close()
+                src.close()
+        except Exception:
+            pass
+        # Mantener solo los 60 más recientes
+        try:
+            archivos = sorted(
+                [f for f in os.listdir(carpeta)
+                 if f.startswith("agenda_ensayos_") and f.endswith(".db")],
+                reverse=True,
+            )
+            for viejo in archivos[60:]:
+                try:
+                    os.remove(os.path.join(carpeta, viejo))
+                except OSError:
+                    pass
+        except OSError:
+            pass
+    else:
+        # PostgreSQL: exportar cada tabla a CSV
+        tablas = [
+            "visitas", "revision_ocular", "pacientes", "checklist_items",
+            "notas_esquemas", "notas_enfermeria", "notas_coordinacion",
+            "adendas_ensayo", "adendas_paciente", "dreamm10_excels",
+        ]
+        subcarpeta = os.path.join(carpeta, f"backup_{hoy}")
+        marca = os.path.join(subcarpeta, ".completado")
+        if os.path.exists(marca):
+            return  # Ya se hizo el backup de hoy
+        try:
+            os.makedirs(subcarpeta, exist_ok=True)
+            conn = connect_db()
+            try:
+                for tabla in tablas:
+                    try:
+                        df = pd.read_sql_query(f"SELECT * FROM {tabla}", conn)  # noqa: S608
+                        df.to_csv(
+                            os.path.join(subcarpeta, f"{tabla}.csv"),
+                            index=False,
+                            encoding="utf-8-sig",
+                        )
+                    except Exception:
+                        pass
+            finally:
+                conn.close()
+            with open(marca, "w", encoding="utf-8") as _m:
+                _m.write(datetime.now().isoformat())
+        except Exception:
+            pass
+        # Mantener solo los 60 más recientes
+        try:
+            subcarpetas = sorted(
+                [f for f in os.listdir(carpeta)
+                 if f.startswith("backup_") and os.path.isdir(os.path.join(carpeta, f))],
+                reverse=True,
+            )
+            for vieja in subcarpetas[60:]:
+                shutil.rmtree(os.path.join(carpeta, vieja), ignore_errors=True)
+        except OSError:
+            pass
 
 
 def export_db_bytes():
@@ -3074,6 +3168,12 @@ def render_resumen_manana():
 if not st.session_state.get("_db_inicializada", False):
     init_db()
     st.session_state["_db_inicializada"] = True
+
+# Backup diario automatico a la carpeta local de red.
+_hoy_str = datetime.now().strftime("%Y%m%d")
+if st.session_state.get("_backup_diario_fecha") != _hoy_str:
+    backup_diario_ensayos()
+    st.session_state["_backup_diario_fecha"] = _hoy_str
 
 # --- INTERFAZ PRINCIPAL ---
 if LOGO_PATH:
