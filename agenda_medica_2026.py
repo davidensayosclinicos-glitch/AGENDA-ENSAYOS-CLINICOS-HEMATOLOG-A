@@ -12,6 +12,7 @@ import os
 import re
 import base64
 import io
+import shutil
 import webbrowser
 import tempfile
 import importlib
@@ -521,6 +522,22 @@ def snapshot_db(tag="autosave"):
         pass
 
 
+def resolver_carpeta_backup_diario():
+    candidatos = [BACKUP_ENSAYOS_DIR, DB_BACKUP_DIR]
+    for carpeta in candidatos:
+        if not carpeta:
+            continue
+        # En Linux/macOS, una ruta tipo H:\... no es una unidad real montada.
+        if os.name != "nt" and re.match(r"^[A-Za-z]:\\", carpeta):
+            continue
+        try:
+            os.makedirs(carpeta, exist_ok=True)
+            return carpeta
+        except OSError:
+            continue
+    return ""
+
+
 def backup_diario_ensayos():
     """Exporta una copia diaria de todas las tablas a BACKUP_ENSAYOS_DIR.
 
@@ -530,22 +547,18 @@ def backup_diario_ensayos():
     (modo cloud) la función termina silenciosamente.
     Se conservan los 60 últimos backups diarios.
     """
-    import shutil
-
-    carpeta = BACKUP_ENSAYOS_DIR
-    try:
-        os.makedirs(carpeta, exist_ok=True)
-    except OSError:
-        return  # Ruta no disponible (cloud)
+    carpeta = resolver_carpeta_backup_diario()
+    if not carpeta:
+        return False, ""
 
     hoy = datetime.now().strftime("%Y%m%d")
 
     if DB_BACKEND == "sqlite":
         if not os.path.exists(DB_PATH):
-            return
+            return False, carpeta
         destino = os.path.join(carpeta, f"agenda_ensayos_{hoy}.db")
         if os.path.exists(destino):
-            return  # Ya se hizo el backup de hoy
+            return True, carpeta  # Ya se hizo el backup de hoy
         try:
             src = connect_db()
             dst = sqlite3.connect(destino)
@@ -555,7 +568,7 @@ def backup_diario_ensayos():
                 dst.close()
                 src.close()
         except Exception:
-            pass
+            return False, carpeta
         # Mantener solo los 60 más recientes
         try:
             archivos = sorted(
@@ -570,6 +583,7 @@ def backup_diario_ensayos():
                     pass
         except OSError:
             pass
+        return True, carpeta
     else:
         # PostgreSQL: exportar cada tabla a CSV
         tablas = [
@@ -580,7 +594,7 @@ def backup_diario_ensayos():
         subcarpeta = os.path.join(carpeta, f"backup_{hoy}")
         marca = os.path.join(subcarpeta, ".completado")
         if os.path.exists(marca):
-            return  # Ya se hizo el backup de hoy
+            return True, carpeta  # Ya se hizo el backup de hoy
         try:
             os.makedirs(subcarpeta, exist_ok=True)
             conn = connect_db()
@@ -600,7 +614,7 @@ def backup_diario_ensayos():
             with open(marca, "w", encoding="utf-8") as _m:
                 _m.write(datetime.now().isoformat())
         except Exception:
-            pass
+            return False, carpeta
         # Mantener solo los 60 más recientes
         try:
             subcarpetas = sorted(
@@ -612,6 +626,7 @@ def backup_diario_ensayos():
                 shutil.rmtree(os.path.join(carpeta, vieja), ignore_errors=True)
         except OSError:
             pass
+        return True, carpeta
 
 
 def export_db_bytes():
@@ -3172,8 +3187,10 @@ if not st.session_state.get("_db_inicializada", False):
 # Backup diario automatico a la carpeta local de red.
 _hoy_str = datetime.now().strftime("%Y%m%d")
 if st.session_state.get("_backup_diario_fecha") != _hoy_str:
-    backup_diario_ensayos()
-    st.session_state["_backup_diario_fecha"] = _hoy_str
+    _backup_ok, _backup_ruta = backup_diario_ensayos()
+    if _backup_ok:
+        st.session_state["_backup_diario_fecha"] = _hoy_str
+        st.session_state["_backup_diario_ruta"] = _backup_ruta
 
 # --- INTERFAZ PRINCIPAL ---
 if LOGO_PATH:
