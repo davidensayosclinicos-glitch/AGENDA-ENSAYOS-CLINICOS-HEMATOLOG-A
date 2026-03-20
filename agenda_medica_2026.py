@@ -3281,14 +3281,10 @@ else:
     st.sidebar.caption("Logo no encontrado")
 
 _ruta_backup_mostrada = st.session_state.get("_backup_diario_ruta", "")
-if _ruta_backup_mostrada:
-    st.sidebar.caption(f"Backup diario: {_ruta_backup_mostrada}")
-else:
-    st.sidebar.warning("Backup diario sin ruta accesible (revisar unidad H: o BACKUP_ENSAYOS_DIR)")
 
 secciones_principales = [
     "Agenda",
-    "Backups",
+    "Copia de seguridad",
     "Citas ojos",
     "Calendario DREAMM10",
     "Prot. ensayo",
@@ -3316,7 +3312,7 @@ if ensayos_con_adendas:
         if etiqueta:
             st.sidebar.markdown(f"• {etiqueta}")
 
-if seccion_activa == "Backups":
+if seccion_activa == "Copia de seguridad":
     st.subheader("🗂️ Copias de seguridad")
     if _ruta_backup_mostrada:
         st.info(f"Ruta activa de backup: {_ruta_backup_mostrada}")
