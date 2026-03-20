@@ -523,7 +523,26 @@ def snapshot_db(tag="autosave"):
 
 
 def resolver_carpeta_backup_diario():
-    candidatos = [BACKUP_ENSAYOS_DIR, DB_BACKUP_DIR]
+    candidatos = []
+
+    ruta_configurada = str(leer_config("BACKUP_ENSAYOS_DIR", BACKUP_ENSAYOS_DIR)).strip()
+    if ruta_configurada:
+        candidatos.append(ruta_configurada)
+
+    # Si viene una ruta Windows (H:\...), en Linux intentamos rutas montadas equivalentes.
+    m_drive = re.match(r"^([A-Za-z]):\\(.+)$", ruta_configurada)
+    if os.name != "nt" and m_drive:
+        drive = m_drive.group(1).lower()
+        resto = m_drive.group(2).replace("\\", "/")
+        candidatos.extend(
+            [
+                f"/mnt/{drive}/{resto}",
+                f"/media/{m_drive.group(1).upper()}/{resto}",
+            ]
+        )
+
+    candidatos.append(DB_BACKUP_DIR)
+
     for carpeta in candidatos:
         if not carpeta:
             continue
@@ -3202,12 +3221,20 @@ if st.session_state.get("_backup_diario_fecha") != _hoy_str or not _backup_hoy_e
     if _backup_ok:
         st.session_state["_backup_diario_fecha"] = _hoy_str
         st.session_state["_backup_diario_ruta"] = _backup_ruta
+elif _backup_ruta_actual:
+    st.session_state["_backup_diario_ruta"] = _backup_ruta_actual
 
 # --- INTERFAZ PRINCIPAL ---
 if LOGO_PATH:
     renderizar_logo_sidebar(LOGO_PATH)
 else:
     st.sidebar.caption("Logo no encontrado")
+
+_ruta_backup_mostrada = st.session_state.get("_backup_diario_ruta", "")
+if _ruta_backup_mostrada:
+    st.sidebar.caption(f"Backup diario: {_ruta_backup_mostrada}")
+else:
+    st.sidebar.warning("Backup diario sin ruta accesible (revisar unidad H: o BACKUP_ENSAYOS_DIR)")
 
 secciones_principales = [
     "Agenda",
