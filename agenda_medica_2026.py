@@ -13,6 +13,7 @@ import re
 import base64
 import io
 import shutil
+import zipfile
 import webbrowser
 import tempfile
 import importlib
@@ -673,6 +674,49 @@ def export_db_bytes():
             return f.read()
     except OSError:
         return None
+
+
+def construir_backup_descargable():
+    ahora = datetime.now()
+
+    if DB_BACKEND == "sqlite":
+        db_bytes = export_db_bytes()
+        if not db_bytes:
+            return None, "", ""
+        nombre = f"agenda_ensayos_{ahora.strftime('%Y%m%d_%H%M%S')}.db"
+        return db_bytes, nombre, "application/octet-stream"
+
+    tablas = [
+        "visitas", "revision_ocular", "pacientes", "checklist_items",
+        "notas_esquemas", "notas_enfermeria", "notas_coordinacion",
+        "adendas_ensayo", "adendas_paciente", "dreamm10_excels",
+    ]
+
+    buffer = io.BytesIO()
+    conn = connect_db()
+    try:
+        with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            for tabla in tablas:
+                try:
+                    df = pd.read_sql_query(f"SELECT * FROM {tabla}", conn)  # noqa: S608
+                    zf.writestr(f"{tabla}.csv", df.to_csv(index=False, encoding="utf-8-sig"))
+                except Exception:
+                    continue
+            zf.writestr(
+                "_meta.txt",
+                (
+                    "Backup exportado desde Agenda Ensayos Clinicos\n"
+                    f"Fecha: {ahora.isoformat()}\n"
+                    f"Backend: {DB_BACKEND}\n"
+                ),
+            )
+    except Exception:
+        return None, "", ""
+    finally:
+        conn.close()
+
+    nombre = f"agenda_ensayos_{ahora.strftime('%Y%m%d_%H%M%S')}.zip"
+    return buffer.getvalue(), nombre, "application/zip"
 
 
 def restore_db_from_bytes(db_bytes):
@@ -3249,6 +3293,25 @@ if st.sidebar.button("Forzar backup ahora", key="btn_forzar_backup"):
         st.sidebar.success(f"Backup generado en: {_ruta_forzada}")
     else:
         st.sidebar.error("No se pudo generar el backup ahora. Revisa la ruta de destino.")
+
+if st.sidebar.button("Preparar descarga backup", key="btn_preparar_backup_pc"):
+    _bytes_backup, _nombre_backup, _mime_backup = construir_backup_descargable()
+    if _bytes_backup:
+        st.session_state["_backup_descarga_bytes"] = _bytes_backup
+        st.session_state["_backup_descarga_nombre"] = _nombre_backup
+        st.session_state["_backup_descarga_mime"] = _mime_backup
+        st.sidebar.success("Backup listo para descargar")
+    else:
+        st.sidebar.error("No se pudo preparar el backup para descarga")
+
+if st.session_state.get("_backup_descarga_bytes"):
+    st.sidebar.download_button(
+        "Descargar backup al PC",
+        data=st.session_state["_backup_descarga_bytes"],
+        file_name=st.session_state.get("_backup_descarga_nombre", "backup.db"),
+        mime=st.session_state.get("_backup_descarga_mime", "application/octet-stream"),
+        key="btn_descargar_backup_pc",
+    )
 
 secciones_principales = [
     "Agenda",
