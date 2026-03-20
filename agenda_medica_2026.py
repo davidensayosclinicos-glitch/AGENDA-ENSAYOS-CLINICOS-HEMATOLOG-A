@@ -557,7 +557,7 @@ def resolver_carpeta_backup_diario():
     return ""
 
 
-def backup_diario_ensayos():
+def backup_diario_ensayos(forzar=False):
     """Exporta una copia diaria de todas las tablas a BACKUP_ENSAYOS_DIR.
 
     - SQLite  → copia el archivo .db con fecha en el nombre.
@@ -570,14 +570,17 @@ def backup_diario_ensayos():
     if not carpeta:
         return False, ""
 
-    hoy = datetime.now().strftime("%Y%m%d")
+    ahora = datetime.now()
+    hoy = ahora.strftime("%Y%m%d")
 
     if DB_BACKEND == "sqlite":
         if not os.path.exists(DB_PATH):
             return False, carpeta
         destino = os.path.join(carpeta, f"agenda_ensayos_{hoy}.db")
-        if os.path.exists(destino):
+        if os.path.exists(destino) and not forzar:
             return True, carpeta  # Ya se hizo el backup de hoy
+        if forzar:
+            destino = os.path.join(carpeta, f"agenda_ensayos_{ahora.strftime('%Y%m%d_%H%M%S')}.db")
         try:
             src = connect_db()
             dst = sqlite3.connect(destino)
@@ -612,8 +615,11 @@ def backup_diario_ensayos():
         ]
         subcarpeta = os.path.join(carpeta, f"backup_{hoy}")
         marca = os.path.join(subcarpeta, ".completado")
-        if os.path.exists(marca):
+        if os.path.exists(marca) and not forzar:
             return True, carpeta  # Ya se hizo el backup de hoy
+        if forzar:
+            subcarpeta = os.path.join(carpeta, f"backup_{ahora.strftime('%Y%m%d_%H%M%S')}")
+            marca = os.path.join(subcarpeta, ".completado")
         try:
             os.makedirs(subcarpeta, exist_ok=True)
             conn = connect_db()
@@ -3235,6 +3241,14 @@ if _ruta_backup_mostrada:
     st.sidebar.caption(f"Backup diario: {_ruta_backup_mostrada}")
 else:
     st.sidebar.warning("Backup diario sin ruta accesible (revisar unidad H: o BACKUP_ENSAYOS_DIR)")
+
+if st.sidebar.button("Forzar backup ahora", key="btn_forzar_backup"):
+    _ok_forzado, _ruta_forzada = backup_diario_ensayos(forzar=True)
+    if _ok_forzado:
+        st.session_state["_backup_diario_ruta"] = _ruta_forzada
+        st.sidebar.success(f"Backup generado en: {_ruta_forzada}")
+    else:
+        st.sidebar.error("No se pudo generar el backup ahora. Revisa la ruta de destino.")
 
 secciones_principales = [
     "Agenda",
