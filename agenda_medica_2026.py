@@ -37,7 +37,6 @@ except ImportError:
 # Icono para la pestaña del navegador (disponible antes de set_page_config).
 BOOT_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 BOOT_LOGO_CANDIDATOS = [
-    os.path.join(BOOT_SCRIPT_DIR, "cabuenes_corregido.png"),
     os.path.join(BOOT_SCRIPT_DIR, "ChatGPT Image 10 mar 2026, 09_32_03.png"),
     os.path.join(BOOT_SCRIPT_DIR, "ChatGPT Image 10 mar 2026, 09_22_55.png"),
 ]
@@ -114,14 +113,12 @@ def construir_estilos_app():
                 box-shadow: none !important;
             }}
             section[data-testid="stSidebar"] .sidebar-logo-frame img {{
-                width: 210% !important;
-                max-width: none !important;
+                width: 100% !important;
+                max-width: 100% !important;
                 height: auto !important;
                 display: block !important;
-                margin: 0 !important;
-                position: relative !important;
-                left: 50% !important;
-                transform: translateX(-50%) !important;
+                transform: scale(2.2) !important;
+                transform-origin: center center !important;
                 border-radius: 0 !important;
                 box-shadow: none !important;
             }}
@@ -228,7 +225,6 @@ DB_PATH = os.path.join(SCRIPT_DIR, "agenda_ensayos.db")
 DB_BACKUP_DIR = os.path.join(SCRIPT_DIR, "backups_db")
 APP_BUILD = datetime.fromtimestamp(os.path.getmtime(__file__)).strftime("%Y-%m-%d %H:%M")
 LOGO_PATH = resolver_archivo(
-    os.path.join(SCRIPT_DIR, "cabuenes_corregido.png"),
     os.path.join(SCRIPT_DIR, "ChatGPT Image 10 mar 2026, 09_32_03.png"),
     os.path.join(SCRIPT_DIR, "ChatGPT Image 10 mar 2026, 09_22_55.png")
 )
