@@ -99,22 +99,28 @@ def construir_estilos_app():
             }}
             section[data-testid="stSidebar"] .sidebar-logo-frame {{
                 height: 170px !important;
+                width: 100% !important;
+                max-width: 100% !important;
                 overflow: hidden !important;
                 background: transparent !important;
                 display: flex !important;
                 align-items: center !important;
                 justify-content: center !important;
-                margin: -0.15rem -0.2rem 0.45rem -0.2rem !important;
+                margin: 0 0 0.45rem 0 !important;
                 padding: 0 !important;
+                box-sizing: border-box !important;
                 border: none !important;
                 box-shadow: none !important;
             }}
             section[data-testid="stSidebar"] .sidebar-logo-frame img {{
-                width: 245% !important;
+                width: 210% !important;
                 max-width: none !important;
                 height: auto !important;
                 display: block !important;
                 margin: 0 !important;
+                position: relative !important;
+                left: 50% !important;
+                transform: translateX(-50%) !important;
                 border-radius: 0 !important;
                 box-shadow: none !important;
             }}
