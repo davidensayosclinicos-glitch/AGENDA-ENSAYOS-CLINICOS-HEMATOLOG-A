@@ -629,6 +629,15 @@ def backup_diario_ensayos():
         return True, carpeta
 
 
+def existe_backup_diario_hoy(carpeta):
+    if not carpeta:
+        return False
+    hoy = datetime.now().strftime("%Y%m%d")
+    if DB_BACKEND == "sqlite":
+        return os.path.exists(os.path.join(carpeta, f"agenda_ensayos_{hoy}.db"))
+    return os.path.exists(os.path.join(carpeta, f"backup_{hoy}", ".completado"))
+
+
 def export_db_bytes():
     if DB_BACKEND != "sqlite":
         return None
@@ -3186,7 +3195,9 @@ if not st.session_state.get("_db_inicializada", False):
 
 # Backup diario automatico a la carpeta local de red.
 _hoy_str = datetime.now().strftime("%Y%m%d")
-if st.session_state.get("_backup_diario_fecha") != _hoy_str:
+_backup_ruta_actual = resolver_carpeta_backup_diario()
+_backup_hoy_existe = existe_backup_diario_hoy(_backup_ruta_actual)
+if st.session_state.get("_backup_diario_fecha") != _hoy_str or not _backup_hoy_existe:
     _backup_ok, _backup_ruta = backup_diario_ensayos()
     if _backup_ok:
         st.session_state["_backup_diario_fecha"] = _hoy_str
