@@ -3078,7 +3078,6 @@ if LOGO_PATH:
     renderizar_logo_sidebar(LOGO_PATH)
 else:
     st.sidebar.caption("Logo no encontrado")
-st.sidebar.markdown("### 📅 Agenda de Pacientes - Ensayos Clínicos 2026")
 
 secciones_principales = [
     "Agenda",
