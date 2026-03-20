@@ -14,6 +14,8 @@ import base64
 import io
 import shutil
 import zipfile
+import hashlib
+import hmac
 import webbrowser
 import tempfile
 import importlib
@@ -318,6 +320,57 @@ def leer_config(clave, default=None):
     except Exception:
         pass
     return default
+
+
+def _auth_configurada():
+    pwd_hash = str(leer_config("APP_PASSWORD_HASH_SHA256", "")).strip().lower()
+    pwd_plano = str(leer_config("APP_PASSWORD", "")).strip()
+    return bool(pwd_hash or pwd_plano)
+
+
+def _validar_password(password_ingresada):
+    pwd_hash = str(leer_config("APP_PASSWORD_HASH_SHA256", "")).strip().lower()
+    pwd_plano = str(leer_config("APP_PASSWORD", "")).strip()
+
+    if not password_ingresada:
+        return False
+
+    if pwd_hash:
+        hash_ingresado = hashlib.sha256(password_ingresada.encode("utf-8")).hexdigest().lower()
+        return hmac.compare_digest(hash_ingresado, pwd_hash)
+
+    if pwd_plano:
+        return hmac.compare_digest(password_ingresada, pwd_plano)
+
+    return True
+
+
+def requerir_login_si_configurado():
+    if not _auth_configurada():
+        return
+
+    if st.session_state.get("_auth_ok", False):
+        return
+
+    st.title("🔒 Acceso a la aplicación")
+    st.caption("Introduce la contraseña para continuar")
+
+    with st.form("form_login_app", clear_on_submit=False):
+        password = st.text_input("Contraseña", type="password")
+        enviar = st.form_submit_button("Entrar")
+
+    if enviar:
+        if _validar_password(password):
+            st.session_state["_auth_ok"] = True
+            st.session_state.pop("_auth_error", None)
+            st.rerun()
+        else:
+            st.session_state["_auth_error"] = "Contraseña incorrecta"
+
+    if st.session_state.get("_auth_error"):
+        st.error(st.session_state["_auth_error"])
+
+    st.stop()
 
 
 def extraer_database_url():
@@ -3257,6 +3310,9 @@ def render_resumen_manana():
             for tarea in tareas:
                 st.write(f"• {tarea}")
 
+
+requerir_login_si_configurado()
+
 # Inicializamos DB una vez por sesion para evitar coste en cada rerun.
 if not st.session_state.get("_db_inicializada", False):
     init_db()
@@ -3280,11 +3336,15 @@ if LOGO_PATH:
 else:
     st.sidebar.caption("Logo no encontrado")
 
+if _auth_configurada() and st.sidebar.button("Cerrar sesión", key="btn_logout_app"):
+    st.session_state["_auth_ok"] = False
+    st.rerun()
+
 _ruta_backup_mostrada = st.session_state.get("_backup_diario_ruta", "")
 
 secciones_principales = [
-    "Agenda",
     "Copia de seguridad",
+    "Agenda",
     "Citas ojos",
     "Calendario DREAMM10",
     "Prot. ensayo",
