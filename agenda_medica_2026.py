@@ -3359,6 +3359,7 @@ secciones_principales = [
     "Notas coordinacion",
     "Adendas",
     "Esquemas",
+    "🤖 Análisis IA",
 ]
 seccion_activa = st.sidebar.radio("Navegación", options=secciones_principales, key="seccion_principal")
 
@@ -5238,3 +5239,16 @@ if seccion_activa == "Agenda":
         else:
             st.info("👈 Haz clic en un día para añadir pacientes.")
             st.caption("Los días con '🩸' indican punción de médula.")
+
+if seccion_activa == "🤖 Análisis IA":
+    # Importar el módulo de análisis de protocolos
+    try:
+        from streamlit_protocol_ui import render_protocol_analyzer_section
+        render_protocol_analyzer_section()
+    except ImportError as e:
+        st.error(
+            f"❌ No se pudo cargar el módulo de análisis de IA: {e}. "
+            "Verifica que `streamlit_protocol_ui.py` esté en la carpeta raíz."
+        )
+    except Exception as e:
+        st.error(f"❌ Error en el análisis de IA: {e}")
