@@ -1,5 +1,5 @@
 """
-Panel de análisis de protocolos con IA (Groq / OpenAI).
+Panel de análisis de protocolos con IA (Groq / OpenAI / OpenRouter).
 Este módulo proporciona funciones para integrar en la aplicación Streamlit principal.
 """
 
@@ -45,12 +45,14 @@ def render_protocol_analyzer_section():
         ```toml
         groq_api_key   = "gsk_..."   # Groq
         openai_api_key = "sk-..."    # OpenAI
+        openrouter_api_key = "sk-or-v1-..."  # OpenRouter
         ```
 
         **Opción 2: Variables de entorno**
         ```bash
         export GROQ_API_KEY="gsk_..."
         export OPENAI_API_KEY="sk-..."
+        export OPENROUTER_API_KEY="sk-or-v1-..."
         ```
 
         **Obtener tu API key de Groq (gratuito):**
@@ -61,6 +63,11 @@ def render_protocol_analyzer_section():
         **Obtener tu API key de OpenAI:**
         1. Ve a https://platform.openai.com/api-keys
         2. Crea una nueva API key (requiere saldo)
+
+        **Obtener tu API key de OpenRouter (incluye modelos gratis):**
+        1. Ve a https://openrouter.ai/keys
+        2. Crea una API key
+        3. Usa un modelo con sufijo `:free`
 
         ⚠️ **Seguridad**: Nunca compartas tu API key públicamente
         """)
@@ -117,7 +124,7 @@ def render_protocol_analyzer_section():
             
             try:
                 with st.spinner("📖 Leyendo protocolo..."):
-                    analyzer = ProtocoloAnalyzer(api_key)
+                    analyzer = ProtocoloAnalyzer(api_key, provider=selected_provider, model=selected_model)
                     protocol_path = os.path.join("PROTOCOLOS", selected_protocol)
                     
                     # Extraer texto del PDF

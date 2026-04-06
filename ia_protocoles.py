@@ -1,5 +1,5 @@
 """
-Módulo para integración con IA (OpenAI o Groq) para análisis de protocolos médicos.
+Módulo para integración con IA (OpenAI, Groq u OpenRouter) para análisis de protocolos médicos.
 Gestiona lectura de PDFs, procesamiento con IA y extracción de información.
 """
 
@@ -30,11 +30,20 @@ PROVEEDORES = {
         },
         "modelo_default": "gpt-4o",
     },
+    "openrouter": {
+        "nombre": "OpenRouter (Modelos Free)",
+        "modelos": {
+            "meta-llama/llama-3.3-70b-instruct:free": "LLaMA 3.3 70B Instruct · Free",
+            "deepseek/deepseek-r1:free": "DeepSeek R1 · Free",
+            "mistralai/mistral-7b-instruct:free": "Mistral 7B Instruct · Free",
+        },
+        "modelo_default": "meta-llama/llama-3.3-70b-instruct:free",
+    },
 }
 
 
 class ProtocoloAnalyzer:
-    """Analiza protocolos médicos usando OpenAI o Groq como motor de IA."""
+    """Analiza protocolos médicos usando OpenAI, Groq u OpenRouter como motor de IA."""
 
     def __init__(self, api_key: str, provider: str = "groq", model: str = None):
         """
@@ -42,7 +51,7 @@ class ProtocoloAnalyzer:
 
         Args:
             api_key: API key del proveedor seleccionado.
-            provider: "groq" (por defecto) o "openai".
+            provider: "groq" (por defecto), "openai" u "openrouter".
             model: Modelo específico; si None usa el modelo por defecto del proveedor.
         """
         self.provider = provider
@@ -51,6 +60,11 @@ class ProtocoloAnalyzer:
 
         if provider == "groq":
             self.client = Groq(api_key=api_key)
+        elif provider == "openrouter":
+            self.client = OpenAI(
+                api_key=api_key,
+                base_url="https://openrouter.ai/api/v1"
+            )
         else:
             self.client = OpenAI(api_key=api_key)
     
@@ -164,13 +178,13 @@ def get_api_key(provider: str = "groq") -> Optional[str]:
     Obtiene el API key del proveedor indicado desde Streamlit secrets o variables de entorno.
 
     Args:
-        provider: "groq" o "openai"
+        provider: "groq", "openai" u "openrouter"
 
     Returns:
         API key o None si no está configurado
     """
-    secrets_key = f"{provider}_api_key"          # groq_api_key / openai_api_key
-    env_key = f"{provider.upper()}_API_KEY"       # GROQ_API_KEY / OPENAI_API_KEY
+    secrets_key = f"{provider}_api_key"          # groq_api_key / openai_api_key / openrouter_api_key
+    env_key = f"{provider.upper()}_API_KEY"       # GROQ_API_KEY / OPENAI_API_KEY / OPENROUTER_API_KEY
     try:
         if secrets_key in st.secrets:
             return st.secrets[secrets_key]
