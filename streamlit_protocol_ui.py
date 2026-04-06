@@ -1,12 +1,12 @@
 """
-Panel de análisis de protocolos con IA (OpenAI GPT-4).
+Panel de análisis de protocolos con IA (Groq / OpenAI).
 Este módulo proporciona funciones para integrar en la aplicación Streamlit principal.
 """
 
 import streamlit as st
 import os
 from pathlib import Path
-from ia_protocoles import ProtocoloAnalyzer, get_api_key, list_protocol_files
+from ia_protocoles import ProtocoloAnalyzer, get_api_key, list_protocol_files, PROVEEDORES
 
 
 def render_protocol_analyzer_section():
@@ -17,53 +17,65 @@ def render_protocol_analyzer_section():
     
     st.header("🤖 Análisis de Protocolos con IA")
     
-    # Aviso importante
-    st.info(
-        "📌 **Nota**: Asegúrate de haber configurado tu API key de OpenAI. "
-        "Consulta las instrucciones más abajo.",
-        icon="ℹ️"
+    # --- Selector de proveedor ---
+    provider_labels = {k: v["nombre"] for k, v in PROVEEDORES.items()}
+    selected_provider = st.radio(
+        "Motor de IA:",
+        list(provider_labels.keys()),
+        format_func=lambda k: provider_labels[k],
+        index=0,          # Groq por defecto
+        horizontal=True,
+        key="ia_provider"
     )
-    
+
+    # Selector de modelo del proveedor elegido
+    modelos_prov = PROVEEDORES[selected_provider]["modelos"]
+    selected_model = st.selectbox(
+        "Modelo:",
+        list(modelos_prov.keys()),
+        format_func=lambda k: modelos_prov[k],
+        key="ia_model"
     # Sección de configuración
     with st.expander("⚙️ Configuración de API Key", expanded=False):
-        st.markdown("""
-        ### Cómo configurar tu API key:
-        
+        st.markdown(f"""
+        ### Cómo configurar tu API key para **{PROVEEDORES[selected_provider]['nombre']}**:
+
         **Opción 1: Usar archivo `.streamlit/secrets.toml` (RECOMENDADO)**
-        1. Crea la carpeta `.streamlit` en tu proyecto si no existe
-        2. Crea o edita el archivo `.streamlit/secrets.toml`
-        3. Añade tu API key:
-           ```toml
-           openai_api_key = "sk-..."
-           ```
-        4. Reinicia la aplicación
-        
-        **Opción 2: Variable de entorno**
+        ```toml
+        groq_api_key   = "gsk_..."   # Groq
+        openai_api_key = "sk-..."    # OpenAI
+        ```
+
+        **Opción 2: Variables de entorno**
         ```bash
+        export GROQ_API_KEY="gsk_..."
         export OPENAI_API_KEY="sk-..."
         ```
-        
-        **Obtener tu API key:**
+
+        **Obtener tu API key de Groq (gratuito):**
+        1. Ve a https://console.groq.com/keys
+        2. Crea una cuenta gratuita
+        3. Genera una nueva API key
+
+        **Obtener tu API key de OpenAI:**
         1. Ve a https://platform.openai.com/api-keys
-        2. Crea una nueva API key
-        3. Cópiala y guárdala de forma segura
-        
+        2. Crea una nueva API key (requiere saldo)
+
         ⚠️ **Seguridad**: Nunca compartas tu API key públicamente
         """)
     
-    # Obtener API key
-    api_key = get_api_key()
-    
+    # Obtener API key del proveedor seleccionado
+    api_key = get_api_key(selected_provider)
+
     if not api_key:
         st.error(
-            "❌ API key no configurada. Por favor, configura tu API key siguiendo "
-            "las instrucciones en la sección de Configuración arriba.",
+            f"❌ API key de **{PROVEEDORES[selected_provider]['nombre']}** no configurada. "
+            "Sigue las instrucciones en la sección de Configuración.",
             icon="❌"
         )
         return
-    
-    # API key configurada
-    st.success("✅ API key configurada correctamente", icon="✅")
+
+    st.success(f"✅ API key de {PROVEEDORES[selected_provider]['nombre']} configurada", icon="✅")
     
     # Tabs para diferentes funcionalidades
     tab1, tab2, tab3 = st.tabs([
@@ -146,7 +158,7 @@ def render_protocol_analyzer_section():
         if st.button("📊 Extraer Información", key="extract_btn"):
             try:
                 with st.spinner("📖 Leyendo protocolo..."):
-                    analyzer = ProtocoloAnalyzer(api_key)
+                    analyzer = ProtocoloAnalyzer(api_key, provider=selected_provider, model=selected_model)
                     protocol_path = os.path.join("PROTOCOLOS", selected_protocol)
                     
                     # Extraer texto del PDF
@@ -211,7 +223,7 @@ def render_protocol_analyzer_section():
         if st.button("❓ Responder Pregunta", key="common_question_btn"):
             try:
                 with st.spinner("📖 Leyendo protocolo..."):
-                    analyzer = ProtocoloAnalyzer(api_key)
+                    analyzer = ProtocoloAnalyzer(api_key, provider=selected_provider, model=selected_model)
                     protocol_path = os.path.join("PROTOCOLOS", selected_protocol)
                     
                     # Extraer texto del PDF

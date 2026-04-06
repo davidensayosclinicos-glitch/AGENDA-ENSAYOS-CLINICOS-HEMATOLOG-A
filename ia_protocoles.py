@@ -1,5 +1,5 @@
 """
-Módulo para integración con OpenAI GPT-4 para análisis de protocolos médicos.
+Módulo para integración con IA (OpenAI o Groq) para análisis de protocolos médicos.
 Gestiona lectura de PDFs, procesamiento con IA y extracción de información.
 """
 
@@ -8,16 +8,51 @@ from typing import Optional, Dict, List
 import streamlit as st
 from PyPDF2 import PdfReader
 from openai import OpenAI
+from groq import Groq
+
+# Proveedores disponibles
+PROVEEDORES = {
+    "groq": {
+        "nombre": "Groq (LLaMA 3.3 · Gratis)",
+        "modelos": {
+            "llama-3.3-70b-versatile": "LLaMA 3.3 70B · Versátil (recomendado)",
+            "llama-3.1-8b-instant": "LLaMA 3.1 8B · Ultra rápido",
+            "mixtral-8x7b-32768": "Mixtral 8x7B · Contexto largo (32k)",
+            "gemma2-9b-it": "Gemma 2 9B · Google",
+        },
+        "modelo_default": "llama-3.3-70b-versatile",
+    },
+    "openai": {
+        "nombre": "OpenAI (GPT-4o · De pago)",
+        "modelos": {
+            "gpt-4o": "GPT-4o · Más capaz",
+            "gpt-4o-mini": "GPT-4o Mini · Económico",
+        },
+        "modelo_default": "gpt-4o",
+    },
+}
 
 
 class ProtocoloAnalyzer:
-    """Clase para analizar protocolos con OpenAI GPT-4"""
-    
-    def __init__(self, api_key: str):
-        """Inicializa el cliente de OpenAI"""
-        self.client = OpenAI(api_key=api_key)
-        self.model = "gpt-4o"  # Usa GPT-4o (más económico que GPT-4)
+    """Analiza protocolos médicos usando OpenAI o Groq como motor de IA."""
+
+    def __init__(self, api_key: str, provider: str = "groq", model: str = None):
+        """
+        Inicializa el analizador.
+
+        Args:
+            api_key: API key del proveedor seleccionado.
+            provider: "groq" (por defecto) o "openai".
+            model: Modelo específico; si None usa el modelo por defecto del proveedor.
+        """
+        self.provider = provider
+        self.model = model or PROVEEDORES[provider]["modelo_default"]
         self.max_tokens = 2000
+
+        if provider == "groq":
+            self.client = Groq(api_key=api_key)
+        else:
+            self.client = OpenAI(api_key=api_key)
     
     def extract_text_from_pdf(self, pdf_path: str) -> str:
         """
@@ -46,12 +81,12 @@ class ProtocoloAnalyzer:
     
     def analyze_protocol(self, protocol_text: str, prompt: str) -> str:
         """
-        Analiza un protocolo usando GPT-4.
-        
+        Analiza un protocolo usando el motor de IA configurado.
+
         Args:
             protocol_text: Texto del protocolo
             prompt: Pregunta o instrucción específica
-            
+
         Returns:
             Análisis realizado por IA
         """
@@ -82,15 +117,15 @@ Proporciona una respuesta clara y estruturada."""
             return response.choices[0].message.content
         
         except Exception as e:
-            raise Exception(f"Error en análisis con IA: {str(e)}")
-    
+            raise Exception(f"Error en análisis con IA ({self.provider}): {str(e)}")
+
     def extract_protocol_info(self, protocol_text: str) -> Dict[str, str]:
         """
         Extrae información clave del protocolo automáticamente.
-        
+
         Args:
             protocol_text: Texto del protocolo
-            
+
         Returns:
             Diccionario con información clave
         """
@@ -121,30 +156,30 @@ Responde SOLO con un JSON válido, sin explicaciones adicionales."""
             return response.choices[0].message.content
         
         except Exception as e:
-            raise Exception(f"Error extrayendo información: {str(e)}")
+            raise Exception(f"Error extrayendo información ({self.provider}): {str(e)}")
 
 
-def get_api_key() -> Optional[str]:
+def get_api_key(provider: str = "groq") -> Optional[str]:
     """
-    Obtiene el API key de OpenAI de forma segura desde Streamlit secrets.
-    
+    Obtiene el API key del proveedor indicado desde Streamlit secrets o variables de entorno.
+
+    Args:
+        provider: "groq" o "openai"
+
     Returns:
-        API key de OpenAI o None si no está configurado
+        API key o None si no está configurado
     """
+    secrets_key = f"{provider}_api_key"          # groq_api_key / openai_api_key
+    env_key = f"{provider.upper()}_API_KEY"       # GROQ_API_KEY / OPENAI_API_KEY
     try:
-        # Intentar obtener de Streamlit secrets
-        if "openai_api_key" in st.secrets:
-            return st.secrets["openai_api_key"]
-        
-        # Alternativa: variable de entorno
-        api_key = os.getenv("OPENAI_API_KEY")
+        if secrets_key in st.secrets:
+            return st.secrets[secrets_key]
+        api_key = os.getenv(env_key)
         if api_key:
             return api_key
-        
         return None
-    
     except Exception as e:
-        st.warning(f"Error obteniendo API key: {str(e)}")
+        st.warning(f"Error obteniendo API key ({provider}): {str(e)}")
         return None
 
 
