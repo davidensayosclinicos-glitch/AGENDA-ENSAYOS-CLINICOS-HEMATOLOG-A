@@ -35,6 +35,7 @@ def render_protocol_analyzer_section():
         list(modelos_prov.keys()),
         format_func=lambda k: modelos_prov[k],
         key="ia_model"
+    )
     # Sección de configuración
     with st.expander("⚙️ Configuración de API Key", expanded=False):
         st.markdown(f"""
