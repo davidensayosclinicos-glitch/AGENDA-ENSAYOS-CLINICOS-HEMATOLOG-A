@@ -14,13 +14,14 @@ from openai import OpenAI
 # Proveedor disponible
 PROVEEDORES = {
     "openrouter": {
-        "nombre": "OpenRouter (Modelos Free)",
+        "nombre": "OpenRouter",
         "modelos": {
+            "openrouter/auto": "Auto (recomendado, puede usar modelos de pago)",
             "meta-llama/llama-3.3-70b-instruct:free": "LLaMA 3.3 70B Instruct · Free",
             "deepseek/deepseek-r1:free": "DeepSeek R1 · Free",
             "mistralai/mistral-7b-instruct:free": "Mistral 7B Instruct · Free",
         },
-        "modelo_default": "meta-llama/llama-3.3-70b-instruct:free",
+        "modelo_default": "openrouter/auto",
     },
 }
 
@@ -91,6 +92,25 @@ class ProtocoloAnalyzer:
         ]
         return any(pista in texto for pista in pistas)
 
+    @staticmethod
+    def _es_error_credito_insuficiente(error: Exception) -> bool:
+        """Detecta errores de pago/saldo insuficiente en OpenRouter."""
+        status_code = getattr(error, "status_code", None)
+        texto = str(error).lower()
+
+        if status_code == 402:
+            return True
+
+        pistas = [
+            "error code: 402",
+            "payment required",
+            "insufficient credits",
+            "insufficient balance",
+            "not enough credits",
+            "billing",
+        ]
+        return any(pista in texto for pista in pistas)
+
     def _chat_completion(
         self,
         messages: List[Dict[str, str]],
@@ -118,6 +138,13 @@ class ProtocoloAnalyzer:
                     ultimo_error = e
                     es_rate_limit = self._es_error_rate_limit(e)
                     es_modelo_no_disponible = self._es_error_modelo_no_disponible(e)
+                    es_credito_insuficiente = self._es_error_credito_insuficiente(e)
+
+                    if es_credito_insuficiente:
+                        raise Exception(
+                            "OpenRouter devolvió error de saldo/facturación (402). "
+                            "Si usas openrouter/auto o modelos de pago, revisa tus créditos en OpenRouter."
+                        ) from e
 
                     if not es_rate_limit and not es_modelo_no_disponible:
                         raise

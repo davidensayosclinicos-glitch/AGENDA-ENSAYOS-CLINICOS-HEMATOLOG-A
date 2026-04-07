@@ -42,10 +42,13 @@ def render_protocol_analyzer_section():
         export OPENROUTER_API_KEY="sk-or-v1-..."
         ```
 
-        **Obtener tu API key de OpenRouter (incluye modelos gratis):**
+        **Obtener tu API key de OpenRouter:**
         1. Ve a https://openrouter.ai/keys
         2. Crea una API key
-        3. Usa un modelo con sufijo `:free`
+        3. Recomendado: usar `openrouter/auto` para evitar errores de endpoints en modelos free
+        4. Si eliges modelos `:free`, pueden quedar temporalmente sin endpoints
+
+        ℹ️ `openrouter/auto` puede consumir saldo según el modelo enroutado.
 
         ⚠️ **Seguridad**: Nunca compartas tu API key públicamente
         """)
