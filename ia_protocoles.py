@@ -94,6 +94,25 @@ class ProtocoloAnalyzer:
         # Fallback regex para variantes tipo "code":429 o "status": 429
         return bool(re.search(r'\b(code|status(?:_code)?)\b[\s\":=\']+429\b', texto))
 
+    @staticmethod
+    def _es_error_modelo_no_disponible(error: Exception) -> bool:
+        """Detecta cuando OpenRouter no tiene endpoints para el modelo solicitado."""
+        status_code = getattr(error, "status_code", None)
+        texto = str(error).lower()
+
+        if status_code == 404 and "endpoint" in texto:
+            return True
+
+        pistas = [
+            "error code: 404",
+            "'code': 404",
+            '"code": 404',
+            "no endpoints found",
+            "model not found",
+            "no provider available",
+        ]
+        return any(pista in texto for pista in pistas)
+
     def _chat_completion(
         self,
         messages: List[Dict[str, str]],
@@ -128,14 +147,23 @@ class ProtocoloAnalyzer:
                     )
                 except Exception as e:
                     ultimo_error = e
-                    if not self._es_error_rate_limit(e):
+                    es_rate_limit = self._es_error_rate_limit(e)
+                    es_modelo_no_disponible = self._es_error_modelo_no_disponible(e)
+
+                    if not es_rate_limit and not es_modelo_no_disponible:
                         raise
 
                     # Reintento breve en el mismo modelo antes de pasar al siguiente.
-                    if intento == 0:
+                    if es_rate_limit and intento == 0:
                         time.sleep(1.5)
                         continue
                     break
+
+        if ultimo_error and self._es_error_modelo_no_disponible(ultimo_error):
+            raise Exception(
+                "OpenRouter no tiene endpoints disponibles para los modelos free probados en este momento. "
+                "Cambia de modelo/proveedor o reintenta más tarde."
+            ) from ultimo_error
 
         raise Exception(
             "OpenRouter devolvió límite de tasa (429) en todos los modelos free probados. "
