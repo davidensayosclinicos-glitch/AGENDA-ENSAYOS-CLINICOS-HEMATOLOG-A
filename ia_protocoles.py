@@ -6,6 +6,8 @@ Gestiona lectura de PDFs, procesamiento con IA y extracción de información.
 import os
 import re
 import time
+import json
+import urllib.request
 from typing import Optional, Dict, List
 import streamlit as st
 from PyPDF2 import PdfReader
@@ -51,6 +53,36 @@ class ProtocoloAnalyzer:
             api_key=api_key,
             base_url="https://openrouter.ai/api/v1"
         )
+        self.api_key = api_key
+
+    def _modelos_free_dinamicos(self, max_modelos: int = 20) -> List[str]:
+        """Consulta OpenRouter para descubrir modelos :free vigentes."""
+        try:
+            req = urllib.request.Request(
+                "https://openrouter.ai/api/v1/models",
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json",
+                },
+            )
+            with urllib.request.urlopen(req, timeout=8) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+
+            data = payload.get("data", []) if isinstance(payload, dict) else []
+            ids = []
+            for item in data:
+                if not isinstance(item, dict):
+                    continue
+                model_id = item.get("id", "")
+                if isinstance(model_id, str) and model_id.endswith(":free"):
+                    ids.append(model_id)
+
+            # Prioriza mantener primero los ya conocidos en la app.
+            conocidos = list(PROVEEDORES["openrouter"]["modelos"].keys())
+            ordenados = [m for m in conocidos if m in ids] + [m for m in ids if m not in conocidos]
+            return ordenados[:max_modelos]
+        except Exception:
+            return []
 
     @staticmethod
     def _es_error_rate_limit(error: Exception) -> bool:
@@ -168,10 +200,33 @@ class ProtocoloAnalyzer:
             if ronda == 0:
                 time.sleep(1.0)
 
+        # Fallback dinámico: consulta el catálogo actual de OpenRouter para probar
+        # modelos :free que no estén en la lista estática local.
+        dinamicos = self._modelos_free_dinamicos()
+        dinamicos_no_probados = [m for m in dinamicos if m not in modelos_a_probar]
+        for modelo in dinamicos_no_probados:
+            try:
+                return self.client.chat.completions.create(
+                    model=modelo,
+                    messages=messages,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                )
+            except Exception as e:
+                ultimo_error = e
+                if not self._es_error_rate_limit(e) and not self._es_error_modelo_no_disponible(e):
+                    if self._es_error_credito_insuficiente(e):
+                        raise Exception(
+                            "OpenRouter devolvió error de saldo/facturación (402). "
+                            "Si tu cuenta no tiene créditos, usa un modelo `:free` con endpoint activo."
+                        ) from e
+                    raise
+
         if ultimo_error and self._es_error_modelo_no_disponible(ultimo_error):
             raise Exception(
-                "OpenRouter no tiene endpoints disponibles para los modelos free probados. "
-                "Reintenta más tarde o cambia a otro modelo de OpenRouter."
+                "OpenRouter no tiene endpoints disponibles para los modelos free probados, "
+                "incluyendo los publicados dinámicamente en este momento. "
+                "Reintenta más tarde porque la disponibilidad free cambia por región/cupo."
             ) from ultimo_error
 
         if ultimo_error and self._es_error_credito_insuficiente(ultimo_error):
