@@ -1,5 +1,5 @@
 """
-Módulo para integración con IA (OpenAI, Groq u OpenRouter) para análisis de protocolos médicos.
+Módulo para integración con OpenRouter para análisis de protocolos médicos.
 Gestiona lectura de PDFs, procesamiento con IA y extracción de información.
 """
 
@@ -10,28 +10,9 @@ from typing import Optional, Dict, List
 import streamlit as st
 from PyPDF2 import PdfReader
 from openai import OpenAI
-from groq import Groq
 
-# Proveedores disponibles
+# Proveedor disponible
 PROVEEDORES = {
-    "groq": {
-        "nombre": "Groq (LLaMA 3.3 · Gratis)",
-        "modelos": {
-            "llama-3.3-70b-versatile": "LLaMA 3.3 70B · Versátil (recomendado)",
-            "llama-3.1-8b-instant": "LLaMA 3.1 8B · Ultra rápido",
-            "mixtral-8x7b-32768": "Mixtral 8x7B · Contexto largo (32k)",
-            "gemma2-9b-it": "Gemma 2 9B · Google",
-        },
-        "modelo_default": "llama-3.3-70b-versatile",
-    },
-    "openai": {
-        "nombre": "OpenAI (GPT-4o · De pago)",
-        "modelos": {
-            "gpt-4o": "GPT-4o · Más capaz",
-            "gpt-4o-mini": "GPT-4o Mini · Económico",
-        },
-        "modelo_default": "gpt-4o",
-    },
     "openrouter": {
         "nombre": "OpenRouter (Modelos Free)",
         "modelos": {
@@ -45,30 +26,27 @@ PROVEEDORES = {
 
 
 class ProtocoloAnalyzer:
-    """Analiza protocolos médicos usando OpenAI, Groq u OpenRouter como motor de IA."""
+    """Analiza protocolos médicos usando OpenRouter como motor de IA."""
 
-    def __init__(self, api_key: str, provider: str = "groq", model: str = None):
+    def __init__(self, api_key: str, provider: str = "openrouter", model: str = None):
         """
         Inicializa el analizador.
 
         Args:
             api_key: API key del proveedor seleccionado.
-            provider: "groq" (por defecto), "openai" u "openrouter".
+            provider: Debe ser "openrouter".
             model: Modelo específico; si None usa el modelo por defecto del proveedor.
         """
+        if provider != "openrouter":
+            raise ValueError("Este analizador solo soporta OpenRouter")
+
         self.provider = provider
         self.model = model or PROVEEDORES[provider]["modelo_default"]
         self.max_tokens = 2000
-
-        if provider == "groq":
-            self.client = Groq(api_key=api_key)
-        elif provider == "openrouter":
-            self.client = OpenAI(
-                api_key=api_key,
-                base_url="https://openrouter.ai/api/v1"
-            )
-        else:
-            self.client = OpenAI(api_key=api_key)
+        self.client = OpenAI(
+            api_key=api_key,
+            base_url="https://openrouter.ai/api/v1"
+        )
 
     @staticmethod
     def _es_error_rate_limit(error: Exception) -> bool:
@@ -123,15 +101,6 @@ class ProtocoloAnalyzer:
         Ejecuta chat completion con tolerancia a 429 en OpenRouter:
         reintenta una vez por modelo y hace fallback a otros modelos free.
         """
-        # Para OpenAI/Groq mantenemos ejecución directa.
-        if self.provider != "openrouter":
-            return self.client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                max_tokens=max_tokens,
-                temperature=temperature,
-            )
-
         modelos_disponibles = list(PROVEEDORES["openrouter"]["modelos"].keys())
         modelos_a_probar = [self.model] + [m for m in modelos_disponibles if m != self.model]
         ultimo_error = None
@@ -161,13 +130,13 @@ class ProtocoloAnalyzer:
 
         if ultimo_error and self._es_error_modelo_no_disponible(ultimo_error):
             raise Exception(
-                "OpenRouter no tiene endpoints disponibles para los modelos free probados en este momento. "
-                "Cambia de modelo/proveedor o reintenta más tarde."
+                "OpenRouter no tiene endpoints disponibles para los modelos free probados. "
+                "Reintenta más tarde o cambia a otro modelo de OpenRouter."
             ) from ultimo_error
 
         raise Exception(
             "OpenRouter devolvió límite de tasa (429) en todos los modelos free probados. "
-            "Reintenta en unos minutos o cambia a Groq/OpenAI."
+            "Reintenta en unos minutos o cambia a otro modelo de OpenRouter."
         ) from ultimo_error
     
     def extract_text_from_pdf(self, pdf_path: str) -> str:
@@ -273,18 +242,21 @@ Responde SOLO con un JSON válido, sin explicaciones adicionales."""
             raise Exception(f"Error extrayendo información ({self.provider}): {str(e)}")
 
 
-def get_api_key(provider: str = "groq") -> Optional[str]:
+def get_api_key(provider: str = "openrouter") -> Optional[str]:
     """
-    Obtiene el API key del proveedor indicado desde Streamlit secrets o variables de entorno.
+    Obtiene el API key de OpenRouter desde Streamlit secrets o variables de entorno.
 
     Args:
-        provider: "groq", "openai" u "openrouter"
+        provider: Debe ser "openrouter"
 
     Returns:
         API key o None si no está configurado
     """
-    secrets_key = f"{provider}_api_key"          # groq_api_key / openai_api_key / openrouter_api_key
-    env_key = f"{provider.upper()}_API_KEY"       # GROQ_API_KEY / OPENAI_API_KEY / OPENROUTER_API_KEY
+    if provider != "openrouter":
+        return None
+
+    secrets_key = "openrouter_api_key"
+    env_key = "OPENROUTER_API_KEY"
     try:
         if secrets_key in st.secrets:
             return st.secrets[secrets_key]

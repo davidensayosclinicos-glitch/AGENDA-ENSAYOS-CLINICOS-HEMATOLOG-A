@@ -1,5 +1,5 @@
 """
-Panel de análisis de protocolos con IA (Groq / OpenAI / OpenRouter).
+Panel de análisis de protocolos con IA (OpenRouter).
 Este módulo proporciona funciones para integrar en la aplicación Streamlit principal.
 """
 
@@ -17,21 +17,12 @@ def render_protocol_analyzer_section():
     
     st.header("🤖 Análisis de Protocolos con IA")
     
-    # --- Selector de proveedor ---
-    provider_labels = {k: v["nombre"] for k, v in PROVEEDORES.items()}
-    selected_provider = st.radio(
-        "Motor de IA:",
-        list(provider_labels.keys()),
-        format_func=lambda k: provider_labels[k],
-        index=0,          # Groq por defecto
-        horizontal=True,
-        key="ia_provider"
-    )
+    selected_provider = "openrouter"
 
-    # Selector de modelo del proveedor elegido
+    # Selector de modelo de OpenRouter
     modelos_prov = PROVEEDORES[selected_provider]["modelos"]
     selected_model = st.selectbox(
-        "Modelo:",
+        "Modelo OpenRouter:",
         list(modelos_prov.keys()),
         format_func=lambda k: modelos_prov[k],
         key="ia_model"
@@ -43,26 +34,13 @@ def render_protocol_analyzer_section():
 
         **Opción 1: Usar archivo `.streamlit/secrets.toml` (RECOMENDADO)**
         ```toml
-        groq_api_key   = "gsk_..."   # Groq
-        openai_api_key = "sk-..."    # OpenAI
         openrouter_api_key = "sk-or-v1-..."  # OpenRouter
         ```
 
         **Opción 2: Variables de entorno**
         ```bash
-        export GROQ_API_KEY="gsk_..."
-        export OPENAI_API_KEY="sk-..."
         export OPENROUTER_API_KEY="sk-or-v1-..."
         ```
-
-        **Obtener tu API key de Groq (gratuito):**
-        1. Ve a https://console.groq.com/keys
-        2. Crea una cuenta gratuita
-        3. Genera una nueva API key
-
-        **Obtener tu API key de OpenAI:**
-        1. Ve a https://platform.openai.com/api-keys
-        2. Crea una nueva API key (requiere saldo)
 
         **Obtener tu API key de OpenRouter (incluye modelos gratis):**
         1. Ve a https://openrouter.ai/keys
@@ -73,7 +51,7 @@ def render_protocol_analyzer_section():
         """)
     
     # Obtener API key del proveedor seleccionado
-    api_key = get_api_key(selected_provider)
+    api_key = get_api_key("openrouter")
 
     if not api_key:
         st.error(
