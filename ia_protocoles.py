@@ -141,9 +141,13 @@ class ProtocoloAnalyzer:
                     es_credito_insuficiente = self._es_error_credito_insuficiente(e)
 
                     if es_credito_insuficiente:
+                        # Si el modelo actual es auto/pago, intentar otros modelos (incluidos free).
+                        # Si ya estamos en un modelo free, no hay recuperación adicional por este motivo.
+                        if modelo == "openrouter/auto":
+                            break
                         raise Exception(
                             "OpenRouter devolvió error de saldo/facturación (402). "
-                            "Si usas openrouter/auto o modelos de pago, revisa tus créditos en OpenRouter."
+                            "Revisa tus créditos en OpenRouter."
                         ) from e
 
                     if not es_rate_limit and not es_modelo_no_disponible:
@@ -159,6 +163,12 @@ class ProtocoloAnalyzer:
             raise Exception(
                 "OpenRouter no tiene endpoints disponibles para los modelos free probados. "
                 "Reintenta más tarde o cambia a otro modelo de OpenRouter."
+            ) from ultimo_error
+
+        if ultimo_error and self._es_error_credito_insuficiente(ultimo_error):
+            raise Exception(
+                "OpenRouter devolvió error de saldo/facturación (402). "
+                "Si `openrouter/auto` no tiene saldo, usa un modelo `:free` disponible o recarga créditos."
             ) from ultimo_error
 
         raise Exception(
