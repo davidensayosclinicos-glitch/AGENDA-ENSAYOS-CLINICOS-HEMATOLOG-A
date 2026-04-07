@@ -4,6 +4,8 @@ Gestiona lectura de PDFs, procesamiento con IA y extracción de información.
 """
 
 import os
+import re
+import time
 from typing import Optional, Dict, List
 import streamlit as st
 from PyPDF2 import PdfReader
@@ -67,6 +69,78 @@ class ProtocoloAnalyzer:
             )
         else:
             self.client = OpenAI(api_key=api_key)
+
+    @staticmethod
+    def _es_error_rate_limit(error: Exception) -> bool:
+        """Detecta errores de límite de tasa de forma tolerante entre proveedores."""
+        status_code = getattr(error, "status_code", None)
+        if status_code == 429:
+            return True
+
+        texto = str(error).lower()
+        pistas = [
+            "error code: 429",
+            "'code': 429",
+            '"code": 429',
+            "rate limit",
+            "rate-limit",
+            "rate_limited",
+            "too many requests",
+            "temporarily rate-limited",
+        ]
+        if any(pista in texto for pista in pistas):
+            return True
+
+        # Fallback regex para variantes tipo "code":429 o "status": 429
+        return bool(re.search(r'\b(code|status(?:_code)?)\b[\s\":=\']+429\b', texto))
+
+    def _chat_completion(
+        self,
+        messages: List[Dict[str, str]],
+        max_tokens: int,
+        temperature: float,
+    ):
+        """
+        Ejecuta chat completion con tolerancia a 429 en OpenRouter:
+        reintenta una vez por modelo y hace fallback a otros modelos free.
+        """
+        # Para OpenAI/Groq mantenemos ejecución directa.
+        if self.provider != "openrouter":
+            return self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                max_tokens=max_tokens,
+                temperature=temperature,
+            )
+
+        modelos_disponibles = list(PROVEEDORES["openrouter"]["modelos"].keys())
+        modelos_a_probar = [self.model] + [m for m in modelos_disponibles if m != self.model]
+        ultimo_error = None
+
+        for modelo in modelos_a_probar:
+            for intento in range(2):
+                try:
+                    return self.client.chat.completions.create(
+                        model=modelo,
+                        messages=messages,
+                        max_tokens=max_tokens,
+                        temperature=temperature,
+                    )
+                except Exception as e:
+                    ultimo_error = e
+                    if not self._es_error_rate_limit(e):
+                        raise
+
+                    # Reintento breve en el mismo modelo antes de pasar al siguiente.
+                    if intento == 0:
+                        time.sleep(1.5)
+                        continue
+                    break
+
+        raise Exception(
+            "OpenRouter devolvió límite de tasa (429) en todos los modelos free probados. "
+            "Reintenta en unos minutos o cambia a Groq/OpenAI."
+        ) from ultimo_error
     
     def extract_text_from_pdf(self, pdf_path: str) -> str:
         """
@@ -118,14 +192,13 @@ PREGUNTA/SOLICITUD:
 
 Proporciona una respuesta clara y estruturada."""
             
-            response = self.client.chat.completions.create(
-                model=self.model,
+            response = self._chat_completion(
                 messages=[
                     {"role": "system", "content": system_message},
                     {"role": "user", "content": user_message}
                 ],
                 max_tokens=self.max_tokens,
-                temperature=0.7
+                temperature=0.7,
             )
             
             return response.choices[0].message.content
@@ -157,14 +230,13 @@ Proporciona una respuesta clara y estruturada."""
 
 Responde SOLO con un JSON válido, sin explicaciones adicionales."""
             
-            response = self.client.chat.completions.create(
-                model=self.model,
+            response = self._chat_completion(
                 messages=[
                     {"role": "system", "content": "Eres un experto extrayendo datos de protocolos médicos. Responde en JSON válido."},
                     {"role": "user", "content": f"PROTOCOLO:\n{protocol_text}\n\n{prompt}"}
                 ],
                 max_tokens=1500,
-                temperature=0.2
+                temperature=0.2,
             )
             
             return response.choices[0].message.content
