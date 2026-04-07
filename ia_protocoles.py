@@ -20,8 +20,11 @@ PROVEEDORES = {
             "meta-llama/llama-3.3-70b-instruct:free": "LLaMA 3.3 70B Instruct · Free",
             "deepseek/deepseek-r1:free": "DeepSeek R1 · Free",
             "mistralai/mistral-7b-instruct:free": "Mistral 7B Instruct · Free",
+            "deepseek/deepseek-chat-v3-0324:free": "DeepSeek Chat V3 · Free",
+            "qwen/qwen-2.5-72b-instruct:free": "Qwen 2.5 72B Instruct · Free",
+            "google/gemma-2-9b-it:free": "Gemma 2 9B IT · Free",
         },
-        "modelo_default": "openrouter/auto",
+        "modelo_default": "mistralai/mistral-7b-instruct:free",
     },
 }
 
@@ -125,39 +128,45 @@ class ProtocoloAnalyzer:
         modelos_a_probar = [self.model] + [m for m in modelos_disponibles if m != self.model]
         ultimo_error = None
 
-        for modelo in modelos_a_probar:
-            for intento in range(2):
-                try:
-                    return self.client.chat.completions.create(
-                        model=modelo,
-                        messages=messages,
-                        max_tokens=max_tokens,
-                        temperature=temperature,
-                    )
-                except Exception as e:
-                    ultimo_error = e
-                    es_rate_limit = self._es_error_rate_limit(e)
-                    es_modelo_no_disponible = self._es_error_modelo_no_disponible(e)
-                    es_credito_insuficiente = self._es_error_credito_insuficiente(e)
+        # Dos rondas para absorber ventanas cortas de indisponibilidad upstream.
+        for ronda in range(2):
+            for modelo in modelos_a_probar:
+                for intento in range(2):
+                    try:
+                        return self.client.chat.completions.create(
+                            model=modelo,
+                            messages=messages,
+                            max_tokens=max_tokens,
+                            temperature=temperature,
+                        )
+                    except Exception as e:
+                        ultimo_error = e
+                        es_rate_limit = self._es_error_rate_limit(e)
+                        es_modelo_no_disponible = self._es_error_modelo_no_disponible(e)
+                        es_credito_insuficiente = self._es_error_credito_insuficiente(e)
 
-                    if es_credito_insuficiente:
-                        # Si el modelo actual es auto/pago, intentar otros modelos (incluidos free).
-                        # Si ya estamos en un modelo free, no hay recuperación adicional por este motivo.
-                        if modelo == "openrouter/auto":
-                            break
-                        raise Exception(
-                            "OpenRouter devolvió error de saldo/facturación (402). "
-                            "Revisa tus créditos en OpenRouter."
-                        ) from e
+                        if es_credito_insuficiente:
+                            # Si el modelo actual es auto/pago, intentar otros modelos (incluidos free).
+                            # Si ya estamos en un modelo free, no hay recuperación adicional por este motivo.
+                            if modelo == "openrouter/auto":
+                                break
+                            raise Exception(
+                                "OpenRouter devolvió error de saldo/facturación (402). "
+                                "Revisa tus créditos en OpenRouter."
+                            ) from e
 
-                    if not es_rate_limit and not es_modelo_no_disponible:
-                        raise
+                        if not es_rate_limit and not es_modelo_no_disponible:
+                            raise
 
-                    # Reintento breve en el mismo modelo antes de pasar al siguiente.
-                    if es_rate_limit and intento == 0:
-                        time.sleep(1.5)
-                        continue
-                    break
+                        # Reintento breve en el mismo modelo antes de pasar al siguiente.
+                        if es_rate_limit and intento == 0:
+                            time.sleep(1.5)
+                            continue
+                        break
+
+            # Pausa mínima entre rondas de fallback para evitar tormenta de reintentos.
+            if ronda == 0:
+                time.sleep(1.0)
 
         if ultimo_error and self._es_error_modelo_no_disponible(ultimo_error):
             raise Exception(
