@@ -1598,8 +1598,8 @@ def add_checklist_item(ensayo, item):
     conn = connect_db()
     c = conn.cursor()
     c.execute(
-        "INSERT INTO checklist_items (ensayo, item, done) VALUES (?, ?, 0)",
-        (ensayo, item)
+        "INSERT INTO checklist_items (ensayo, item, done) VALUES (?, ?, ?)",
+        (ensayo, item, False)
     )
     conn.commit()
     conn.close()
@@ -1619,8 +1619,9 @@ def add_checklist_items_bulk(ensayo, items):
     )
     nuevos = [(ensayo, item) for item in items if item not in existentes]
     if nuevos:
+        nuevos = [(ensayo, item, False) for ensayo, item in nuevos]
         c.executemany(
-            "INSERT INTO checklist_items (ensayo, item, done) VALUES (?, ?, 0)",
+            "INSERT INTO checklist_items (ensayo, item, done) VALUES (?, ?, ?)",
             nuevos
         )
     conn.commit()
@@ -1631,7 +1632,7 @@ def add_checklist_items_bulk(ensayo, items):
 def set_checklist_done(item_id, done):
     conn = connect_db()
     c = conn.cursor()
-    c.execute("UPDATE checklist_items SET done = ? WHERE id = ?", (int(done), item_id))
+    c.execute("UPDATE checklist_items SET done = ? WHERE id = ?", (bool(done), item_id))
     conn.commit()
     conn.close()
     invalidar_cache_lecturas()
