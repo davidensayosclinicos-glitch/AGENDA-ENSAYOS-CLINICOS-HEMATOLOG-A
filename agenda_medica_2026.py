@@ -2656,6 +2656,55 @@ def clasificar_item_checklist(item):
     return "Otros"
 
 
+def descomponer_item_checklist(item):
+    texto = normalizar_texto_campo(item)
+    if not texto:
+        return "General", "", ""
+
+    if texto.startswith("Visita:"):
+        resto = texto.split(":", 1)[1].strip()
+        partes = [p.strip() for p in resto.split("|") if p.strip()]
+        titulo = partes[0] if partes else "Visita"
+        detalle = " | ".join(partes[1:]) if len(partes) > 1 else ""
+        return "Visitas", titulo, detalle
+
+    if texto.startswith("Panel analítico:") or texto.startswith("Panel analitico:"):
+        resto = texto.split(":", 1)[1].strip()
+        partes = [p.strip() for p in resto.split("|") if p.strip()]
+        titulo = partes[0] if partes else "Panel"
+        detalle = " | ".join(partes[1:]) if len(partes) > 1 else ""
+        return "Analitos", titulo, detalle
+
+    if ":" in texto:
+        grupo, resto = texto.split(":", 1)
+        return normalizar_texto_campo(grupo) or "General", normalizar_texto_campo(resto), ""
+
+    return "General", texto, ""
+
+
+def agrupar_items_checklist(df_items):
+    grupos = []
+    mapa_indices = {}
+
+    for _, row in df_items.iterrows():
+        grupo, titulo, detalle = descomponer_item_checklist(row["item"])
+        if grupo not in mapa_indices:
+            mapa_indices[grupo] = len(grupos)
+            grupos.append({"grupo": grupo, "items": []})
+
+        grupos[mapa_indices[grupo]]["items"].append(
+            {
+                "id": int(row["id"]),
+                "titulo": titulo or normalizar_texto_campo(row["item"]),
+                "detalle": detalle,
+                "done": bool(row["done"]),
+                "item": row["item"],
+            }
+        )
+
+    return grupos
+
+
 def _buscar_columna_por_patron(df, patrones):
     columnas = list(df.columns)
     if not columnas:
@@ -4850,20 +4899,48 @@ if seccion_activa == "Check list":
         if df_items.empty:
             st.info("No hay items para este ensayo.")
         else:
-            for _, row in df_items.iterrows():
-                cols = st.columns([8, 1])
-                with cols[0]:
-                    estado = st.checkbox(
-                        row["item"],
-                        value=bool(row["done"]),
-                        key=f"chk_{row['id']}"
-                    )
-                    if estado != bool(row["done"]):
-                        set_checklist_done(int(row["id"]), estado)
-                with cols[1]:
-                    if st.button("🗑️", key=f"del_{row['id']}"):
-                        delete_checklist_item(int(row["id"]))
-                        st.rerun()
+            total_items = int(len(df_items))
+            total_completados = int(df_items["done"].fillna(False).astype(bool).sum())
+            total_pendientes = total_items - total_completados
+            progreso = (total_completados / total_items) if total_items else 0
+
+            m1, m2, m3 = st.columns(3)
+            with m1:
+                st.metric("Total", total_items)
+            with m2:
+                st.metric("Completados", total_completados)
+            with m3:
+                st.metric("Pendientes", total_pendientes)
+
+            st.progress(progreso, text=f"Progreso global: {total_completados}/{total_items}")
+
+            grupos_checklist = agrupar_items_checklist(df_items)
+            for bloque in grupos_checklist:
+                items_bloque = bloque["items"]
+                hechos_bloque = sum(1 for item in items_bloque if item["done"])
+                total_bloque = len(items_bloque)
+                titulo_bloque = f"{bloque['grupo']} · {hechos_bloque}/{total_bloque}"
+
+                with st.expander(titulo_bloque, expanded=hechos_bloque < total_bloque):
+                    progreso_bloque = (hechos_bloque / total_bloque) if total_bloque else 0
+                    st.progress(progreso_bloque)
+
+                    for item in items_bloque:
+                        cols = st.columns([8, 1])
+                        with cols[0]:
+                            estado = st.checkbox(
+                                item["titulo"],
+                                value=item["done"],
+                                key=f"chk_{item['id']}"
+                            )
+                            if item["detalle"]:
+                                st.caption(item["detalle"])
+                            if estado != item["done"]:
+                                set_checklist_done(item["id"], estado)
+                        with cols[1]:
+                            if st.button("🗑️", key=f"del_{item['id']}"):
+                                delete_checklist_item(item["id"])
+                                st.rerun()
 
             if st.button("Imprimir checklist"):
                 nombre_paciente = datos_paciente.get("nombre", "")
