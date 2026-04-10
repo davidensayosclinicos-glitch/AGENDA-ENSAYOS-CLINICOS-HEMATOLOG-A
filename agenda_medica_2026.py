@@ -225,6 +225,7 @@ IMG_DIR_ESQUEMAS = resolver_directorio(
     r"H:\ENSAYOS\ENSAYOS\ESQUEMAS TRATAMIENTOS"
 )
 DREAMM10_XLSX_DIR = os.path.join(SCRIPT_DIR, "DREAMM10 calendario pacientes")
+CHECKLIST_GLOBAL_XLSX = os.path.join(SCRIPT_DIR, "checklist_todos_los_ensayos.xlsx")
 APP_TIMEZONE = "Europe/Madrid"
 DB_PATH = os.path.join(SCRIPT_DIR, "agenda_ensayos.db")
 DB_BACKUP_DIR = os.path.join(SCRIPT_DIR, "backups_db")
@@ -1607,7 +1608,7 @@ def add_checklist_item(ensayo, item):
 def add_checklist_items_bulk(ensayo, items):
     ensayo = normalizar_ensayo(ensayo)
     if not items:
-        return
+        return 0
     conn = connect_db()
     c = conn.cursor()
     existentes = set(
@@ -1625,6 +1626,7 @@ def add_checklist_items_bulk(ensayo, items):
     conn.commit()
     conn.close()
     invalidar_cache_lecturas()
+    return len(nuevos)
 
 def set_checklist_done(item_id, done):
     conn = connect_db()
@@ -2508,6 +2510,140 @@ def cargar_excel_desde_bytes(bytes_excel):
         df_hoja = pd.read_excel(libro, sheet_name=hoja, header=0)
         hojas[hoja] = df_hoja
     return hojas
+
+
+@st.cache_data(show_spinner=False)
+def leer_archivo_binario(ruta_archivo):
+    with open(ruta_archivo, "rb") as f:
+        return f.read()
+
+
+def _normalizar_token_checklist(valor):
+    texto = normalizar_texto_campo(valor).upper()
+    return re.sub(r"[^A-Z0-9]+", "", texto)
+
+
+def _extraer_numeros_checklist(valor):
+    texto = normalizar_texto_campo(valor)
+    return set(re.findall(r"\d{2,}", texto))
+
+
+def _listar_protocolos_checklist(hojas_excel):
+    protocolos = []
+    vistos = set()
+
+    for nombre_hoja in ("Visitas_resumen", "Analitos"):
+        df = hojas_excel.get(nombre_hoja)
+        if df is None or df.empty or "Protocolo" not in df.columns:
+            continue
+
+        for protocolo in df["Protocolo"].dropna().astype(str).tolist():
+            texto = normalizar_texto_campo(protocolo)
+            if not texto:
+                continue
+            clave = texto.casefold()
+            if clave in vistos:
+                continue
+            vistos.add(clave)
+            protocolos.append(texto)
+
+    return protocolos
+
+
+def _buscar_protocolos_relacionados(ensayo, protocolos):
+    ensayo_norm = normalizar_ensayo(ensayo)
+    ensayo_txt = normalizar_texto_campo(ensayo_norm)
+    ensayo_token = _normalizar_token_checklist(ensayo_txt)
+    ensayo_numeros = _extraer_numeros_checklist(ensayo_txt)
+    palabras_ensayo = set(re.findall(r"[A-Z0-9]+", ensayo_txt.upper()))
+
+    puntuados = []
+    for idx, protocolo in enumerate(protocolos):
+        protocolo_txt = normalizar_texto_campo(protocolo)
+        protocolo_token = _normalizar_token_checklist(protocolo_txt)
+        protocolo_numeros = _extraer_numeros_checklist(protocolo_txt)
+        palabras_protocolo = set(re.findall(r"[A-Z0-9]+", protocolo_txt.upper()))
+
+        score = 0
+        if ensayo_token and ensayo_token in protocolo_token:
+            score += 100
+        if ensayo_numeros and ensayo_numeros & protocolo_numeros:
+            score += 120
+        if ensayo_txt and ensayo_txt.casefold() in protocolo_txt.casefold():
+            score += 60
+
+        interseccion_palabras = palabras_ensayo & palabras_protocolo
+        if interseccion_palabras:
+            score += 10 * len(interseccion_palabras)
+
+        if score > 0:
+            puntuados.append((score, idx, protocolo))
+
+    puntuados.sort(key=lambda item: (-item[0], item[1]))
+    return [protocolo for _, _, protocolo in puntuados]
+
+
+def _construir_items_protocolo_desde_excel(hojas_excel, protocolo_sel):
+    items = []
+
+    df_visitas = hojas_excel.get("Visitas_resumen")
+    if df_visitas is not None and not df_visitas.empty and "Protocolo" in df_visitas.columns:
+        df_visitas_filtrado = df_visitas[
+            df_visitas["Protocolo"].fillna("").astype(str).str.strip() == protocolo_sel
+        ]
+        for _, row in df_visitas_filtrado.iterrows():
+            periodo = normalizar_texto_campo(row.get("Periodo/visita"))
+            brazo = normalizar_texto_campo(row.get("Brazo/parte"))
+            frecuencia = normalizar_texto_campo(row.get("Frecuencia/ventana"))
+            procedimientos = normalizar_texto_campo(row.get("Procedimientos / pruebas"))
+            laboratorios = normalizar_texto_campo(row.get("Laboratorios en esa visita"))
+
+            partes = [f"Visita: {periodo or 'Sin especificar'}"]
+            if brazo:
+                partes.append(f"Brazo/parte: {brazo}")
+            if frecuencia:
+                partes.append(f"Ventana: {frecuencia}")
+            if procedimientos:
+                partes.append(f"Procedimientos: {procedimientos}")
+            if laboratorios:
+                partes.append(f"Laboratorios: {laboratorios}")
+            items.append(" | ".join(partes))
+
+    df_analitos = hojas_excel.get("Analitos")
+    if df_analitos is not None and not df_analitos.empty and "Protocolo" in df_analitos.columns:
+        df_analitos_filtrado = df_analitos[
+            df_analitos["Protocolo"].fillna("").astype(str).str.strip() == protocolo_sel
+        ]
+        for _, row in df_analitos_filtrado.iterrows():
+            panel = normalizar_texto_campo(row.get("Panel"))
+            analitos = normalizar_texto_campo(row.get("Analitos / parámetros"))
+
+            partes = [f"Panel analítico: {panel or 'Sin especificar'}"]
+            if analitos:
+                partes.append(f"Analitos/parámetros: {analitos}")
+            items.append(" | ".join(partes))
+
+    items_unicos = []
+    vistos = set()
+    for item in items:
+        clave = item.casefold()
+        if clave in vistos:
+            continue
+        vistos.add(clave)
+        items_unicos.append(item)
+
+    return items_unicos
+
+
+@st.cache_data(show_spinner=False)
+def resumir_checklist_excel_desde_bytes(bytes_excel):
+    hojas_excel = cargar_excel_desde_bytes(bytes_excel)
+    protocolos = _listar_protocolos_checklist(hojas_excel)
+    items_por_protocolo = {
+        protocolo: _construir_items_protocolo_desde_excel(hojas_excel, protocolo)
+        for protocolo in protocolos
+    }
+    return protocolos, items_por_protocolo
 
 
 def _buscar_columna_por_patron(df, patrones):
@@ -4577,6 +4713,66 @@ if seccion_activa == "Check list":
                 add_checklist_items_bulk(ensayo_sel, checklist_2274)
                 st.success("Checklist 2274 cargado.")
                 st.rerun()
+
+        with st.expander("Importar checklist desde Excel", expanded=False):
+            bytes_excel_checklist = None
+            origen_excel_checklist = ""
+
+            if os.path.isfile(CHECKLIST_GLOBAL_XLSX):
+                bytes_excel_checklist = leer_archivo_binario(CHECKLIST_GLOBAL_XLSX)
+                origen_excel_checklist = f"Archivo versionado detectado: {os.path.basename(CHECKLIST_GLOBAL_XLSX)}"
+
+            archivo_checklist_subido = st.file_uploader(
+                "Sube otro Excel de checklist (.xlsx) si quieres reemplazar el archivo detectado",
+                type=["xlsx"],
+                key="checklist_excel_uploader"
+            )
+            if archivo_checklist_subido is not None:
+                bytes_excel_checklist = archivo_checklist_subido.getvalue()
+                origen_excel_checklist = f"Archivo subido: {archivo_checklist_subido.name}"
+
+            if bytes_excel_checklist is None:
+                st.info("No se ha encontrado el Excel de checklist en la carpeta raíz y tampoco se ha subido uno manualmente.")
+            else:
+                st.caption(origen_excel_checklist)
+                try:
+                    protocolos_excel, items_por_protocolo = resumir_checklist_excel_desde_bytes(bytes_excel_checklist)
+                except Exception as exc:
+                    st.error(f"No se pudo procesar el Excel del checklist: {exc}")
+                else:
+                    if not protocolos_excel:
+                        st.warning("El Excel no contiene protocolos importables en las hojas esperadas.")
+                    else:
+                        sugeridos = _buscar_protocolos_relacionados(ensayo_sel, protocolos_excel)
+                        protocolo_por_defecto = sugeridos[0] if sugeridos else protocolos_excel[0]
+                        indice_defecto = protocolos_excel.index(protocolo_por_defecto)
+
+                        protocolo_excel_sel = st.selectbox(
+                            "Protocolo del Excel",
+                            options=protocolos_excel,
+                            index=indice_defecto,
+                            key=f"checklist_excel_protocolo_{ensayo_sel}"
+                        )
+                        if sugeridos:
+                            st.caption(f"Sugerencia automática para el ensayo {ensayo_sel}: {protocolo_por_defecto}")
+
+                        items_excel = items_por_protocolo.get(protocolo_excel_sel, [])
+                        st.caption(f"Items detectados para importar: {len(items_excel)}")
+
+                        if items_excel:
+                            st.dataframe(
+                                pd.DataFrame({"Item": items_excel[:15]}),
+                                use_container_width=True,
+                                hide_index=True
+                            )
+
+                            if st.button("Importar protocolo del Excel", key="checklist_importar_excel"):
+                                items_nuevos = add_checklist_items_bulk(ensayo_sel, items_excel)
+                                if items_nuevos:
+                                    st.success(f"Se importaron {items_nuevos} items nuevos al ensayo {ensayo_sel}.")
+                                else:
+                                    st.info("Todos los items de ese protocolo ya estaban cargados en este ensayo.")
+                                st.rerun()
 
         col_add, col_spacer = st.columns([3, 1])
         with col_add:
