@@ -2647,6 +2647,15 @@ def resumir_checklist_excel_desde_bytes(bytes_excel):
     return protocolos, items_por_protocolo
 
 
+def clasificar_item_checklist(item):
+    txt = normalizar_texto_campo(item).lower()
+    if txt.startswith("visita:"):
+        return "Visitas"
+    if txt.startswith("panel analítico:") or txt.startswith("panel analitico:"):
+        return "Analitos"
+    return "Otros"
+
+
 def _buscar_columna_por_patron(df, patrones):
     columnas = list(df.columns)
     if not columnas:
@@ -4735,6 +4744,7 @@ if seccion_activa == "Check list":
             if bytes_excel_checklist is None:
                 st.info("No se ha encontrado el Excel de checklist en la carpeta raíz y tampoco se ha subido uno manualmente.")
             else:
+                st.markdown("**Paso 1. Fuente del Excel**")
                 st.caption(origen_excel_checklist)
                 try:
                     protocolos_excel, items_por_protocolo = resumir_checklist_excel_desde_bytes(bytes_excel_checklist)
@@ -4744,28 +4754,79 @@ if seccion_activa == "Check list":
                     if not protocolos_excel:
                         st.warning("El Excel no contiene protocolos importables en las hojas esperadas.")
                     else:
+                        st.markdown("**Paso 2. Selección del protocolo**")
                         sugeridos = _buscar_protocolos_relacionados(ensayo_sel, protocolos_excel)
                         protocolo_por_defecto = sugeridos[0] if sugeridos else protocolos_excel[0]
                         indice_defecto = protocolos_excel.index(protocolo_por_defecto)
 
-                        protocolo_excel_sel = st.selectbox(
-                            "Protocolo del Excel",
-                            options=protocolos_excel,
-                            index=indice_defecto,
-                            key=f"checklist_excel_protocolo_{ensayo_sel}"
-                        )
-                        if sugeridos:
-                            st.caption(f"Sugerencia automática para el ensayo {ensayo_sel}: {protocolo_por_defecto}")
+                        col_protocolo, col_sugerencia = st.columns([3, 2])
+                        with col_protocolo:
+                            protocolo_excel_sel = st.selectbox(
+                                "Protocolo del Excel",
+                                options=protocolos_excel,
+                                index=indice_defecto,
+                                key=f"checklist_excel_protocolo_{ensayo_sel}"
+                            )
+                        with col_sugerencia:
+                            if sugeridos:
+                                st.success(f"Sugerido para {ensayo_sel}: {protocolo_por_defecto}")
+                            else:
+                                st.info("No hay coincidencia automática fuerte; revisa el protocolo seleccionado.")
 
                         items_excel = items_por_protocolo.get(protocolo_excel_sel, [])
-                        st.caption(f"Items detectados para importar: {len(items_excel)}")
+
+                        filas_preview = [
+                            {
+                                "Tipo": clasificar_item_checklist(item),
+                                "Item": item
+                            }
+                            for item in items_excel
+                        ]
+                        df_preview = pd.DataFrame(filas_preview)
+
+                        total_items = len(items_excel)
+                        total_visitas = int((df_preview["Tipo"] == "Visitas").sum()) if not df_preview.empty else 0
+                        total_analitos = int((df_preview["Tipo"] == "Analitos").sum()) if not df_preview.empty else 0
+
+                        st.markdown("**Paso 3. Vista previa e importación**")
+                        m1, m2, m3 = st.columns(3)
+                        with m1:
+                            st.metric("Total items", total_items)
+                        with m2:
+                            st.metric("Visitas", total_visitas)
+                        with m3:
+                            st.metric("Analitos", total_analitos)
 
                         if items_excel:
-                            st.dataframe(
-                                pd.DataFrame({"Item": items_excel[:15]}),
-                                use_container_width=True,
-                                hide_index=True
-                            )
+                            filtro_txt = st.text_input(
+                                "Filtrar por texto",
+                                value="",
+                                key=f"checklist_excel_filtro_{ensayo_sel}",
+                                placeholder="Ejemplo: screening, coagulación, C1D1..."
+                            ).strip()
+
+                            df_filtrado = df_preview.copy()
+                            if filtro_txt:
+                                patron = re.escape(filtro_txt)
+                                df_filtrado = df_filtrado[
+                                    df_filtrado["Item"].astype(str).str.contains(patron, case=False, na=False)
+                                ]
+
+                            tab_todos, tab_visitas, tab_analitos = st.tabs(["Todos", "Visitas", "Analitos"])
+                            with tab_todos:
+                                st.dataframe(df_filtrado.head(30), use_container_width=True, hide_index=True)
+                            with tab_visitas:
+                                st.dataframe(
+                                    df_filtrado[df_filtrado["Tipo"] == "Visitas"].head(30),
+                                    use_container_width=True,
+                                    hide_index=True
+                                )
+                            with tab_analitos:
+                                st.dataframe(
+                                    df_filtrado[df_filtrado["Tipo"] == "Analitos"].head(30),
+                                    use_container_width=True,
+                                    hide_index=True
+                                )
 
                             if st.button("Importar protocolo del Excel", key="checklist_importar_excel"):
                                 items_nuevos = add_checklist_items_bulk(ensayo_sel, items_excel)
