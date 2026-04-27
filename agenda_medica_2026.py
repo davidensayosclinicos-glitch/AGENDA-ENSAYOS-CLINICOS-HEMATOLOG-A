@@ -6,10 +6,12 @@ except ImportError:
 import sqlite3
 from datetime import datetime, timedelta
 import pandas as pd
+import numpy as np
 import html
 import streamlit.components.v1 as components
 import os
 import re
+import json
 import base64
 import io
 import shutil
@@ -1984,6 +1986,388 @@ def formatear_latencia_desde_creacion(creado_en):
     if horas > 0:
         return f"{horas}h {minutos}m"
     return f"{minutos}m"
+
+
+# ----------------------------
+# Respuesta IMWG por paciente
+# ----------------------------
+IMWG_DATA_DIR = os.path.join(SCRIPT_DIR, "data_pacientes_imwg")
+IMWG_STANDARD_COLUMNS = [
+    "Fecha", "Timepoint", "Inmunoglobulinas", "Proteina_M_suero", "IFE_suero", "IFE_orina",
+    "Cadenas_kappa", "Cadenas_lambda", "FLC_ratio", "Proteina_orina", "BMPC_pct",
+    "Citometria_MO", "Cambio_tamano_pct", "Evaluacion_respuesta_IMWG", "Iniciales_investigador"
+]
+IMWG_CRITERIOS_INFO = {
+    "1": {
+        "nombre": "Proteina M serica",
+        "descripcion": "Enfermedad medible: proteina M >= 1 g/dL"
+    },
+    "2": {
+        "nombre": "Proteina M urinaria",
+        "descripcion": "Enfermedad medible: >= 200 mg/24h"
+    },
+    "3": {
+        "nombre": "Cadenas ligeras libres (FLC)",
+        "descripcion": "Enfermedad medible: dFLC >= 100 mg/L o ratio kappa/lambda anormal"
+    },
+    "4": {
+        "nombre": "Enfermedad no secretora",
+        "descripcion": "Seguimiento por medula osea/citometria"
+    },
+    "5": {
+        "nombre": "Plasmocitoma / extramedular",
+        "descripcion": "Seguimiento por imagen usando % cambio de tamano"
+    }
+}
+IMWG_ENSAYOS_EXCLUIDOS = {"CAEL", "2256", "NURIX", "BGB"}
+IMWG_DEFAULT_ROWS = [
+    {
+        "Fecha": "", "Timepoint": "Screening", "Inmunoglobulinas": "",
+        "Proteina_M_suero": "", "IFE_suero": "", "IFE_orina": "", "Cadenas_kappa": "",
+        "Cadenas_lambda": "", "FLC_ratio": "", "Proteina_orina": "", "BMPC_pct": "",
+        "Citometria_MO": "", "Cambio_tamano_pct": "", "Evaluacion_respuesta_IMWG": "",
+        "Iniciales_investigador": ""
+    },
+    {
+        "Fecha": "", "Timepoint": "C1D1", "Inmunoglobulinas": "",
+        "Proteina_M_suero": "", "IFE_suero": "", "IFE_orina": "", "Cadenas_kappa": "",
+        "Cadenas_lambda": "", "FLC_ratio": "", "Proteina_orina": "", "BMPC_pct": "",
+        "Citometria_MO": "", "Cambio_tamano_pct": "", "Evaluacion_respuesta_IMWG": "",
+        "Iniciales_investigador": ""
+    },
+    {
+        "Fecha": "", "Timepoint": "Week 5", "Inmunoglobulinas": "",
+        "Proteina_M_suero": "", "IFE_suero": "", "IFE_orina": "", "Cadenas_kappa": "",
+        "Cadenas_lambda": "", "FLC_ratio": "", "Proteina_orina": "", "BMPC_pct": "",
+        "Citometria_MO": "", "Cambio_tamano_pct": "", "Evaluacion_respuesta_IMWG": "",
+        "Iniciales_investigador": ""
+    },
+]
+
+
+def normalizar_ensayo_imwg(valor):
+    ensayo = normalizar_ensayo(valor)
+    return re.sub(r"[\s\-_/]+", "", str(ensayo or "").upper())
+
+
+def es_ensayo_excluido_imwg(ensayo):
+    clave = normalizar_ensayo_imwg(ensayo)
+    if not clave:
+        return False
+    if clave in IMWG_ENSAYOS_EXCLUIDOS:
+        return True
+    return any(clave.startswith(prefijo) for prefijo in IMWG_ENSAYOS_EXCLUIDOS)
+
+
+def imwg_to_float(x):
+    if x is None:
+        return np.nan
+    if isinstance(x, (int, float, np.number)):
+        return float(x)
+    s = str(x).strip().replace(",", ".")
+    if s == "" or s.lower() in {"na", "nan", "none", "null", "-"}:
+        return np.nan
+    m = re.search(r"-?\d+(\.\d+)?", s)
+    return float(m.group(0)) if m else np.nan
+
+
+def imwg_compute_dflc(kappa, lambda_):
+    k = imwg_to_float(kappa)
+    l = imwg_to_float(lambda_)
+    if np.isnan(k) or np.isnan(l):
+        return np.nan
+    return abs(k - l)
+
+
+def imwg_is_negative(x):
+    if x is None or x == "" or (isinstance(x, float) and np.isnan(x)):
+        return False
+    if isinstance(x, bool):
+        return not x
+    s = str(x).strip().lower()
+    return s in {"neg", "negative", "no", "n", "0", "false", "(-)", "-", "not detected", "negativo"}
+
+
+def imwg_normalize_dataframe_schema(dataframe):
+    df = dataframe.copy()
+
+    if "FLC_ratio" not in df.columns and "FLC" in df.columns:
+        df["FLC_ratio"] = df["FLC"]
+
+    if "FLC" in df.columns:
+        df = df.drop(columns=["FLC"])
+
+    for col in IMWG_STANDARD_COLUMNS:
+        if col not in df.columns:
+            df[col] = ""
+
+    extra_cols = [c for c in df.columns if c not in IMWG_STANDARD_COLUMNS]
+    ordered_cols = IMWG_STANDARD_COLUMNS + extra_cols
+    return df[ordered_cols]
+
+
+def imwg_archivo_paciente(codigo, nombre, ensayo):
+    os.makedirs(IMWG_DATA_DIR, exist_ok=True)
+    clave = clave_paciente_unificada(codigo, nombre, ensayo)
+    if not clave:
+        clave = f"{normalizar_texto_campo(codigo)}|{nombre_a_iniciales(nombre)}|{normalizar_ensayo(ensayo)}"
+    token = hashlib.sha1(clave.encode("utf-8")).hexdigest()[:16]
+    return os.path.join(IMWG_DATA_DIR, f"imwg_{token}.json")
+
+
+def guardar_datos_imwg_paciente(codigo, nombre, ensayo, dataframe, criterio):
+    filepath = imwg_archivo_paciente(codigo, nombre, ensayo)
+    normalized_df = imwg_normalize_dataframe_schema(dataframe)
+    payload = {
+        "metadata": {
+            "criterio": str(criterio),
+            "codigo": normalizar_texto_campo(codigo),
+            "nombre": nombre_a_iniciales(nombre),
+            "ensayo": normalizar_ensayo(ensayo),
+            "updated_at": ahora_local().isoformat(timespec="seconds"),
+        },
+        "datos": normalized_df.to_dict(orient="records"),
+    }
+    with open(filepath, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+    return filepath
+
+
+def cargar_datos_imwg_paciente(codigo, nombre, ensayo):
+    filepath = imwg_archivo_paciente(codigo, nombre, ensayo)
+    if not os.path.exists(filepath):
+        return None, None
+
+    with open(filepath, "r", encoding="utf-8") as f:
+        payload = json.load(f)
+
+    if isinstance(payload, list):
+        return imwg_normalize_dataframe_schema(pd.DataFrame(payload)), None
+
+    metadata = payload.get("metadata", {})
+    criterio = metadata.get("criterio", "1")
+    return imwg_normalize_dataframe_schema(pd.DataFrame(payload.get("datos", []))), criterio
+
+
+def classify_integrated_imwg(row, baseline_row, nadir_values):
+    serum = imwg_to_float(row.get("Proteina_M_suero", ""))
+    urine = imwg_to_float(row.get("Proteina_orina", ""))
+    bmpc = imwg_to_float(row.get("BMPC_pct", ""))
+    flc_ratio = imwg_to_float(row.get("FLC_ratio", ""))
+    dflc = imwg_compute_dflc(row.get("Cadenas_kappa", ""), row.get("Cadenas_lambda", ""))
+    size_pct = imwg_to_float(row.get("Cambio_tamano_pct", ""))
+
+    base_serum = imwg_to_float(baseline_row.get("Proteina_M_suero", ""))
+    base_urine = imwg_to_float(baseline_row.get("Proteina_orina", ""))
+    base_dflc = imwg_compute_dflc(baseline_row.get("Cadenas_kappa", ""), baseline_row.get("Cadenas_lambda", ""))
+    base_bmpc = imwg_to_float(baseline_row.get("BMPC_pct", ""))
+    base_flc_ratio = imwg_to_float(baseline_row.get("FLC_ratio", ""))
+
+    nadir_serum = nadir_values.get("serum", np.nan)
+    nadir_urine = nadir_values.get("urine", np.nan)
+    nadir_dflc = nadir_values.get("dflc", np.nan)
+    nadir_bmpc = nadir_values.get("bmpc", np.nan)
+
+    ife_neg = imwg_is_negative(row.get("IFE_suero", "")) and imwg_is_negative(row.get("IFE_orina", ""))
+    cit_neg = imwg_is_negative(row.get("Citometria_MO", ""))
+    flc_ratio_normal = not np.isnan(flc_ratio) and 0.26 <= flc_ratio <= 1.65
+    bmpc_rc = not np.isnan(bmpc) and bmpc <= 5
+
+    serum_measurable = not np.isnan(base_serum) and base_serum >= 1
+    urine_measurable = not np.isnan(base_urine) and base_urine >= 200
+    base_flc_ratio_abnormal = not np.isnan(base_flc_ratio) and (base_flc_ratio < 0.26 or base_flc_ratio > 1.65)
+    flc_measurable = not np.isnan(base_dflc) and base_dflc >= 100 and base_flc_ratio_abnormal
+
+    lesions_known = not np.isnan(size_pct)
+    lesions_resolved = (size_pct <= -100) if lesions_known else True
+
+    if not np.isnan(serum) and not np.isnan(nadir_serum):
+        pd_abs_min = 1.0 if (not np.isnan(base_serum) and base_serum >= 5) else 0.5
+        if serum >= nadir_serum * 1.25 and (serum - nadir_serum) >= pd_abs_min:
+            return "PD"
+
+    if not np.isnan(urine) and not np.isnan(nadir_urine):
+        if urine >= nadir_urine * 1.25 and (urine - nadir_urine) >= 200:
+            return "PD"
+
+    if not np.isnan(dflc) and not np.isnan(nadir_dflc):
+        if dflc >= nadir_dflc * 1.25 and (dflc - nadir_dflc) >= 100:
+            return "PD"
+
+    if not np.isnan(bmpc) and not np.isnan(nadir_bmpc):
+        if nadir_bmpc < 5 and bmpc >= 10:
+            return "PD"
+
+    if not np.isnan(size_pct) and size_pct >= 50:
+        return "PD"
+
+    if ife_neg and bmpc_rc and lesions_resolved:
+        if flc_ratio_normal and cit_neg:
+            return "sCR"
+        return "RC"
+
+    serum_pct_red = np.nan
+    urine_pct_red = np.nan
+    dflc_pct_red = np.nan
+    bmpc_pct_red = np.nan
+
+    if serum_measurable and not np.isnan(serum):
+        serum_pct_red = ((base_serum - serum) / base_serum) * 100
+
+    if urine_measurable and not np.isnan(urine):
+        urine_pct_red = ((base_urine - urine) / base_urine) * 100
+
+    if flc_measurable and not np.isnan(dflc) and not np.isnan(base_dflc) and base_dflc > 0:
+        dflc_pct_red = ((base_dflc - dflc) / base_dflc) * 100
+
+    if not np.isnan(bmpc) and not np.isnan(base_bmpc) and base_bmpc > 0:
+        bmpc_pct_red = ((base_bmpc - bmpc) / base_bmpc) * 100
+
+    if serum_measurable and urine_measurable:
+        if not np.isnan(serum_pct_red) and not np.isnan(urine):
+            if serum_pct_red >= 90 and urine < 100:
+                return "VGPR"
+        if not np.isnan(serum_pct_red) and (not np.isnan(urine_pct_red) or not np.isnan(urine)):
+            urine_rp_ok = (not np.isnan(urine_pct_red) and urine_pct_red >= 90) or (not np.isnan(urine) and urine < 200)
+            if serum_pct_red >= 50 and urine_rp_ok:
+                return "RP"
+    elif serum_measurable:
+        if not np.isnan(serum_pct_red):
+            if serum_pct_red >= 90:
+                return "VGPR"
+            if serum_pct_red >= 50:
+                return "RP"
+    elif urine_measurable:
+        if not np.isnan(urine) and urine < 100:
+            return "VGPR"
+        if (not np.isnan(urine_pct_red) and urine_pct_red >= 90) or (not np.isnan(urine) and urine < 200):
+            return "RP"
+    elif flc_measurable:
+        if not np.isnan(dflc_pct_red):
+            if dflc_pct_red >= 90:
+                return "VGPR"
+            if dflc_pct_red >= 50:
+                return "RP"
+    else:
+        if not np.isnan(bmpc_pct_red):
+            if bmpc_pct_red >= 90:
+                return "VGPR"
+            if bmpc_pct_red >= 50:
+                return "RP"
+
+    return "EE"
+
+
+def renderizar_bloque_respuesta_imwg_paciente(paciente, id_visita):
+    ensayo = paciente.get("ensayo", "")
+    codigo = paciente.get("codigo", "")
+    nombre = paciente.get("nombre", "")
+
+    with st.expander("Respuesta IMWG por paciente", expanded=False):
+        if es_ensayo_excluido_imwg(ensayo):
+            st.info("No aplica calculo IMWG para este paciente: ensayo excluido (CAEL, 2256, NURIX o BGB).")
+            return
+
+        st.caption("Evaluacion IMWG integrada por paciente (guardado local por paciente/ensayo).")
+        st.caption(f"Paciente: {codigo} | {nombre} | Ensayo: {ensayo}")
+
+        datos_cargados, criterio_cargado = cargar_datos_imwg_paciente(codigo, nombre, ensayo)
+        criterio_default = criterio_cargado if criterio_cargado in IMWG_CRITERIOS_INFO else "1"
+
+        criterio_key = f"imwg_criterio_{int(id_visita)}"
+        if criterio_key not in st.session_state:
+            st.session_state[criterio_key] = criterio_default
+
+        criterio_seleccionado = st.radio(
+            "Criterio basal",
+            options=list(IMWG_CRITERIOS_INFO.keys()),
+            format_func=lambda x: IMWG_CRITERIOS_INFO[x]["nombre"],
+            horizontal=True,
+            key=criterio_key,
+        )
+        st.caption(IMWG_CRITERIOS_INFO[criterio_seleccionado]["descripcion"])
+
+        if datos_cargados is not None:
+            df = imwg_normalize_dataframe_schema(datos_cargados)
+        else:
+            df = imwg_normalize_dataframe_schema(pd.DataFrame(IMWG_DEFAULT_ROWS))
+
+        work = df.copy()
+        baseline_mask = work["Timepoint"].astype(str).str.contains("C1D1", case=False, na=False)
+        if baseline_mask.sum() > 0:
+            baseline_idx = work.index[baseline_mask].tolist()[0]
+            baseline_row = work.loc[baseline_idx]
+            baseline_found = True
+        else:
+            baseline_row = work.iloc[0] if len(work) > 0 else pd.Series()
+            baseline_found = False
+
+        nadir_values = {
+            "serum": imwg_to_float(baseline_row.get("Proteina_M_suero", "")) if baseline_found else np.nan,
+            "urine": imwg_to_float(baseline_row.get("Proteina_orina", "")) if baseline_found else np.nan,
+            "dflc": imwg_compute_dflc(baseline_row.get("Cadenas_kappa", ""), baseline_row.get("Cadenas_lambda", "")) if baseline_found else np.nan,
+            "bmpc": imwg_to_float(baseline_row.get("BMPC_pct", "")) if baseline_found else np.nan,
+        }
+
+        responses = []
+        for _, row in work.iterrows():
+            timepoint = str(row["Timepoint"]).strip().lower()
+            if "screening" in timepoint or "c1d1" in timepoint or not baseline_found:
+                responses.append("")
+                continue
+
+            resp = classify_integrated_imwg(row, baseline_row, nadir_values)
+            responses.append(resp)
+
+            serum_value = imwg_to_float(row.get("Proteina_M_suero", ""))
+            if not np.isnan(serum_value):
+                nadir_values["serum"] = serum_value if np.isnan(nadir_values["serum"]) else min(nadir_values["serum"], serum_value)
+
+            urine_value = imwg_to_float(row.get("Proteina_orina", ""))
+            if not np.isnan(urine_value):
+                nadir_values["urine"] = urine_value if np.isnan(nadir_values["urine"]) else min(nadir_values["urine"], urine_value)
+
+            dflc_value = imwg_compute_dflc(row.get("Cadenas_kappa", ""), row.get("Cadenas_lambda", ""))
+            if not np.isnan(dflc_value):
+                nadir_values["dflc"] = dflc_value if np.isnan(nadir_values["dflc"]) else min(nadir_values["dflc"], dflc_value)
+
+            bmpc_value = imwg_to_float(row.get("BMPC_pct", ""))
+            if not np.isnan(bmpc_value):
+                nadir_values["bmpc"] = bmpc_value if np.isnan(nadir_values["bmpc"]) else min(nadir_values["bmpc"], bmpc_value)
+
+        work["Evaluacion_respuesta_IMWG"] = responses
+
+        edited = st.data_editor(
+            work,
+            num_rows="dynamic",
+            width="stretch",
+            height=340,
+            column_config={
+                "Evaluacion_respuesta_IMWG": st.column_config.TextColumn(
+                    "Evaluacion_respuesta_IMWG",
+                    disabled=True,
+                )
+            },
+            key=f"imwg_editor_{int(id_visita)}",
+        )
+
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            if st.button("Recalcular IMWG", key=f"imwg_recalc_{int(id_visita)}"):
+                st.rerun()
+        with c2:
+            if st.button("Guardar IMWG", key=f"imwg_save_{int(id_visita)}"):
+                guardar_datos_imwg_paciente(codigo, nombre, ensayo, edited, criterio_seleccionado)
+                st.success("Respuesta IMWG guardada para este paciente.")
+        with c3:
+            csv_data = edited.to_csv(index=False).encode("utf-8")
+            st.download_button(
+                "Descargar CSV IMWG",
+                data=csv_data,
+                file_name=f"imwg_{normalizar_texto_campo(codigo)}_{normalizar_ensayo(ensayo)}.csv",
+                mime="text/csv",
+                key=f"imwg_csv_{int(id_visita)}",
+            )
 
 def guardar_revision_ocular(visita_id, sede, medico, agenda_hospitalaria, fecha_evaluacion, resultado):
     sede = str(sede or "").strip().lower()
@@ -5339,6 +5723,8 @@ if seccion_activa == "Agenda":
                     st.markdown(f"## 🆔 {paciente['codigo']}")
                     st.markdown(f"**Paciente:** {paciente['nombre']}")
                     st.markdown(f"**Ensayo:** {paciente['ensayo']} | **Ciclo:** {paciente['ciclo']}")
+
+                    renderizar_bloque_respuesta_imwg_paciente(paciente, id_evento_cmp)
 
                     adenda_paciente_info = get_adenda_paciente(
                         paciente.get('codigo'),
