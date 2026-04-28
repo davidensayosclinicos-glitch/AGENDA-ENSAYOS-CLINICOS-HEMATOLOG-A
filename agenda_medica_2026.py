@@ -2263,12 +2263,13 @@ def renderizar_bloque_respuesta_imwg_paciente(paciente, id_visita):
     codigo = paciente.get("codigo", "")
     nombre = paciente.get("nombre", "")
 
-    with st.expander("Respuesta IMWG por paciente", expanded=False):
+    with st.expander("Tabla de respuestas de la enfermedad (IMWG)", expanded=True):
         if es_ensayo_excluido_imwg(ensayo):
             st.info("No aplica calculo IMWG para este paciente: ensayo excluido (CAEL, 2256, NURIX o BGB).")
             return
 
         st.caption("Evaluacion IMWG integrada por paciente (guardado local por paciente/ensayo).")
+        st.caption("Si editas valores y guardas, la tabla recalcula la respuesta IMWG por visita.")
         st.caption(f"Paciente: {codigo} | {nombre} | Ensayo: {ensayo}")
 
         datos_cargados, criterio_cargado = cargar_datos_imwg_paciente(codigo, nombre, ensayo)
@@ -3929,6 +3930,7 @@ _ruta_backup_mostrada = st.session_state.get("_backup_diario_ruta", "")
 secciones_principales = [
     "Copia de seguridad",
     "Agenda",
+    "Respuesta enfermedad (IMWG)",
     "Citas ojos",
     "Calendario DREAMM10",
     "Prot. ensayo",
@@ -5960,6 +5962,54 @@ if seccion_activa == "Agenda":
         else:
             st.info("👈 Haz clic en un día para añadir pacientes.")
             st.caption("Los días con '🩸' indican punción de médula.")
+
+if seccion_activa == "Respuesta enfermedad (IMWG)":
+    st.subheader("📈 Respuesta de la enfermedad (IMWG)")
+    st.caption("Acceso directo desde navegación para revisar/editar la tabla IMWG por paciente.")
+
+    df_visitas_imwg = get_visitas()
+    if df_visitas_imwg.empty:
+        st.info("No hay visitas registradas todavía.")
+    else:
+        df_visitas_imwg = df_visitas_imwg.copy()
+        if "fecha" in df_visitas_imwg.columns:
+            df_visitas_imwg["_fecha_sort"] = pd.to_datetime(df_visitas_imwg["fecha"], errors="coerce")
+            if "id" in df_visitas_imwg.columns:
+                df_visitas_imwg = df_visitas_imwg.sort_values(
+                    by=["_fecha_sort", "id"],
+                    ascending=[False, False],
+                    na_position="last"
+                )
+            else:
+                df_visitas_imwg = df_visitas_imwg.sort_values(by=["_fecha_sort"], ascending=[False], na_position="last")
+        elif "id" in df_visitas_imwg.columns:
+            df_visitas_imwg = df_visitas_imwg.sort_values(by=["id"], ascending=[False])
+
+        opciones = []
+        mapa_visitas = {}
+        for _, row in df_visitas_imwg.iterrows():
+            id_visita = row.get("id", "")
+            codigo = row.get("codigo", "")
+            nombre = row.get("nombre", "")
+            ensayo = row.get("ensayo", "")
+            ciclo = row.get("ciclo", "")
+            fecha = formatear_fecha_visita(row.get("fecha", "")) if "fecha" in df_visitas_imwg.columns else ""
+            etiqueta = f"{fecha} | {codigo} | {nombre} | {ensayo} | {ciclo}".strip(" |")
+            opciones.append(etiqueta)
+            mapa_visitas[etiqueta] = row
+
+        seleccion_visita = st.selectbox(
+            "Selecciona paciente / visita",
+            options=opciones,
+            key="imwg_nav_visita_sel"
+        )
+
+        if seleccion_visita:
+            paciente_sel = mapa_visitas.get(seleccion_visita)
+            if paciente_sel is not None:
+                st.markdown(f"**Paciente:** {paciente_sel.get('codigo', '')} | {paciente_sel.get('nombre', '')}")
+                st.markdown(f"**Ensayo:** {paciente_sel.get('ensayo', '')} | **Ciclo:** {paciente_sel.get('ciclo', '')}")
+                renderizar_bloque_respuesta_imwg_paciente(paciente_sel, paciente_sel.get("id", 0))
 
 if seccion_activa == "🤖 Análisis IA":
     # Importar el módulo de análisis de protocolos
