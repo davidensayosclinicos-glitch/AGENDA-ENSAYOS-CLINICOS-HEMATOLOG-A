@@ -2272,6 +2272,63 @@ def renderizar_bloque_respuesta_imwg_paciente(paciente, id_visita):
         st.caption("Si editas valores y guardas, la tabla recalcula la respuesta IMWG por visita.")
         st.caption(f"Paciente: {codigo} | {nombre} | Ensayo: {ensayo}")
 
+        df_visitas_paciente = get_visitas()
+        if not df_visitas_paciente.empty:
+            if "codigo" not in df_visitas_paciente.columns:
+                df_visitas_paciente["codigo"] = ""
+            if "nombre" not in df_visitas_paciente.columns:
+                df_visitas_paciente["nombre"] = ""
+            if "ensayo" not in df_visitas_paciente.columns:
+                df_visitas_paciente["ensayo"] = ""
+            if "ciclo" not in df_visitas_paciente.columns:
+                df_visitas_paciente["ciclo"] = ""
+            if "fecha" not in df_visitas_paciente.columns:
+                df_visitas_paciente["fecha"] = ""
+
+            clave_ref = clave_paciente_unificada(codigo, nombre, ensayo)
+            if clave_ref:
+                df_visitas_paciente = df_visitas_paciente.copy()
+                df_visitas_paciente["_clave_paciente"] = df_visitas_paciente.apply(
+                    lambda row: clave_paciente_unificada(
+                        row.get("codigo", ""),
+                        row.get("nombre", ""),
+                        row.get("ensayo", ""),
+                    ),
+                    axis=1,
+                )
+                df_visitas_paciente = df_visitas_paciente[
+                    df_visitas_paciente["_clave_paciente"] == clave_ref
+                ].copy()
+
+            if not df_visitas_paciente.empty:
+                df_visitas_paciente["_fecha_sort"] = pd.to_datetime(
+                    df_visitas_paciente["fecha"],
+                    errors="coerce",
+                )
+                if "id" in df_visitas_paciente.columns:
+                    df_visitas_paciente = df_visitas_paciente.sort_values(
+                        by=["_fecha_sort", "id"],
+                        ascending=[True, True],
+                        na_position="last",
+                    )
+                else:
+                    df_visitas_paciente = df_visitas_paciente.sort_values(
+                        by=["_fecha_sort"],
+                        ascending=[True],
+                        na_position="last",
+                    )
+
+                visitas_resumen = pd.DataFrame({
+                    "Fecha": df_visitas_paciente["fecha"].apply(formatear_fecha_visita),
+                    "Ciclo": df_visitas_paciente["ciclo"].fillna("").astype(str),
+                })
+                st.markdown("**Visitas incluidas en agenda (fecha y ciclo):**")
+                st.dataframe(visitas_resumen, width="stretch", hide_index=True)
+            else:
+                st.caption("No hay visitas de agenda asociadas a este paciente.")
+        else:
+            st.caption("No hay visitas registradas en agenda.")
+
         datos_cargados, criterio_cargado = cargar_datos_imwg_paciente(codigo, nombre, ensayo)
         criterio_default = criterio_cargado if criterio_cargado in IMWG_CRITERIOS_INFO else "1"
 
