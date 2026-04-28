@@ -2149,6 +2149,136 @@ def cargar_datos_imwg_paciente(codigo, nombre, ensayo):
     return imwg_normalize_dataframe_schema(pd.DataFrame(payload.get("datos", []))), criterio
 
 
+def imwg_es_timepoint_screening_basal(timepoint):
+    tp = str(timepoint or "").strip().lower()
+    return ("screening" in tp) or ("basal" in tp)
+
+
+def imwg_normalizar_clave_fila(fecha, timepoint):
+    fecha_txt = str(fecha or "").strip()
+    if fecha_txt:
+        dt = pd.to_datetime(fecha_txt, errors="coerce", dayfirst=True)
+        if pd.notna(dt):
+            fecha_txt = dt.strftime("%Y-%m-%d")
+        else:
+            fecha_txt = fecha_txt.lower()
+
+    tp_txt = str(timepoint or "").strip()
+    if imwg_es_timepoint_screening_basal(tp_txt):
+        tp_txt = "screening"
+    else:
+        tp_txt = re.sub(r"\s+", " ", tp_txt.lower())
+
+    return f"{fecha_txt}|{tp_txt}"
+
+
+def imwg_visitas_agenda_paciente(codigo, nombre, ensayo):
+    df_visitas = get_visitas()
+    if df_visitas.empty:
+        return pd.DataFrame(columns=["Fecha", "Timepoint"])
+
+    for col in ["codigo", "nombre", "ensayo", "ciclo", "fecha"]:
+        if col not in df_visitas.columns:
+            df_visitas[col] = ""
+
+    clave_ref = clave_paciente_unificada(codigo, nombre, ensayo)
+    if not clave_ref:
+        return pd.DataFrame(columns=["Fecha", "Timepoint"])
+
+    df_visitas = df_visitas.copy()
+    df_visitas["_clave_paciente"] = df_visitas.apply(
+        lambda row: clave_paciente_unificada(
+            row.get("codigo", ""),
+            row.get("nombre", ""),
+            row.get("ensayo", ""),
+        ),
+        axis=1,
+    )
+    df_visitas = df_visitas[df_visitas["_clave_paciente"] == clave_ref].copy()
+    if df_visitas.empty:
+        return pd.DataFrame(columns=["Fecha", "Timepoint"])
+
+    df_visitas["_fecha_sort"] = pd.to_datetime(df_visitas["fecha"], errors="coerce")
+    if "id" in df_visitas.columns:
+        df_visitas = df_visitas.sort_values(
+            by=["_fecha_sort", "id"],
+            ascending=[True, True],
+            na_position="last",
+        )
+    else:
+        df_visitas = df_visitas.sort_values(by=["_fecha_sort"], ascending=[True], na_position="last")
+
+    filas = []
+    tiene_screening = False
+    for _, row in df_visitas.iterrows():
+        ciclo = str(row.get("ciclo", "") or "").strip()
+        fecha = formatear_fecha_visita(row.get("fecha", ""))
+        if imwg_es_timepoint_screening_basal(ciclo):
+            timepoint = "Screening (Basal)"
+            tiene_screening = True
+        else:
+            timepoint = ciclo
+
+        filas.append({
+            "Fecha": fecha,
+            "Timepoint": timepoint,
+        })
+
+    if not tiene_screening:
+        filas.insert(0, {"Fecha": "", "Timepoint": "Screening (Basal)"})
+
+    return pd.DataFrame(filas, columns=["Fecha", "Timepoint"])
+
+
+def imwg_integrar_visitas_en_tabla(df_actual, codigo, nombre, ensayo):
+    df_base = imwg_normalize_dataframe_schema(df_actual)
+    df_agenda = imwg_visitas_agenda_paciente(codigo, nombre, ensayo)
+
+    if df_agenda.empty:
+        return df_base
+
+    work = df_base.copy()
+    work["_clave_fila"] = work.apply(
+        lambda row: imwg_normalizar_clave_fila(row.get("Fecha", ""), row.get("Timepoint", "")),
+        axis=1,
+    )
+
+    indices_por_clave = {}
+    for idx, clave in work["_clave_fila"].items():
+        indices_por_clave.setdefault(clave, []).append(idx)
+
+    filas_resultado = []
+    indices_usados = set()
+    for _, agenda_row in df_agenda.iterrows():
+        fecha_agenda = agenda_row.get("Fecha", "")
+        timepoint_agenda = agenda_row.get("Timepoint", "")
+        clave_agenda = imwg_normalizar_clave_fila(fecha_agenda, timepoint_agenda)
+
+        idx_match = None
+        for idx_candidato in indices_por_clave.get(clave_agenda, []):
+            if idx_candidato not in indices_usados:
+                idx_match = idx_candidato
+                break
+
+        if idx_match is not None:
+            fila = work.loc[idx_match].to_dict()
+            indices_usados.add(idx_match)
+        else:
+            fila = {col: "" for col in IMWG_STANDARD_COLUMNS}
+
+        fila["Fecha"] = fecha_agenda
+        fila["Timepoint"] = timepoint_agenda
+        fila.pop("_clave_fila", None)
+        filas_resultado.append(fila)
+
+    restantes = work[~work.index.isin(indices_usados)].copy()
+    if not restantes.empty:
+        restantes = restantes.drop(columns=["_clave_fila"], errors="ignore")
+        filas_resultado.extend(restantes.to_dict(orient="records"))
+
+    return imwg_normalize_dataframe_schema(pd.DataFrame(filas_resultado))
+
+
 def classify_integrated_imwg(row, baseline_row, nadir_values):
     serum = imwg_to_float(row.get("Proteina_M_suero", ""))
     urine = imwg_to_float(row.get("Proteina_orina", ""))
@@ -2272,63 +2402,6 @@ def renderizar_bloque_respuesta_imwg_paciente(paciente, id_visita):
         st.caption("Si editas valores y guardas, la tabla recalcula la respuesta IMWG por visita.")
         st.caption(f"Paciente: {codigo} | {nombre} | Ensayo: {ensayo}")
 
-        df_visitas_paciente = get_visitas()
-        if not df_visitas_paciente.empty:
-            if "codigo" not in df_visitas_paciente.columns:
-                df_visitas_paciente["codigo"] = ""
-            if "nombre" not in df_visitas_paciente.columns:
-                df_visitas_paciente["nombre"] = ""
-            if "ensayo" not in df_visitas_paciente.columns:
-                df_visitas_paciente["ensayo"] = ""
-            if "ciclo" not in df_visitas_paciente.columns:
-                df_visitas_paciente["ciclo"] = ""
-            if "fecha" not in df_visitas_paciente.columns:
-                df_visitas_paciente["fecha"] = ""
-
-            clave_ref = clave_paciente_unificada(codigo, nombre, ensayo)
-            if clave_ref:
-                df_visitas_paciente = df_visitas_paciente.copy()
-                df_visitas_paciente["_clave_paciente"] = df_visitas_paciente.apply(
-                    lambda row: clave_paciente_unificada(
-                        row.get("codigo", ""),
-                        row.get("nombre", ""),
-                        row.get("ensayo", ""),
-                    ),
-                    axis=1,
-                )
-                df_visitas_paciente = df_visitas_paciente[
-                    df_visitas_paciente["_clave_paciente"] == clave_ref
-                ].copy()
-
-            if not df_visitas_paciente.empty:
-                df_visitas_paciente["_fecha_sort"] = pd.to_datetime(
-                    df_visitas_paciente["fecha"],
-                    errors="coerce",
-                )
-                if "id" in df_visitas_paciente.columns:
-                    df_visitas_paciente = df_visitas_paciente.sort_values(
-                        by=["_fecha_sort", "id"],
-                        ascending=[True, True],
-                        na_position="last",
-                    )
-                else:
-                    df_visitas_paciente = df_visitas_paciente.sort_values(
-                        by=["_fecha_sort"],
-                        ascending=[True],
-                        na_position="last",
-                    )
-
-                visitas_resumen = pd.DataFrame({
-                    "Fecha": df_visitas_paciente["fecha"].apply(formatear_fecha_visita),
-                    "Ciclo": df_visitas_paciente["ciclo"].fillna("").astype(str),
-                })
-                st.markdown("**Visitas incluidas en agenda (fecha y ciclo):**")
-                st.dataframe(visitas_resumen, width="stretch", hide_index=True)
-            else:
-                st.caption("No hay visitas de agenda asociadas a este paciente.")
-        else:
-            st.caption("No hay visitas registradas en agenda.")
-
         datos_cargados, criterio_cargado = cargar_datos_imwg_paciente(codigo, nombre, ensayo)
         criterio_default = criterio_cargado if criterio_cargado in IMWG_CRITERIOS_INFO else "1"
 
@@ -2350,8 +2423,13 @@ def renderizar_bloque_respuesta_imwg_paciente(paciente, id_visita):
         else:
             df = imwg_normalize_dataframe_schema(pd.DataFrame(IMWG_DEFAULT_ROWS))
 
+        df = imwg_integrar_visitas_en_tabla(df, codigo, nombre, ensayo)
+
         work = df.copy()
-        baseline_mask = work["Timepoint"].astype(str).str.contains("C1D1", case=False, na=False)
+        baseline_mask = work["Timepoint"].astype(str).str.contains("screening|basal", case=False, na=False)
+        baseline_idx = None
+        if baseline_mask.sum() == 0:
+            baseline_mask = work["Timepoint"].astype(str).str.contains("C1D1", case=False, na=False)
         if baseline_mask.sum() > 0:
             baseline_idx = work.index[baseline_mask].tolist()[0]
             baseline_row = work.loc[baseline_idx]
@@ -2368,9 +2446,10 @@ def renderizar_bloque_respuesta_imwg_paciente(paciente, id_visita):
         }
 
         responses = []
-        for _, row in work.iterrows():
+        for idx, row in work.iterrows():
             timepoint = str(row["Timepoint"]).strip().lower()
-            if "screening" in timepoint or "c1d1" in timepoint or not baseline_found:
+            es_basal = imwg_es_timepoint_screening_basal(timepoint) or (baseline_found and baseline_idx is not None and idx == baseline_idx)
+            if es_basal or not baseline_found:
                 responses.append("")
                 continue
 
