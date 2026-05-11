@@ -835,6 +835,13 @@ def normalizar_ensayo(valor):
     ensayo = normalizar_texto_campo(valor).upper()
     clave = re.sub(r"[\s\-_/]+", "", ensayo)
 
+    if clave == "DREAMM10":
+        return "DREAMM 10"
+    if clave == "DREAMM8":
+        return "DREAMM-8"
+    if clave == "FUERADEENSAYO":
+        return "Fuera de Ensayo"
+
     if clave in {"GEM21", "GEM2021"}:
         return "GEM21"
 
