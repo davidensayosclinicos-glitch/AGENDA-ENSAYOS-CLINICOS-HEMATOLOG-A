@@ -21,6 +21,7 @@ import hmac
 import webbrowser
 import tempfile
 import importlib
+import glob
 from urllib.parse import quote_plus
 
 try:
@@ -1589,6 +1590,181 @@ def borrar_visitas_sin_paciente_citas_ojos():
     invalidar_cache_lecturas()
     snapshot_db("pacientes")
     return len(ids_borrar)
+
+
+def _listar_bases_backup_locales():
+    candidatos = []
+
+    if os.path.isfile(os.path.join(SCRIPT_DIR, "agenda_ensayos_backup_2026-03-06_124925.db")):
+        candidatos.append(os.path.join(SCRIPT_DIR, "agenda_ensayos_backup_2026-03-06_124925.db"))
+
+    candidatos.extend(sorted(glob.glob(os.path.join(DB_BACKUP_DIR, "*.db"))))
+    candidatos.extend(sorted(glob.glob(os.path.join(SCRIPT_DIR, "agenda_ensayos_backup_*.db"))))
+
+    vistos = set()
+    ordenados = []
+    for ruta in candidatos:
+        ruta_abs = os.path.abspath(ruta)
+        if not os.path.isfile(ruta_abs):
+            continue
+        if ruta_abs == os.path.abspath(DB_PATH):
+            continue
+        if ruta_abs in vistos:
+            continue
+        vistos.add(ruta_abs)
+        ordenados.append(ruta_abs)
+
+    ordenados.sort(key=lambda p: os.path.getmtime(p), reverse=True)
+    return ordenados
+
+
+def restaurar_paciente_desde_backups_locales(codigo):
+    codigo = normalizar_texto_campo(codigo)
+    if not codigo:
+        return {
+            "ok": False,
+            "mensaje": "Introduce un código de paciente.",
+            "backups": 0,
+            "visitas_insertadas": 0,
+            "visitas_totales": 0,
+        }
+
+    backups = _listar_bases_backup_locales()
+    if not backups:
+        return {
+            "ok": False,
+            "mensaje": "No se encontraron backups locales en la carpeta de la app.",
+            "backups": 0,
+            "visitas_insertadas": 0,
+            "visitas_totales": 0,
+        }
+
+    conn = connect_db()
+    c = conn.cursor()
+    visitas_insertadas = 0
+    paciente_encontrado = False
+    visitas_backup = 0
+
+    for ruta_backup in backups:
+        try:
+            src = sqlite3.connect(ruta_backup)
+        except Exception:
+            continue
+
+        try:
+            s = src.cursor()
+            p_row = s.execute(
+                "SELECT codigo, nombre, ensayo FROM pacientes WHERE codigo = ? ORDER BY id DESC LIMIT 1",
+                (codigo,),
+            ).fetchone()
+            v_rows = s.execute(
+                """
+                SELECT fecha, nombre, codigo, ensayo, ciclo, kits, tablet, medula, otras_pruebas, comentarios
+                FROM visitas
+                WHERE codigo = ?
+                ORDER BY id ASC
+                """,
+                (codigo,),
+            ).fetchall()
+        except Exception:
+            src.close()
+            continue
+
+        if not p_row and not v_rows:
+            src.close()
+            continue
+
+        paciente_encontrado = True
+        visitas_backup += len(v_rows)
+
+        if p_row:
+            codigo_p = normalizar_texto_campo(p_row[0])
+            nombre_p = nombre_a_iniciales(p_row[1])
+            ensayo_p = normalizar_ensayo(p_row[2])
+            existe_p = c.execute("SELECT id FROM pacientes WHERE codigo = ?", (codigo_p,)).fetchone()
+            if existe_p:
+                c.execute(
+                    "UPDATE pacientes SET nombre = ?, ensayo = ? WHERE codigo = ?",
+                    (nombre_p, ensayo_p, codigo_p),
+                )
+            else:
+                c.execute(
+                    "INSERT OR IGNORE INTO pacientes (codigo, nombre, ensayo) VALUES (?, ?, ?)",
+                    (codigo_p, nombre_p, ensayo_p),
+                )
+
+        for fila in v_rows:
+            fecha, nombre, codigo_v, ensayo, ciclo, kits, tablet, medula, otras_pruebas, comentarios = fila
+            codigo_v = normalizar_texto_campo(codigo_v) or codigo
+            nombre_v = nombre_a_iniciales(nombre)
+            ensayo_v = normalizar_ensayo(ensayo)
+
+            existe_v = c.execute(
+                """
+                SELECT 1
+                FROM visitas
+                WHERE codigo = ?
+                  AND fecha = ?
+                  AND COALESCE(ciclo, '') = COALESCE(?, '')
+                  AND COALESCE(comentarios, '') = COALESCE(?, '')
+                LIMIT 1
+                """,
+                (codigo_v, fecha, ciclo, comentarios),
+            ).fetchone()
+            if existe_v:
+                continue
+
+            c.execute(
+                """
+                INSERT INTO visitas (fecha, nombre, codigo, ensayo, ciclo, kits, tablet, medula, otras_pruebas, comentarios)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    fecha,
+                    nombre_v,
+                    codigo_v,
+                    ensayo_v,
+                    ciclo,
+                    kits,
+                    tablet,
+                    medula,
+                    otras_pruebas,
+                    comentarios,
+                ),
+            )
+            visitas_insertadas += 1
+
+        src.close()
+
+    if not paciente_encontrado:
+        conn.close()
+        return {
+            "ok": False,
+            "mensaje": f"No se encontró el código {codigo} en los backups locales.",
+            "backups": len(backups),
+            "visitas_insertadas": 0,
+            "visitas_totales": 0,
+        }
+
+    sincronizar_pacientes_desde_visitas(c)
+    unificar_pacientes_duplicados(c)
+    eliminar_ensayos_sin_pacientes(c)
+    conn.commit()
+
+    visitas_totales = c.execute("SELECT COUNT(*) FROM visitas WHERE codigo = ?", (codigo,)).fetchone()[0]
+    conn.close()
+
+    invalidar_cache_lecturas()
+    snapshot_db("pacientes")
+
+    return {
+        "ok": True,
+        "mensaje": f"Paciente {codigo} recuperado desde backups locales.",
+        "backups": len(backups),
+        "visitas_insertadas": int(visitas_insertadas),
+        "visitas_totales": int(visitas_totales),
+        "visitas_backup": int(visitas_backup),
+    }
 
 @st.cache_data(show_spinner=False)
 def get_checklist_items(ensayo):
@@ -4661,6 +4837,23 @@ if seccion_activa == "Citas ojos":
                         guardar_visita(fecha_visita_nueva.isoformat(), data_nueva)
                         st.success("Paciente creado en Fuera de Ensayo.")
                         st.rerun()
+
+        with st.expander("🛟 Recuperar paciente desde backups", expanded=False):
+            st.caption("Restaura un paciente y sus visitas en la base actual usando los backups locales de la app.")
+            with st.form("form_recuperar_paciente_backup"):
+                codigo_recuperar = st.text_input("Código a recuperar", value="000601")
+                recuperar = st.form_submit_button("Recuperar paciente", type="primary")
+                if recuperar:
+                    resultado = restaurar_paciente_desde_backups_locales(codigo_recuperar)
+                    if resultado.get("ok"):
+                        st.success(
+                            f"{resultado.get('mensaje')} Visitas en backups: {resultado.get('visitas_backup', 0)}. "
+                            f"Insertadas: {resultado.get('visitas_insertadas', 0)}. "
+                            f"Totales ahora: {resultado.get('visitas_totales', 0)}."
+                        )
+                        st.rerun()
+                    else:
+                        st.warning(resultado.get("mensaje", "No se pudo recuperar el paciente."))
 
         df_visitas = df_visitas.copy()
         df_visitas["ensayo"] = df_visitas["ensayo"].apply(_normalizar_ensayo_ojos)
