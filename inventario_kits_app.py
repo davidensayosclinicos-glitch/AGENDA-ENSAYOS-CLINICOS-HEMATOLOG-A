@@ -618,14 +618,38 @@ def sincronizar_catalogo_desde_inventario(df_inventario: pd.DataFrame) -> None:
 
     desde_inv = df_inventario[["Ensayo", "Tipo de kit"]].copy()
     if _usar_postgres():
+        if st.session_state.get("_catalogo_sync_done", False):
+            return
+
         desde_inv["Ensayo"] = desde_inv["Ensayo"].fillna("").astype(str).str.strip()
         desde_inv["Tipo de kit"] = desde_inv["Tipo de kit"].fillna("").astype(str).str.strip()
         desde_inv = desde_inv[(desde_inv["Ensayo"] != "") & (desde_inv["Tipo de kit"] != "")].drop_duplicates()
-        for _, fila in desde_inv.iterrows():
-            _insertar_fila_postgres(
-                ARCHIVO_CATALOGO_TIPOS,
-                {"Ensayo": str(fila["Ensayo"]), "Tipo de kit": str(fila["Tipo de kit"])},
-            )
+        if desde_inv.empty:
+            st.session_state["_catalogo_sync_done"] = True
+            return
+
+        config = DB_TABLAS.get(ARCHIVO_CATALOGO_TIPOS)
+        if not config:
+            return
+
+        try:
+            with _conexion_postgres() as conn:
+                with conn.cursor() as cur:
+                    tabla_real, columnas_reales = _resolver_mapeo_columnas(cur, config)
+                    if not tabla_real or not columnas_reales or len(columnas_reales) < 2:
+                        return
+
+                    col_ensayo = _qident(columnas_reales[0])
+                    col_tipo = _qident(columnas_reales[1])
+                    query = (
+                        f"INSERT INTO {_qident(tabla_real)} ({col_ensayo}, {col_tipo}) "
+                        f"VALUES (%s, %s) ON CONFLICT DO NOTHING"
+                    )
+                    filas = [(str(f["Ensayo"]), str(f["Tipo de kit"])) for _, f in desde_inv.iterrows()]
+                    cur.executemany(query, filas)
+            st.session_state["_catalogo_sync_done"] = True
+        except Exception:
+            pass
         return
 
     base = cargar_catalogo_tipos()
