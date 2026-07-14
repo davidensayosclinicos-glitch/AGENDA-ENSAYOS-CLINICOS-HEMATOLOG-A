@@ -980,6 +980,19 @@ def resolver_tipo_kit_auto(i: int, tipo_auto_sel: str, tipo_auto_manual: str) ->
     return "SIN TIPO"
 
 
+def normalizar_payload_scan(payload) -> dict:
+    if payload is None:
+        return {"code": "", "text": "", "source": "none"}
+    if isinstance(payload, dict):
+        return {
+            "code": str(payload.get("code", "") or "").strip(),
+            "text": str(payload.get("text", "") or "").strip(),
+            "source": str(payload.get("source", "") or "").strip(),
+        }
+    # Compatibilidad con versiones que devuelven directamente el codigo como string.
+    return {"code": str(payload).strip(), "text": "", "source": "legacy"}
+
+
 def calcular_alertas(df: pd.DataFrame):
     hoy = date.today()
     caducados = []
@@ -1120,10 +1133,11 @@ for i, ensayo_tab in enumerate(lista_ensayos):
                         height=430,
                     )
                 except Exception:
-                    payload_alta_cam = {}
+                    payload_alta_cam = {"code": "", "text": "", "source": "error"}
                     st.warning("Escaner avanzado no disponible en este entorno. Usa entrada manual.")
-                codigo_alta_cam = normalizar_codigo((payload_alta_cam or {}).get("code", ""))
-                texto_alta_cam = str((payload_alta_cam or {}).get("text", "")).strip()
+                payload_alta = normalizar_payload_scan(payload_alta_cam)
+                codigo_alta_cam = normalizar_codigo(payload_alta.get("code", ""))
+                texto_alta_cam = payload_alta.get("text", "")
 
                 if texto_alta_cam:
                     tipo_inferido = inferir_tipo_kit_desde_texto(texto_alta_cam, tipos_auto)
@@ -1168,9 +1182,10 @@ for i, ensayo_tab in enumerate(lista_ensayos):
                         height=430,
                     )
                 except Exception:
-                    payload_salida_cam = {}
+                    payload_salida_cam = {"code": "", "text": "", "source": "error"}
                     st.warning("Escaner avanzado no disponible en este entorno. Usa entrada manual.")
-                codigo_salida_cam = normalizar_codigo((payload_salida_cam or {}).get("code", ""))
+                payload_salida = normalizar_payload_scan(payload_salida_cam)
+                codigo_salida_cam = normalizar_codigo(payload_salida.get("code", ""))
                 if codigo_salida_cam:
                     codigo_norm = normalizar_codigo(codigo_salida_cam)
                     if st.session_state.get(f"rear_scan_last_salida_{i}") != codigo_norm:
