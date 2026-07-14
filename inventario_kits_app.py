@@ -446,7 +446,9 @@ def cargar_tabla(path: str, columnas: list[str]) -> pd.DataFrame:
 
 def guardar_tabla(path: str, df: pd.DataFrame, columnas: list[str]) -> None:
     if _usar_postgres() and path in DB_TABLAS:
-        _reemplazar_tabla_postgres(path, df, columnas)
+        guardado_ok = _reemplazar_tabla_postgres(path, df, columnas)
+        if not guardado_ok:
+            raise RuntimeError(f"No se pudo guardar la tabla en PostgreSQL: {DB_TABLAS[path]['tabla']}")
         return
 
     out = df.copy()
@@ -883,11 +885,14 @@ for i, ensayo_tab in enumerate(lista_ensayos):
                         cad = str(row["Caducidad"])
 
                         inventario = inventario.drop(index=idx[0]).reset_index(drop=True)
-                        guardar_inventario(inventario)
-                        registrar_movimiento("SALIDA", codigo_salida, ensayo_tab, tipo_kit, cad, "Retiro por escaneo")
-
-                        st.success(f"Caja retirada de {ensayo_tab}: {codigo_salida} | Tipo: {tipo_kit}")
-                        st.rerun()
+                        try:
+                            guardar_inventario(inventario)
+                            registrar_movimiento("SALIDA", codigo_salida, ensayo_tab, tipo_kit, cad, "Retiro por escaneo")
+                        except Exception as exc:
+                            st.error(f"No se pudo retirar la caja en base de datos: {exc}")
+                        else:
+                            st.success(f"Caja retirada de {ensayo_tab}: {codigo_salida} | Tipo: {tipo_kit}")
+                            st.rerun()
 
         st.markdown("**Resumen de contabilidad del inventario activo**")
         total_activos = len(data_ensayo)
