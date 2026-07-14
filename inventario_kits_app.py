@@ -4,6 +4,8 @@ import base64
 import html
 import random
 import re
+import difflib
+import unicodedata
 from datetime import date, datetime
 from pathlib import Path
 
@@ -666,6 +668,52 @@ def normalizar_codigo(codigo: str) -> str:
     return codigo.strip().upper()
 
 
+def _normalizar_texto_libre(valor: str) -> str:
+    txt = str(valor or "").strip().lower()
+    txt = unicodedata.normalize("NFKD", txt)
+    txt = "".join(ch for ch in txt if not unicodedata.combining(ch))
+    txt = re.sub(r"[^a-z0-9\s]", " ", txt)
+    txt = re.sub(r"\s+", " ", txt).strip()
+    return txt
+
+
+def inferir_tipo_kit_desde_texto(texto: str, tipos_disponibles: list[str]) -> str:
+    texto_norm = _normalizar_texto_libre(texto)
+    if not texto_norm or not tipos_disponibles:
+        return ""
+
+    variantes = {
+        "screening": ["screening", "screeening", "screenig", "screning", "screen"],
+    }
+
+    tipos_norm = {t: _normalizar_texto_libre(t) for t in tipos_disponibles}
+
+    # Coincidencia directa por contencion del nombre del tipo.
+    for tipo, tipo_norm in tipos_norm.items():
+        if tipo_norm and (tipo_norm in texto_norm or texto_norm in tipo_norm):
+            return tipo
+
+    # Coincidencia por variantes conocidas.
+    for tipo, tipo_norm in tipos_norm.items():
+        for canon, aliases in variantes.items():
+            if canon in tipo_norm:
+                if any(alias in texto_norm for alias in aliases):
+                    return tipo
+
+    # Coincidencia fuzzy token a token.
+    tokens = [tok for tok in texto_norm.split(" ") if tok]
+    for tipo, tipo_norm in tipos_norm.items():
+        tipo_tokens = [tok for tok in tipo_norm.split(" ") if tok]
+        if not tipo_tokens:
+            continue
+        for tt in tipo_tokens:
+            similitudes = [difflib.SequenceMatcher(None, tt, tk).ratio() for tk in tokens]
+            if similitudes and max(similitudes) >= 0.84:
+                return tipo
+
+    return ""
+
+
 def generar_codigo_automatico(ensayo: str, tipo_kit: str, caducidad: str) -> str:
     """Genera un numero aleatorio unico de 10 digitos."""
     return str(random.randint(1000000000, 9999999999))
@@ -907,6 +955,31 @@ def ejecutar_salida_kit(
     return nuevo_df, True, f"Caja retirada de {ensayo}: {codigo_salida} | Tipo: {tipo_kit}"
 
 
+def resolver_tipo_kit_auto(i: int, tipo_auto_sel: str, tipo_auto_manual: str) -> str:
+    tipo = ""
+
+    if str(tipo_auto_sel).strip() == "+ Nuevo tipo de kit":
+        tipo = str(tipo_auto_manual).strip()
+    else:
+        tipo = str(tipo_auto_sel).strip()
+
+    if tipo:
+        return tipo
+
+    # Fallback al selector manual de la pestaña.
+    sel_manual = str(st.session_state.get(f"tipo_sel_{i}", "")).strip()
+    if sel_manual == "+ Nuevo tipo de kit":
+        tipo = str(st.session_state.get(f"tipo_manual_{i}", "")).strip()
+    else:
+        tipo = sel_manual
+
+    if tipo:
+        return tipo
+
+    # Ultimo recurso para no bloquear el alta automatica.
+    return "SIN TIPO"
+
+
 def calcular_alertas(df: pd.DataFrame):
     hoy = date.today()
     caducados = []
@@ -1028,7 +1101,7 @@ for i, ensayo_tab in enumerate(lista_ensayos):
             st.caption("Alta")
             tipos_auto = tipos_por_ensayo_map.get(str(ensayo_tab).strip(), [])
             auto_alta = st.checkbox("Alta automatica al detectar", value=True, key=f"auto_alta_enabled_{i}")
-            opciones_auto_tipos = ["Selecciona tipo"] + tipos_auto + ["+ Nuevo tipo de kit"]
+            opciones_auto_tipos = (tipos_auto + ["+ Nuevo tipo de kit"]) if tipos_auto else ["+ Nuevo tipo de kit"]
             tipo_auto_sel = st.selectbox("Tipo auto", opciones_auto_tipos, key=f"auto_tipo_sel_{i}")
             tipo_auto_manual = ""
             if tipo_auto_sel == "+ Nuevo tipo de kit":
@@ -1041,27 +1114,32 @@ for i, ensayo_tab in enumerate(lista_ensayos):
             )
             if rear_barcode_scanner is not None:
                 try:
-                    codigo_alta_cam = rear_barcode_scanner(
+                    payload_alta_cam = rear_barcode_scanner(
                         label="Escanear alta (camara trasera)",
                         key=f"rear_scan_alta_{i}",
                         height=430,
                     )
                 except Exception:
-                    codigo_alta_cam = ""
+                    payload_alta_cam = {}
                     st.warning("Escaner avanzado no disponible en este entorno. Usa entrada manual.")
+                codigo_alta_cam = normalizar_codigo((payload_alta_cam or {}).get("code", ""))
+                texto_alta_cam = str((payload_alta_cam or {}).get("text", "")).strip()
+
+                if texto_alta_cam:
+                    tipo_inferido = inferir_tipo_kit_desde_texto(texto_alta_cam, tipos_auto)
+                    if tipo_inferido:
+                        st.session_state[f"auto_tipo_sel_{i}"] = tipo_inferido
+                        st.caption(f"Tipo detectado por texto: {tipo_inferido}")
+
                 if codigo_alta_cam:
-                    codigo_norm = normalizar_codigo(codigo_alta_cam)
+                    codigo_norm = codigo_alta_cam
                     if st.session_state.get(f"rear_scan_last_alta_{i}") != codigo_norm:
                         st.session_state[f"rear_scan_last_alta_{i}"] = codigo_norm
                         st.session_state[f"codigo_alta_{i}"] = codigo_norm
                         st.success(f"Codigo detectado: {codigo_norm}")
 
                         if auto_alta:
-                            tipo_auto = (
-                                tipo_auto_manual.strip()
-                                if tipo_auto_sel == "+ Nuevo tipo de kit"
-                                else ("" if tipo_auto_sel == "Selecciona tipo" else str(tipo_auto_sel).strip())
-                            )
+                            tipo_auto = resolver_tipo_kit_auto(i, tipo_auto_sel, tipo_auto_manual)
                             cad_auto_str = formatear_fecha(cad_auto_fecha) if cad_auto_fecha else ""
                             inventario, ok_auto, msg_auto = ejecutar_alta_kit(
                                 inventario,
@@ -1084,14 +1162,15 @@ for i, ensayo_tab in enumerate(lista_ensayos):
             auto_salida = st.checkbox("Salida automatica al detectar", value=True, key=f"auto_salida_enabled_{i}")
             if rear_barcode_scanner is not None:
                 try:
-                    codigo_salida_cam = rear_barcode_scanner(
+                    payload_salida_cam = rear_barcode_scanner(
                         label="Escanear salida (camara trasera)",
                         key=f"rear_scan_salida_{i}",
                         height=430,
                     )
                 except Exception:
-                    codigo_salida_cam = ""
+                    payload_salida_cam = {}
                     st.warning("Escaner avanzado no disponible en este entorno. Usa entrada manual.")
+                codigo_salida_cam = normalizar_codigo((payload_salida_cam or {}).get("code", ""))
                 if codigo_salida_cam:
                     codigo_norm = normalizar_codigo(codigo_salida_cam)
                     if st.session_state.get(f"rear_scan_last_salida_{i}") != codigo_norm:
