@@ -27,6 +27,8 @@ streamlit run app.py
 ### Importante
 
 - Si cambias dependencias, haz **Clear cache** y luego **Reboot app** en Streamlit Cloud para forzar reinstalación.
+- Si vas a usar Supabase para el inventario, crea primero las tablas con [scripts/create_supabase_inventory_tables.sql](../scripts/create_supabase_inventory_tables.sql) y configura `DATABASE_URL` en los secrets de Streamlit Cloud.
+- Para cargar un CSV inicial en Supabase usa [scripts/import_inventario_kits_to_supabase.py](../scripts/import_inventario_kits_to_supabase.py), por ejemplo: `python scripts/import_inventario_kits_to_supabase.py inventario_kits.csv --replace`.
 
 ## Nota sobre datos
 

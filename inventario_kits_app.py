@@ -4,9 +4,20 @@ import base64
 import html
 import random
 from datetime import date, datetime
+from pathlib import Path
 
 import pandas as pd
 import streamlit as st
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover
+    tomllib = None
+
+try:
+    import psycopg2
+except Exception:
+    psycopg2 = None
 
 try:
     import barcode
@@ -20,6 +31,243 @@ ARCHIVO_INVENTARIO = "inventario_kits.csv"
 ARCHIVO_HISTORIAL = "historial_kits.csv"
 ARCHIVO_CATALOGO_TIPOS = "catalogo_tipos_por_ensayo.csv"
 ARCHIVO_ENSAYOS = "ensayos_configurados.csv"
+
+BASE_DIR = Path(__file__).resolve().parent
+ARCHIVO_INVENTARIO = str(BASE_DIR / ARCHIVO_INVENTARIO)
+ARCHIVO_HISTORIAL = str(BASE_DIR / ARCHIVO_HISTORIAL)
+ARCHIVO_CATALOGO_TIPOS = str(BASE_DIR / ARCHIVO_CATALOGO_TIPOS)
+ARCHIVO_ENSAYOS = str(BASE_DIR / ARCHIVO_ENSAYOS)
+
+TABLA_INVENTARIO = "inventario_kits"
+TABLA_HISTORIAL = "historial_kits"
+TABLA_CATALOGO_TIPOS = "catalogo_tipos_por_ensayo"
+TABLA_ENSAYOS = "ensayos_configurados"
+
+DB_TABLAS = {
+    ARCHIVO_INVENTARIO: {
+        "tabla": TABLA_INVENTARIO,
+        "columnas_ui": ["Codigo de barras", "Ensayo", "Tipo de kit", "Caducidad"],
+        "columnas_db": ["codigo_barras", "ensayo", "tipo_de_kit", "caducidad"],
+    },
+    ARCHIVO_HISTORIAL: {
+        "tabla": TABLA_HISTORIAL,
+        "columnas_ui": [
+            "Fecha",
+            "Hora",
+            "Accion",
+            "Codigo de barras",
+            "Ensayo",
+            "Tipo de kit",
+            "Caducidad",
+            "Detalle",
+        ],
+        "columnas_db": [
+            "fecha",
+            "hora",
+            "accion",
+            "codigo_barras",
+            "ensayo",
+            "tipo_de_kit",
+            "caducidad",
+            "detalle",
+        ],
+    },
+    ARCHIVO_CATALOGO_TIPOS: {
+        "tabla": TABLA_CATALOGO_TIPOS,
+        "columnas_ui": ["Ensayo", "Tipo de kit"],
+        "columnas_db": ["ensayo", "tipo_de_kit"],
+    },
+    ARCHIVO_ENSAYOS: {
+        "tabla": TABLA_ENSAYOS,
+        "columnas_ui": ["Ensayo"],
+        "columnas_db": ["ensayo"],
+    },
+}
+
+SECRETS_CANDIDATES = [
+    BASE_DIR / ".streamlit" / "secrets.toml",
+    BASE_DIR / "agenda-streamlit" / ".streamlit" / "secrets.toml",
+]
+
+
+def _leer_toml(path: Path) -> dict:
+    if tomllib is None or not path.exists():
+        return {}
+    try:
+        with path.open("rb") as archivo:
+            return tomllib.load(archivo)
+    except Exception:
+        return {}
+
+
+def obtener_database_url() -> str:
+    env_url = (os.getenv("DATABASE_URL") or "").strip()
+    if env_url:
+        return env_url
+
+    try:
+        secret_url = str(st.secrets.get("DATABASE_URL", "")).strip()
+        if secret_url:
+            return secret_url
+    except Exception:
+        pass
+
+    for secrets_path in SECRETS_CANDIDATES:
+        data = _leer_toml(secrets_path)
+        url = str(data.get("DATABASE_URL") or "").strip()
+        if url:
+            return url
+
+    return ""
+
+
+DATABASE_URL = obtener_database_url()
+
+
+def _usar_postgres() -> bool:
+    return bool(DATABASE_URL and psycopg2 is not None)
+
+
+def _conexion_postgres():
+    if not _usar_postgres():
+        return None
+    return psycopg2.connect(DATABASE_URL, connect_timeout=10)
+
+
+def _asegurar_esquema_postgres() -> None:
+    if not _usar_postgres():
+        return
+
+    ddl = [
+        f"""
+        CREATE TABLE IF NOT EXISTS {TABLA_INVENTARIO} (
+            id BIGSERIAL PRIMARY KEY,
+            codigo_barras TEXT NOT NULL UNIQUE,
+            ensayo TEXT NOT NULL,
+            tipo_de_kit TEXT NOT NULL,
+            caducidad TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+        """,
+        f"""
+        CREATE TABLE IF NOT EXISTS {TABLA_HISTORIAL} (
+            id BIGSERIAL PRIMARY KEY,
+            fecha TEXT NOT NULL,
+            hora TEXT NOT NULL,
+            accion TEXT NOT NULL,
+            codigo_barras TEXT NOT NULL,
+            ensayo TEXT NOT NULL,
+            tipo_de_kit TEXT NOT NULL,
+            caducidad TEXT,
+            detalle TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+        """,
+        f"""
+        CREATE TABLE IF NOT EXISTS {TABLA_CATALOGO_TIPOS} (
+            id BIGSERIAL PRIMARY KEY,
+            ensayo TEXT NOT NULL,
+            tipo_de_kit TEXT NOT NULL,
+            UNIQUE (ensayo, tipo_de_kit)
+        )
+        """,
+        f"""
+        CREATE TABLE IF NOT EXISTS {TABLA_ENSAYOS} (
+            id BIGSERIAL PRIMARY KEY,
+            ensayo TEXT NOT NULL UNIQUE
+        )
+        """,
+    ]
+
+    with _conexion_postgres() as conn:
+        with conn.cursor() as cur:
+            for sentencia in ddl:
+                cur.execute(sentencia)
+
+
+def _normalizar_para_sql(valor) -> str:
+    if valor is None:
+        return ""
+    if pd.isna(valor):
+        return ""
+    return str(valor)
+
+
+def _leer_tabla_postgres(path: str, columnas_ui: list[str]) -> pd.DataFrame:
+    config = DB_TABLAS.get(path)
+    if not config or not _usar_postgres():
+        return pd.DataFrame(columns=columnas_ui)
+
+    try:
+        with _conexion_postgres() as conn:
+            consulta = f"SELECT {', '.join(config['columnas_db'])} FROM {config['tabla']} ORDER BY id"
+            df = pd.read_sql_query(consulta, conn)
+    except Exception:
+        return pd.DataFrame(columns=columnas_ui)
+
+    if df.empty:
+        return pd.DataFrame(columns=columnas_ui)
+
+    df = df.rename(columns=dict(zip(config["columnas_db"], config["columnas_ui"])))
+    for col in columnas_ui:
+        if col not in df.columns:
+            df[col] = ""
+        df[col] = df[col].fillna("").astype(str)
+    return df[columnas_ui].copy()
+
+
+def _reemplazar_tabla_postgres(path: str, df: pd.DataFrame, columnas_ui: list[str]) -> bool:
+    config = DB_TABLAS.get(path)
+    if not config or not _usar_postgres():
+        return False
+
+    try:
+        with _conexion_postgres() as conn:
+            with conn.cursor() as cur:
+                cur.execute(f"TRUNCATE TABLE {config['tabla']}")
+                if df.empty:
+                    return True
+
+                filas = []
+                for _, fila in df[columnas_ui].iterrows():
+                    filas.append(tuple(_normalizar_para_sql(fila[col]).strip() for col in columnas_ui))
+
+                marcadores = ", ".join(["%s"] * len(config["columnas_db"]))
+                columnas_sql = ", ".join(config["columnas_db"])
+                cur.executemany(
+                    f"INSERT INTO {config['tabla']} ({columnas_sql}) VALUES ({marcadores})",
+                    filas,
+                )
+        return True
+    except Exception:
+        return False
+
+
+def _insertar_fila_postgres(path: str, datos: dict) -> bool:
+    config = DB_TABLAS.get(path)
+    if not config or not _usar_postgres():
+        return False
+
+    try:
+        with _conexion_postgres() as conn:
+            with conn.cursor() as cur:
+                columnas_sql = ", ".join(config["columnas_db"])
+                marcadores = ", ".join(["%s"] * len(config["columnas_db"]))
+                valores = [datos.get(col, "") for col in config["columnas_ui"]]
+                cur.execute(
+                    f"INSERT INTO {config['tabla']} ({columnas_sql}) VALUES ({marcadores}) ON CONFLICT DO NOTHING",
+                    valores,
+                )
+        return True
+    except Exception:
+        return False
+
+
+try:
+    _asegurar_esquema_postgres()
+except Exception as exc:
+    if DATABASE_URL:
+        st.warning(f"No se pudo inicializar PostgreSQL para el inventario: {exc}")
 
 COLUMNAS_INVENTARIO = ["Codigo de barras", "Ensayo", "Tipo de kit", "Caducidad"]
 COLUMNAS_HISTORIAL = [
@@ -62,6 +310,9 @@ ENSAYOS_CONFIGURADOS = [
 
 
 def cargar_tabla(path: str, columnas: list[str]) -> pd.DataFrame:
+    if _usar_postgres() and path in DB_TABLAS:
+        return _leer_tabla_postgres(path, columnas)
+
     if os.path.exists(path):
         try:
             df = pd.read_csv(path, dtype=str)
@@ -81,6 +332,10 @@ def cargar_tabla(path: str, columnas: list[str]) -> pd.DataFrame:
 
 
 def guardar_tabla(path: str, df: pd.DataFrame, columnas: list[str]) -> None:
+    if _usar_postgres() and path in DB_TABLAS:
+        _reemplazar_tabla_postgres(path, df, columnas)
+        return
+
     out = df.copy()
     for col in columnas:
         if col not in out.columns:
@@ -137,6 +392,9 @@ def agregar_ensayo_configurado(ensayo: str) -> bool:
     if nuevo in actuales:
         return False
 
+    if _usar_postgres() and _insertar_fila_postgres(ARCHIVO_ENSAYOS, {"Ensayo": nuevo}):
+        return True
+
     guardar_ensayos_configurados(actuales + [nuevo])
     return True
 
@@ -153,6 +411,12 @@ def registrar_tipo_ensayo(ensayo: str, tipo_kit: str) -> None:
     ensayo = str(ensayo).strip()
     tipo_kit = str(tipo_kit).strip()
     if not ensayo or not tipo_kit:
+        return
+
+    if _usar_postgres() and _insertar_fila_postgres(
+        ARCHIVO_CATALOGO_TIPOS,
+        {"Ensayo": ensayo, "Tipo de kit": tipo_kit},
+    ):
         return
 
     catalogo = cargar_catalogo_tipos()
@@ -315,7 +579,6 @@ def formatear_fecha(fecha_date: date | None) -> str:
 
 
 def registrar_movimiento(accion: str, codigo: str, ensayo: str, tipo_kit: str, caducidad: str, detalle: str = "") -> None:
-    hist = cargar_historial()
     ahora = datetime.now()
     fila = {
         "Fecha": ahora.strftime("%d/%m/%Y"),
@@ -327,6 +590,11 @@ def registrar_movimiento(accion: str, codigo: str, ensayo: str, tipo_kit: str, c
         "Caducidad": caducidad,
         "Detalle": detalle,
     }
+
+    if _usar_postgres() and _insertar_fila_postgres(ARCHIVO_HISTORIAL, fila):
+        return
+
+    hist = cargar_historial()
     hist = pd.concat([hist, pd.DataFrame([fila])], ignore_index=True)
     guardar_historial(hist)
 
