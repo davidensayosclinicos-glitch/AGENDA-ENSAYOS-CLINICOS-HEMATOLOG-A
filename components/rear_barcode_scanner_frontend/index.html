@@ -106,8 +106,45 @@
     </div>
   </div>
 
-  <script src="https://unpkg.com/streamlit-component-lib@1.4.0/dist/index.js"></script>
   <script>
+    const Streamlit = {
+      API_VERSION: 1,
+      RENDER_EVENT: "streamlit:render",
+      events: new EventTarget(),
+      _registered: false,
+      _send(type, data) {
+        window.parent.postMessage(
+          {
+            isStreamlitMessage: true,
+            type,
+            ...data,
+          },
+          "*"
+        );
+      },
+      _onMessage(event) {
+        const data = event && event.data ? event.data : {};
+        if (!data || !data.type) return;
+        if (data.type === Streamlit.RENDER_EVENT) {
+          const evt = new CustomEvent(Streamlit.RENDER_EVENT, { detail: data });
+          Streamlit.events.dispatchEvent(evt);
+        }
+      },
+      setComponentReady() {
+        if (!Streamlit._registered) {
+          window.addEventListener("message", Streamlit._onMessage);
+          Streamlit._registered = true;
+        }
+        Streamlit._send("streamlit:componentReady", { apiVersion: Streamlit.API_VERSION });
+      },
+      setFrameHeight(height) {
+        Streamlit._send("streamlit:setFrameHeight", { height: Math.ceil(height || 0) });
+      },
+      setComponentValue(value) {
+        Streamlit._send("streamlit:setComponentValue", { value });
+      },
+    };
+
     const video = document.getElementById("video");
     const startBtn = document.getElementById("start");
     const stopBtn = document.getElementById("stop");

@@ -941,11 +941,15 @@ for i, ensayo_tab in enumerate(lista_ensayos):
         with cam_col_alta:
             st.caption("Alta")
             if rear_barcode_scanner is not None:
-                codigo_alta_cam = rear_barcode_scanner(
-                    label="Escanear alta (camara trasera)",
-                    key=f"rear_scan_alta_{i}",
-                    height=430,
-                )
+                try:
+                    codigo_alta_cam = rear_barcode_scanner(
+                        label="Escanear alta (camara trasera)",
+                        key=f"rear_scan_alta_{i}",
+                        height=430,
+                    )
+                except Exception:
+                    codigo_alta_cam = ""
+                    st.warning("Escaner avanzado no disponible en este entorno. Usa entrada manual.")
                 if codigo_alta_cam:
                     codigo_norm = normalizar_codigo(codigo_alta_cam)
                     if st.session_state.get(f"rear_scan_last_alta_{i}") != codigo_norm:
@@ -958,11 +962,15 @@ for i, ensayo_tab in enumerate(lista_ensayos):
         with cam_col_salida:
             st.caption("Salida")
             if rear_barcode_scanner is not None:
-                codigo_salida_cam = rear_barcode_scanner(
-                    label="Escanear salida (camara trasera)",
-                    key=f"rear_scan_salida_{i}",
-                    height=430,
-                )
+                try:
+                    codigo_salida_cam = rear_barcode_scanner(
+                        label="Escanear salida (camara trasera)",
+                        key=f"rear_scan_salida_{i}",
+                        height=430,
+                    )
+                except Exception:
+                    codigo_salida_cam = ""
+                    st.warning("Escaner avanzado no disponible en este entorno. Usa entrada manual.")
                 if codigo_salida_cam:
                     codigo_norm = normalizar_codigo(codigo_salida_cam)
                     if st.session_state.get(f"rear_scan_last_salida_{i}") != codigo_norm:
