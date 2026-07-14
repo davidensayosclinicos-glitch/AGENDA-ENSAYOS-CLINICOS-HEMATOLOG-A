@@ -90,6 +90,8 @@ SECRETS_CANDIDATES = [
     BASE_DIR / "agenda-streamlit" / ".streamlit" / "secrets.toml",
 ]
 
+_RESOLUCION_TABLA_CACHE: dict[str, tuple[str, list[str]]] = {}
+
 
 def _leer_toml(path: Path) -> dict:
     if tomllib is None or not path.exists():
@@ -248,6 +250,11 @@ def _resolver_tabla_preferida(cur, tabla_objetivo: str) -> str | None:
 
 
 def _resolver_mapeo_columnas(cur, config: dict) -> tuple[str | None, list[str] | None]:
+    cache_key = str(config.get("tabla", ""))
+    if cache_key in _RESOLUCION_TABLA_CACHE:
+        tabla_cache, cols_cache = _RESOLUCION_TABLA_CACHE[cache_key]
+        return tabla_cache, list(cols_cache)
+
     tabla_real = _resolver_tabla_preferida(cur, config["tabla"])
     if not tabla_real:
         return None, None
@@ -289,7 +296,64 @@ def _resolver_mapeo_columnas(cur, config: dict) -> tuple[str | None, list[str] |
             return None, None
         columnas_resueltas.append(encontrado)
 
+    _RESOLUCION_TABLA_CACHE[cache_key] = (tabla_real, list(columnas_resueltas))
     return tabla_real, columnas_resueltas
+
+
+def _upsert_kit_postgres(codigo: str, ensayo: str, tipo_kit: str, caducidad: str) -> bool:
+    config = DB_TABLAS.get(ARCHIVO_INVENTARIO)
+    if not config or not _usar_postgres():
+        return False
+
+    try:
+        with _conexion_postgres() as conn:
+            with conn.cursor() as cur:
+                tabla_real, columnas_reales = _resolver_mapeo_columnas(cur, config)
+                if not tabla_real or not columnas_reales:
+                    return False
+
+                columnas_sql = ", ".join(_qident(col) for col in columnas_reales)
+                marcadores = ", ".join(["%s"] * len(columnas_reales))
+                col_codigo = _qident(columnas_reales[0])
+                col_ensayo = _qident(columnas_reales[1])
+                col_tipo = _qident(columnas_reales[2])
+                col_cad = _qident(columnas_reales[3])
+
+                cur.execute(
+                    f"""
+                    INSERT INTO {_qident(tabla_real)} ({columnas_sql})
+                    VALUES ({marcadores})
+                    ON CONFLICT ({col_codigo}) DO UPDATE SET
+                        {col_ensayo} = EXCLUDED.{col_ensayo},
+                        {col_tipo} = EXCLUDED.{col_tipo},
+                        {col_cad} = EXCLUDED.{col_cad}
+                    """,
+                    [codigo, ensayo, tipo_kit, caducidad],
+                )
+        return True
+    except Exception:
+        return False
+
+
+def _eliminar_kit_postgres(codigo: str) -> bool:
+    config = DB_TABLAS.get(ARCHIVO_INVENTARIO)
+    if not config or not _usar_postgres():
+        return False
+
+    try:
+        with _conexion_postgres() as conn:
+            with conn.cursor() as cur:
+                tabla_real, columnas_reales = _resolver_mapeo_columnas(cur, config)
+                if not tabla_real or not columnas_reales:
+                    return False
+                col_codigo = _qident(columnas_reales[0])
+                cur.execute(
+                    f"DELETE FROM {_qident(tabla_real)} WHERE {col_codigo} = %s",
+                    [codigo],
+                )
+        return True
+    except Exception:
+        return False
 
 
 def _leer_tabla_postgres(path: str, columnas_ui: list[str]) -> pd.DataFrame:
@@ -548,8 +612,22 @@ def obtener_tipos_por_ensayo(ensayo: str) -> list[str]:
 
 
 def sincronizar_catalogo_desde_inventario(df_inventario: pd.DataFrame) -> None:
-    base = cargar_catalogo_tipos()
+    if df_inventario.empty:
+        return
+
     desde_inv = df_inventario[["Ensayo", "Tipo de kit"]].copy()
+    if _usar_postgres():
+        desde_inv["Ensayo"] = desde_inv["Ensayo"].fillna("").astype(str).str.strip()
+        desde_inv["Tipo de kit"] = desde_inv["Tipo de kit"].fillna("").astype(str).str.strip()
+        desde_inv = desde_inv[(desde_inv["Ensayo"] != "") & (desde_inv["Tipo de kit"] != "")].drop_duplicates()
+        for _, fila in desde_inv.iterrows():
+            _insertar_fila_postgres(
+                ARCHIVO_CATALOGO_TIPOS,
+                {"Ensayo": str(fila["Ensayo"]), "Tipo de kit": str(fila["Tipo de kit"])},
+            )
+        return
+
+    base = cargar_catalogo_tipos()
     guardar_catalogo_tipos(pd.concat([base, desde_inv], ignore_index=True))
 
 
@@ -815,6 +893,14 @@ with st.form("form_nuevo_ensayo", clear_on_submit=True):
 lista_ensayos = ensayos_disponibles(inventario)
 tabs = st.tabs(lista_ensayos)
 historial_global = cargar_historial()
+catalogo_global = cargar_catalogo_tipos()
+tipos_por_ensayo_map: dict[str, list[str]] = {}
+if not catalogo_global.empty:
+    for ensayo_valor, grupo in catalogo_global.groupby("Ensayo"):
+        tipos_por_ensayo_map[str(ensayo_valor).strip()] = sorted(
+            set(grupo["Tipo de kit"].astype(str).str.strip().replace("", pd.NA).dropna().tolist()),
+            key=str.lower,
+        )
 
 for i, ensayo_tab in enumerate(lista_ensayos):
     with tabs[i]:
@@ -831,7 +917,7 @@ for i, ensayo_tab in enumerate(lista_ensayos):
                     key=f"codigo_alta_{i}",
                 )
             with col2:
-                tipos = obtener_tipos_por_ensayo(ensayo_tab)
+                tipos = tipos_por_ensayo_map.get(str(ensayo_tab).strip(), [])
                 opciones_tipos = ["+ Nuevo tipo de kit"] + tipos
                 tipo_sel = st.selectbox("Tipo de kit", opciones_tipos, key=f"tipo_sel_{i}")
                 tipo_manual = ""
@@ -855,20 +941,29 @@ for i, ensayo_tab in enumerate(lista_ensayos):
                 elif codigo in inventario["Codigo de barras"].astype(str).str.strip().str.upper().tolist():
                     st.error("Ese codigo ya existe en inventario activo.")
                 else:
-                    nueva = pd.DataFrame([
-                        {
-                            "Codigo de barras": codigo,
-                            "Ensayo": ensayo_tab,
-                            "Tipo de kit": tipo_kit,
-                            "Caducidad": cad_str,
-                        }
-                    ])
-                    inventario = pd.concat([inventario, nueva], ignore_index=True)
-                    guardar_inventario(inventario)
-                    registrar_tipo_ensayo(ensayo_tab, tipo_kit)
-                    registrar_movimiento("ENTRADA", codigo, ensayo_tab, tipo_kit, cad_str, "Alta por escaneo")
-                    st.success(f"Caja guardada en {ensayo_tab}: {codigo}")
-                    st.rerun()
+                    try:
+                        if _usar_postgres():
+                            if not _upsert_kit_postgres(codigo, ensayo_tab, tipo_kit, cad_str):
+                                raise RuntimeError("No se pudo guardar el kit en PostgreSQL")
+                        else:
+                            nueva = pd.DataFrame([
+                                {
+                                    "Codigo de barras": codigo,
+                                    "Ensayo": ensayo_tab,
+                                    "Tipo de kit": tipo_kit,
+                                    "Caducidad": cad_str,
+                                }
+                            ])
+                            inventario = pd.concat([inventario, nueva], ignore_index=True)
+                            guardar_inventario(inventario)
+
+                        registrar_tipo_ensayo(ensayo_tab, tipo_kit)
+                        registrar_movimiento("ENTRADA", codigo, ensayo_tab, tipo_kit, cad_str, "Alta por escaneo")
+                    except Exception as exc:
+                        st.error(f"No se pudo guardar la caja: {exc}")
+                    else:
+                        st.success(f"Caja guardada en {ensayo_tab}: {codigo}")
+                        st.rerun()
 
         st.markdown("**Salida por escaneo**")
         with st.form(f"form_salida_{i}", clear_on_submit=True):
@@ -896,9 +991,14 @@ for i, ensayo_tab in enumerate(lista_ensayos):
                         tipo_kit = str(row["Tipo de kit"])
                         cad = str(row["Caducidad"])
 
-                        inventario = inventario.drop(index=idx[0]).reset_index(drop=True)
                         try:
-                            guardar_inventario(inventario)
+                            if _usar_postgres():
+                                if not _eliminar_kit_postgres(codigo_salida):
+                                    raise RuntimeError("No se pudo eliminar el kit en PostgreSQL")
+                            else:
+                                inventario = inventario.drop(index=idx[0]).reset_index(drop=True)
+                                guardar_inventario(inventario)
+
                             registrar_movimiento("SALIDA", codigo_salida, ensayo_tab, tipo_kit, cad, "Retiro por escaneo")
                         except Exception as exc:
                             st.error(f"No se pudo retirar la caja en base de datos: {exc}")
@@ -992,12 +1092,25 @@ for i, ensayo_tab in enumerate(lista_ensayos):
                         
                         if guardar_edit:
                             nueva_cad_str = formatear_fecha(nueva_cad) if nueva_cad else ""
-                            inventario.loc[inventario["Codigo de barras"].astype(str).str.strip().str.upper() == str(row['Codigo de barras']).upper(), "Tipo de kit"] = nuevo_tipo
-                            inventario.loc[inventario["Codigo de barras"].astype(str).str.strip().str.upper() == str(row['Codigo de barras']).upper(), "Caducidad"] = nueva_cad_str
-                            guardar_inventario(inventario)
-                            st.success("Kit actualizado.")
-                            st.session_state[f"edit_mode_{ensayo_tab}_{idx_row}"] = False
-                            st.rerun()
+                            try:
+                                if _usar_postgres():
+                                    if not _upsert_kit_postgres(
+                                        str(row["Codigo de barras"]).strip(),
+                                        str(row["Ensayo"]).strip(),
+                                        str(nuevo_tipo).strip(),
+                                        nueva_cad_str,
+                                    ):
+                                        raise RuntimeError("No se pudo actualizar el kit en PostgreSQL")
+                                else:
+                                    inventario.loc[inventario["Codigo de barras"].astype(str).str.strip().str.upper() == str(row['Codigo de barras']).upper(), "Tipo de kit"] = nuevo_tipo
+                                    inventario.loc[inventario["Codigo de barras"].astype(str).str.strip().str.upper() == str(row['Codigo de barras']).upper(), "Caducidad"] = nueva_cad_str
+                                    guardar_inventario(inventario)
+                            except Exception as exc:
+                                st.error(f"No se pudo actualizar el kit: {exc}")
+                            else:
+                                st.success("Kit actualizado.")
+                                st.session_state[f"edit_mode_{ensayo_tab}_{idx_row}"] = False
+                                st.rerun()
                         
                         if cancelar_edit:
                             st.session_state[f"edit_mode_{ensayo_tab}_{idx_row}"] = False
@@ -1009,11 +1122,19 @@ for i, ensayo_tab in enumerate(lista_ensayos):
                     col_si, col_no = st.columns(2)
                     with col_si:
                         if st.button("Sí, eliminar", key=f"confirm_del_si_{ensayo_tab}_{idx_row}"):
-                            inventario = inventario[inventario["Codigo de barras"].astype(str).str.strip().str.upper() != str(row['Codigo de barras']).upper()].reset_index(drop=True)
-                            guardar_inventario(inventario)
-                            st.success("Kit eliminado.")
-                            st.session_state[f"confirm_del_{ensayo_tab}_{idx_row}"] = False
-                            st.rerun()
+                            try:
+                                if _usar_postgres():
+                                    if not _eliminar_kit_postgres(str(row["Codigo de barras"]).strip().upper()):
+                                        raise RuntimeError("No se pudo eliminar el kit en PostgreSQL")
+                                else:
+                                    inventario = inventario[inventario["Codigo de barras"].astype(str).str.strip().str.upper() != str(row['Codigo de barras']).upper()].reset_index(drop=True)
+                                    guardar_inventario(inventario)
+                            except Exception as exc:
+                                st.error(f"No se pudo eliminar el kit: {exc}")
+                            else:
+                                st.success("Kit eliminado.")
+                                st.session_state[f"confirm_del_{ensayo_tab}_{idx_row}"] = False
+                                st.rerun()
                     with col_no:
                         if st.button("Cancelar", key=f"confirm_del_no_{ensayo_tab}_{idx_row}"):
                             st.session_state[f"confirm_del_{ensayo_tab}_{idx_row}"] = False
