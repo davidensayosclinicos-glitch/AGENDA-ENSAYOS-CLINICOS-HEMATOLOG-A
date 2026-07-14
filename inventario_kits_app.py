@@ -821,6 +821,92 @@ def registrar_movimiento(accion: str, codigo: str, ensayo: str, tipo_kit: str, c
     guardar_historial(hist)
 
 
+def ejecutar_alta_kit(
+    inventario_df: pd.DataFrame,
+    ensayo: str,
+    codigo_raw: str,
+    tipo_kit_raw: str,
+    caducidad_str: str,
+    detalle: str = "Alta por escaneo",
+) -> tuple[pd.DataFrame, bool, str]:
+    codigo = normalizar_codigo(codigo_raw)
+    tipo_kit = str(tipo_kit_raw).strip()
+    cad_str = str(caducidad_str or "").strip()
+
+    codigos_existentes = set(
+        inventario_df["Codigo de barras"].astype(str).str.strip().str.upper().tolist()
+    )
+
+    if not codigo:
+        return inventario_df, False, "Escanea un codigo valido."
+    if not tipo_kit:
+        return inventario_df, False, "Tipo de kit es obligatorio."
+    if codigo in codigos_existentes:
+        return inventario_df, False, "Ese codigo ya existe en inventario activo."
+
+    try:
+        if _usar_postgres():
+            if not _upsert_kit_postgres(codigo, ensayo, tipo_kit, cad_str):
+                raise RuntimeError("No se pudo guardar el kit en PostgreSQL")
+            nuevo_df = inventario_df
+        else:
+            nueva = pd.DataFrame([
+                {
+                    "Codigo de barras": codigo,
+                    "Ensayo": ensayo,
+                    "Tipo de kit": tipo_kit,
+                    "Caducidad": cad_str,
+                }
+            ])
+            nuevo_df = pd.concat([inventario_df, nueva], ignore_index=True)
+            guardar_inventario(nuevo_df)
+
+        registrar_tipo_ensayo(ensayo, tipo_kit)
+        registrar_movimiento("ENTRADA", codigo, ensayo, tipo_kit, cad_str, detalle)
+    except Exception as exc:
+        return inventario_df, False, f"No se pudo guardar la caja: {exc}"
+
+    return nuevo_df, True, f"Caja guardada en {ensayo}: {codigo}"
+
+
+def ejecutar_salida_kit(
+    inventario_df: pd.DataFrame,
+    ensayo: str,
+    codigo_raw: str,
+    detalle: str = "Retiro por escaneo",
+) -> tuple[pd.DataFrame, bool, str]:
+    codigo_salida = normalizar_codigo(codigo_raw)
+    if not codigo_salida:
+        return inventario_df, False, "Escanea un codigo valido."
+
+    idx = inventario_df.index[
+        (inventario_df["Codigo de barras"].astype(str).str.strip().str.upper() == codigo_salida)
+        & (inventario_df["Ensayo"].astype(str).str.strip() == ensayo)
+    ]
+
+    if len(idx) == 0:
+        return inventario_df, False, f"Codigo no encontrado en inventario activo del ensayo {ensayo}: {codigo_salida}"
+
+    row = inventario_df.loc[idx[0]]
+    tipo_kit = str(row["Tipo de kit"])
+    cad = str(row["Caducidad"])
+
+    try:
+        if _usar_postgres():
+            if not _eliminar_kit_postgres(codigo_salida):
+                raise RuntimeError("No se pudo eliminar el kit en PostgreSQL")
+            nuevo_df = inventario_df
+        else:
+            nuevo_df = inventario_df.drop(index=idx[0]).reset_index(drop=True)
+            guardar_inventario(nuevo_df)
+
+        registrar_movimiento("SALIDA", codigo_salida, ensayo, tipo_kit, cad, detalle)
+    except Exception as exc:
+        return inventario_df, False, f"No se pudo retirar la caja en base de datos: {exc}"
+
+    return nuevo_df, True, f"Caja retirada de {ensayo}: {codigo_salida} | Tipo: {tipo_kit}"
+
+
 def calcular_alertas(df: pd.DataFrame):
     hoy = date.today()
     caducados = []
@@ -940,6 +1026,19 @@ for i, ensayo_tab in enumerate(lista_ensayos):
         cam_col_alta, cam_col_salida = st.columns(2)
         with cam_col_alta:
             st.caption("Alta")
+            tipos_auto = tipos_por_ensayo_map.get(str(ensayo_tab).strip(), [])
+            auto_alta = st.checkbox("Alta automatica al detectar", value=True, key=f"auto_alta_enabled_{i}")
+            opciones_auto_tipos = ["Selecciona tipo"] + tipos_auto + ["+ Nuevo tipo de kit"]
+            tipo_auto_sel = st.selectbox("Tipo auto", opciones_auto_tipos, key=f"auto_tipo_sel_{i}")
+            tipo_auto_manual = ""
+            if tipo_auto_sel == "+ Nuevo tipo de kit":
+                tipo_auto_manual = st.text_input("Nuevo tipo (auto)", key=f"auto_tipo_manual_{i}")
+            cad_auto_fecha = st.date_input(
+                "Caducidad auto",
+                value=None,
+                format="DD/MM/YYYY",
+                key=f"auto_cad_{i}",
+            )
             if rear_barcode_scanner is not None:
                 try:
                     codigo_alta_cam = rear_barcode_scanner(
@@ -956,11 +1055,33 @@ for i, ensayo_tab in enumerate(lista_ensayos):
                         st.session_state[f"rear_scan_last_alta_{i}"] = codigo_norm
                         st.session_state[f"codigo_alta_{i}"] = codigo_norm
                         st.success(f"Codigo detectado: {codigo_norm}")
+
+                        if auto_alta:
+                            tipo_auto = (
+                                tipo_auto_manual.strip()
+                                if tipo_auto_sel == "+ Nuevo tipo de kit"
+                                else ("" if tipo_auto_sel == "Selecciona tipo" else str(tipo_auto_sel).strip())
+                            )
+                            cad_auto_str = formatear_fecha(cad_auto_fecha) if cad_auto_fecha else ""
+                            inventario, ok_auto, msg_auto = ejecutar_alta_kit(
+                                inventario,
+                                ensayo_tab,
+                                codigo_norm,
+                                tipo_auto,
+                                cad_auto_str,
+                                detalle="Alta automatica por camara",
+                            )
+                            if ok_auto:
+                                st.success(msg_auto)
+                                st.rerun()
+                            else:
+                                st.error(msg_auto)
             else:
                 st.info("Escaner avanzado no disponible. Usa entrada manual.")
 
         with cam_col_salida:
             st.caption("Salida")
+            auto_salida = st.checkbox("Salida automatica al detectar", value=True, key=f"auto_salida_enabled_{i}")
             if rear_barcode_scanner is not None:
                 try:
                     codigo_salida_cam = rear_barcode_scanner(
@@ -977,6 +1098,19 @@ for i, ensayo_tab in enumerate(lista_ensayos):
                         st.session_state[f"rear_scan_last_salida_{i}"] = codigo_norm
                         st.session_state[f"codigo_salida_{i}"] = codigo_norm
                         st.success(f"Codigo detectado: {codigo_norm}")
+
+                        if auto_salida:
+                            inventario, ok_auto_s, msg_auto_s = ejecutar_salida_kit(
+                                inventario,
+                                ensayo_tab,
+                                codigo_norm,
+                                detalle="Retiro automatico por camara",
+                            )
+                            if ok_auto_s:
+                                st.success(msg_auto_s)
+                                st.rerun()
+                            else:
+                                st.error(msg_auto_s)
             else:
                 st.info("Escaner avanzado no disponible. Usa entrada manual.")
 
@@ -1011,34 +1145,19 @@ for i, ensayo_tab in enumerate(lista_ensayos):
                 if not codigo:
                     codigo = generar_codigo_automatico_unico(ensayo_tab, tipo_kit, cad_str, codigos_existentes)
 
-                if not tipo_kit:
-                    st.error("Tipo de kit es obligatorio.")
-                elif codigo in inventario["Codigo de barras"].astype(str).str.strip().str.upper().tolist():
-                    st.error("Ese codigo ya existe en inventario activo.")
+                inventario, ok_alta, msg_alta = ejecutar_alta_kit(
+                    inventario,
+                    ensayo_tab,
+                    codigo,
+                    tipo_kit,
+                    cad_str,
+                    detalle="Alta por escaneo",
+                )
+                if ok_alta:
+                    st.success(msg_alta)
+                    st.rerun()
                 else:
-                    try:
-                        if _usar_postgres():
-                            if not _upsert_kit_postgres(codigo, ensayo_tab, tipo_kit, cad_str):
-                                raise RuntimeError("No se pudo guardar el kit en PostgreSQL")
-                        else:
-                            nueva = pd.DataFrame([
-                                {
-                                    "Codigo de barras": codigo,
-                                    "Ensayo": ensayo_tab,
-                                    "Tipo de kit": tipo_kit,
-                                    "Caducidad": cad_str,
-                                }
-                            ])
-                            inventario = pd.concat([inventario, nueva], ignore_index=True)
-                            guardar_inventario(inventario)
-
-                        registrar_tipo_ensayo(ensayo_tab, tipo_kit)
-                        registrar_movimiento("ENTRADA", codigo, ensayo_tab, tipo_kit, cad_str, "Alta por escaneo")
-                    except Exception as exc:
-                        st.error(f"No se pudo guardar la caja: {exc}")
-                    else:
-                        st.success(f"Caja guardada en {ensayo_tab}: {codigo}")
-                        st.rerun()
+                    st.error(msg_alta)
 
         st.markdown("**Salida por escaneo**")
         with st.form(f"form_salida_{i}", clear_on_submit=True):
@@ -1051,35 +1170,17 @@ for i, ensayo_tab in enumerate(lista_ensayos):
 
             if enviar_salida:
                 codigo_salida = normalizar_codigo(codigo_salida_raw)
-                if not codigo_salida:
-                    st.error("Escanea un codigo valido.")
+                inventario, ok_salida, msg_salida = ejecutar_salida_kit(
+                    inventario,
+                    ensayo_tab,
+                    codigo_salida,
+                    detalle="Retiro por escaneo",
+                )
+                if ok_salida:
+                    st.success(msg_salida)
+                    st.rerun()
                 else:
-                    idx = inventario.index[
-                        (inventario["Codigo de barras"].astype(str).str.strip().str.upper() == codigo_salida)
-                        & (inventario["Ensayo"].astype(str).str.strip() == ensayo_tab)
-                    ]
-
-                    if len(idx) == 0:
-                        st.error(f"Codigo no encontrado en inventario activo del ensayo {ensayo_tab}: {codigo_salida}")
-                    else:
-                        row = inventario.loc[idx[0]]
-                        tipo_kit = str(row["Tipo de kit"])
-                        cad = str(row["Caducidad"])
-
-                        try:
-                            if _usar_postgres():
-                                if not _eliminar_kit_postgres(codigo_salida):
-                                    raise RuntimeError("No se pudo eliminar el kit en PostgreSQL")
-                            else:
-                                inventario = inventario.drop(index=idx[0]).reset_index(drop=True)
-                                guardar_inventario(inventario)
-
-                            registrar_movimiento("SALIDA", codigo_salida, ensayo_tab, tipo_kit, cad, "Retiro por escaneo")
-                        except Exception as exc:
-                            st.error(f"No se pudo retirar la caja en base de datos: {exc}")
-                        else:
-                            st.success(f"Caja retirada de {ensayo_tab}: {codigo_salida} | Tipo: {tipo_kit}")
-                            st.rerun()
+                    st.error(msg_salida)
 
         st.markdown("**Resumen de contabilidad del inventario activo**")
         total_activos = len(data_ensayo)
