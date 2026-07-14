@@ -750,6 +750,18 @@ def ensayos_disponibles(df: pd.DataFrame) -> list[str]:
 
 
 st.set_page_config(page_title="Inventario de Kits", page_icon="🧪", layout="wide")
+st.markdown(
+    """
+    <style>
+    [data-testid="stAppViewContainer"] > .main .block-container {
+        max-width: 100% !important;
+        padding-left: 1rem !important;
+        padding-right: 1rem !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 st.title("🧪 Inventario de Cajas de Kits")
 st.write(
     "Escaneas una caja para darla de alta con su ensayo, tipo y caducidad. "
