@@ -3,6 +3,7 @@ import io
 import base64
 import html
 import random
+import re
 from datetime import date, datetime
 from pathlib import Path
 
@@ -193,6 +194,104 @@ def _normalizar_para_sql(valor) -> str:
     return str(valor)
 
 
+def _normalizar_identificador(texto: str) -> str:
+    base = str(texto or "").strip().lower()
+    base = re.sub(r"[^a-z0-9]+", "_", base)
+    return base.strip("_")
+
+
+def _qident(nombre: str) -> str:
+    return '"' + str(nombre).replace('"', '""') + '"'
+
+
+def _buscar_tablas_compatibles(cur, tabla_objetivo: str) -> list[str]:
+    cur.execute(
+        """
+        SELECT table_name
+        FROM information_schema.tables
+        WHERE table_schema = 'public'
+          AND lower(table_name) = lower(%s)
+        ORDER BY table_name
+        """,
+        (tabla_objetivo,),
+    )
+    return [str(fila[0]) for fila in cur.fetchall()]
+
+
+def _contar_filas_tabla(cur, nombre_tabla: str) -> int:
+    try:
+        cur.execute(f"SELECT COUNT(*) FROM {_qident(nombre_tabla)}")
+        fila = cur.fetchone()
+        return int(fila[0] if fila else 0)
+    except Exception:
+        return 0
+
+
+def _resolver_tabla_preferida(cur, tabla_objetivo: str) -> str | None:
+    candidatas = _buscar_tablas_compatibles(cur, tabla_objetivo)
+    if not candidatas:
+        return None
+
+    if len(candidatas) == 1:
+        return candidatas[0]
+
+    # Si existen varias por diferencias de mayusculas/comillas,
+    # priorizamos la que tenga datos.
+    mejor = candidatas[0]
+    mejor_total = -1
+    for nombre in candidatas:
+        total = _contar_filas_tabla(cur, nombre)
+        if total > mejor_total:
+            mejor_total = total
+            mejor = nombre
+    return mejor
+
+
+def _resolver_mapeo_columnas(cur, config: dict) -> tuple[str | None, list[str] | None]:
+    tabla_real = _resolver_tabla_preferida(cur, config["tabla"])
+    if not tabla_real:
+        return None, None
+
+    cur.execute(
+        """
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = %s
+        ORDER BY ordinal_position
+        """,
+        (tabla_real,),
+    )
+    columnas_existentes = [str(fila[0]) for fila in cur.fetchall()]
+    if not columnas_existentes:
+        return None, None
+
+    norm_to_real: dict[str, str] = {}
+    for col in columnas_existentes:
+        norm_to_real[_normalizar_identificador(col)] = col
+
+    columnas_resueltas: list[str] = []
+    for idx, db_col in enumerate(config["columnas_db"]):
+        ui_col = config["columnas_ui"][idx]
+        candidatos = [
+            db_col,
+            db_col.replace("_", " "),
+            ui_col,
+            ui_col.replace("_", " "),
+        ]
+        encontrado = ""
+        for cand in candidatos:
+            norm = _normalizar_identificador(cand)
+            if norm in norm_to_real:
+                encontrado = norm_to_real[norm]
+                break
+        if not encontrado:
+            return None, None
+        columnas_resueltas.append(encontrado)
+
+    return tabla_real, columnas_resueltas
+
+
 def _leer_tabla_postgres(path: str, columnas_ui: list[str]) -> pd.DataFrame:
     config = DB_TABLAS.get(path)
     if not config or not _usar_postgres():
@@ -200,15 +299,21 @@ def _leer_tabla_postgres(path: str, columnas_ui: list[str]) -> pd.DataFrame:
 
     try:
         with _conexion_postgres() as conn:
-            consulta = f"SELECT {', '.join(config['columnas_db'])} FROM {config['tabla']} ORDER BY id"
-            df = pd.read_sql_query(consulta, conn)
+            with conn.cursor() as cur:
+                tabla_real, columnas_reales = _resolver_mapeo_columnas(cur, config)
+                if not tabla_real or not columnas_reales:
+                    return pd.DataFrame(columns=columnas_ui)
+
+                columnas_sql = ", ".join(_qident(col) for col in columnas_reales)
+                cur.execute(f"SELECT {columnas_sql} FROM {_qident(tabla_real)}")
+                filas = cur.fetchall()
     except Exception:
         return pd.DataFrame(columns=columnas_ui)
 
-    if df.empty:
+    if not filas:
         return pd.DataFrame(columns=columnas_ui)
 
-    df = df.rename(columns=dict(zip(config["columnas_db"], config["columnas_ui"])))
+    df = pd.DataFrame(filas, columns=columnas_ui)
     for col in columnas_ui:
         if col not in df.columns:
             df[col] = ""
@@ -224,7 +329,11 @@ def _reemplazar_tabla_postgres(path: str, df: pd.DataFrame, columnas_ui: list[st
     try:
         with _conexion_postgres() as conn:
             with conn.cursor() as cur:
-                cur.execute(f"TRUNCATE TABLE {config['tabla']}")
+                tabla_real, columnas_reales = _resolver_mapeo_columnas(cur, config)
+                if not tabla_real or not columnas_reales:
+                    return False
+
+                cur.execute(f"TRUNCATE TABLE {_qident(tabla_real)}")
                 if df.empty:
                     return True
 
@@ -232,10 +341,10 @@ def _reemplazar_tabla_postgres(path: str, df: pd.DataFrame, columnas_ui: list[st
                 for _, fila in df[columnas_ui].iterrows():
                     filas.append(tuple(_normalizar_para_sql(fila[col]).strip() for col in columnas_ui))
 
-                marcadores = ", ".join(["%s"] * len(config["columnas_db"]))
-                columnas_sql = ", ".join(config["columnas_db"])
+                marcadores = ", ".join(["%s"] * len(columnas_reales))
+                columnas_sql = ", ".join(_qident(col) for col in columnas_reales)
                 cur.executemany(
-                    f"INSERT INTO {config['tabla']} ({columnas_sql}) VALUES ({marcadores})",
+                    f"INSERT INTO {_qident(tabla_real)} ({columnas_sql}) VALUES ({marcadores})",
                     filas,
                 )
         return True
@@ -251,11 +360,15 @@ def _insertar_fila_postgres(path: str, datos: dict) -> bool:
     try:
         with _conexion_postgres() as conn:
             with conn.cursor() as cur:
-                columnas_sql = ", ".join(config["columnas_db"])
-                marcadores = ", ".join(["%s"] * len(config["columnas_db"]))
+                tabla_real, columnas_reales = _resolver_mapeo_columnas(cur, config)
+                if not tabla_real or not columnas_reales:
+                    return False
+
+                columnas_sql = ", ".join(_qident(col) for col in columnas_reales)
+                marcadores = ", ".join(["%s"] * len(columnas_reales))
                 valores = [datos.get(col, "") for col in config["columnas_ui"]]
                 cur.execute(
-                    f"INSERT INTO {config['tabla']} ({columnas_sql}) VALUES ({marcadores}) ON CONFLICT DO NOTHING",
+                    f"INSERT INTO {_qident(tabla_real)} ({columnas_sql}) VALUES ({marcadores}) ON CONFLICT DO NOTHING",
                     valores,
                 )
         return True
