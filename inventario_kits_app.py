@@ -4,12 +4,16 @@ import base64
 import html
 import random
 import re
-import hashlib
 from datetime import date, datetime
 from pathlib import Path
 
 import pandas as pd
 import streamlit as st
+
+try:
+    from components.rear_barcode_scanner import rear_barcode_scanner
+except Exception:
+    rear_barcode_scanner = None
 
 try:
     import tomllib
@@ -662,57 +666,6 @@ def normalizar_codigo(codigo: str) -> str:
     return codigo.strip().upper()
 
 
-def _decodificar_codigo_desde_imagen(image_bytes: bytes) -> str:
-    """Intenta decodificar codigo de barras/QR desde una foto capturada."""
-    try:
-        from PIL import Image
-    except Exception:
-        return ""
-
-    try:
-        from pyzbar.pyzbar import decode as zbar_decode
-    except Exception:
-        return ""
-
-    try:
-        imagen = Image.open(io.BytesIO(image_bytes)).convert("RGB")
-        resultados = zbar_decode(imagen)
-    except Exception:
-        return ""
-
-    for res in resultados:
-        try:
-            valor = res.data.decode("utf-8", errors="ignore").strip()
-        except Exception:
-            valor = ""
-        if valor:
-            return normalizar_codigo(valor)
-    return ""
-
-
-def _procesar_captura_camara(uploaded_file, key_codigo: str, key_hash: str) -> tuple[bool, str]:
-    """
-    Procesa una captura de camara una sola vez por imagen.
-    Devuelve (ok, mensaje).
-    """
-    if uploaded_file is None:
-        return False, ""
-
-    contenido = uploaded_file.getvalue()
-    digest = hashlib.sha1(contenido).hexdigest()
-    previo = str(st.session_state.get(key_hash, ""))
-    if digest == previo:
-        return False, ""
-
-    st.session_state[key_hash] = digest
-    codigo = _decodificar_codigo_desde_imagen(contenido)
-    if codigo:
-        st.session_state[key_codigo] = codigo
-        return True, f"Codigo detectado: {codigo}"
-
-    return False, "No se pudo leer el codigo en la foto. Prueba con mas luz o acercando la camara."
-
-
 def generar_codigo_automatico(ensayo: str, tipo_kit: str, caducidad: str) -> str:
     """Genera un numero aleatorio unico de 10 digitos."""
     return str(random.randint(1000000000, 9999999999))
@@ -987,35 +940,37 @@ for i, ensayo_tab in enumerate(lista_ensayos):
         cam_col_alta, cam_col_salida = st.columns(2)
         with cam_col_alta:
             st.caption("Alta")
-            foto_alta = st.camera_input(
-                "Captura el codigo para alta",
-                key=f"cam_alta_{i}",
-            )
-            ok_alta, msg_alta = _procesar_captura_camara(
-                foto_alta,
-                key_codigo=f"codigo_alta_{i}",
-                key_hash=f"cam_alta_hash_{i}",
-            )
-            if ok_alta:
-                st.success(msg_alta)
-            elif foto_alta is not None and msg_alta:
-                st.warning(msg_alta)
+            if rear_barcode_scanner is not None:
+                codigo_alta_cam = rear_barcode_scanner(
+                    label="Escanear alta (camara trasera)",
+                    key=f"rear_scan_alta_{i}",
+                    height=430,
+                )
+                if codigo_alta_cam:
+                    codigo_norm = normalizar_codigo(codigo_alta_cam)
+                    if st.session_state.get(f"rear_scan_last_alta_{i}") != codigo_norm:
+                        st.session_state[f"rear_scan_last_alta_{i}"] = codigo_norm
+                        st.session_state[f"codigo_alta_{i}"] = codigo_norm
+                        st.success(f"Codigo detectado: {codigo_norm}")
+            else:
+                st.info("Escaner avanzado no disponible. Usa entrada manual.")
 
         with cam_col_salida:
             st.caption("Salida")
-            foto_salida = st.camera_input(
-                "Captura el codigo para retirada",
-                key=f"cam_salida_{i}",
-            )
-            ok_salida, msg_salida = _procesar_captura_camara(
-                foto_salida,
-                key_codigo=f"codigo_salida_{i}",
-                key_hash=f"cam_salida_hash_{i}",
-            )
-            if ok_salida:
-                st.success(msg_salida)
-            elif foto_salida is not None and msg_salida:
-                st.warning(msg_salida)
+            if rear_barcode_scanner is not None:
+                codigo_salida_cam = rear_barcode_scanner(
+                    label="Escanear salida (camara trasera)",
+                    key=f"rear_scan_salida_{i}",
+                    height=430,
+                )
+                if codigo_salida_cam:
+                    codigo_norm = normalizar_codigo(codigo_salida_cam)
+                    if st.session_state.get(f"rear_scan_last_salida_{i}") != codigo_norm:
+                        st.session_state[f"rear_scan_last_salida_{i}"] = codigo_norm
+                        st.session_state[f"codigo_salida_{i}"] = codigo_norm
+                        st.success(f"Codigo detectado: {codigo_norm}")
+            else:
+                st.info("Escaner avanzado no disponible. Usa entrada manual.")
 
         st.caption("Si no detecta el codigo automaticamente, puedes escribirlo manualmente.")
 

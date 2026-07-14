@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Rear Barcode Scanner</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7fbff;
+      --panel: #ffffff;
+      --text: #1f2937;
+      --accent: #0f766e;
+      --warn: #b45309;
+      --err: #b91c1c;
+      --line: #dbe4ef;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      color: var(--text);
+      background: var(--bg);
+    }
+    .wrap {
+      padding: 10px;
+      display: grid;
+      gap: 8px;
+    }
+    .label { font-size: 0.92rem; font-weight: 600; }
+    .video-box {
+      border: 1px solid var(--line);
+      background: #0b1220;
+      border-radius: 10px;
+      overflow: hidden;
+      position: relative;
+      min-height: 220px;
+      display: grid;
+      place-items: center;
+    }
+    video {
+      width: 100%;
+      height: 260px;
+      object-fit: cover;
+      display: block;
+      transform: scaleX(-1);
+    }
+    .overlay {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      border: 2px dashed rgba(255,255,255,.45);
+      margin: 16% 10%;
+      border-radius: 8px;
+    }
+    .row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    button {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      padding: 8px 12px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .primary {
+      background: var(--accent);
+      color: white;
+      border-color: var(--accent);
+    }
+    .status { font-size: 0.85rem; }
+    .status.ok { color: var(--accent); }
+    .status.warn { color: var(--warn); }
+    .status.err { color: var(--err); }
+    .manual {
+      display: none;
+      gap: 6px;
+      grid-template-columns: 1fr auto;
+    }
+    .manual input {
+      width: 100%;
+      padding: 8px 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div id="label" class="label">Escaner</div>
+    <div class="video-box">
+      <video id="video" autoplay playsinline muted></video>
+      <div class="overlay"></div>
+    </div>
+    <div class="row">
+      <button id="start" class="primary">Iniciar camara trasera</button>
+      <button id="stop">Detener</button>
+    </div>
+    <div id="status" class="status">Esperando inicio...</div>
+    <div id="manual" class="manual">
+      <input id="manualInput" placeholder="Codigo manual" />
+      <button id="sendManual">Enviar</button>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/streamlit-component-lib@1.4.0/dist/index.js"></script>
+  <script>
+    const video = document.getElementById("video");
+    const startBtn = document.getElementById("start");
+    const stopBtn = document.getElementById("stop");
+    const statusEl = document.getElementById("status");
+    const labelEl = document.getElementById("label");
+    const manualBox = document.getElementById("manual");
+    const manualInput = document.getElementById("manualInput");
+    const sendManualBtn = document.getElementById("sendManual");
+
+    let stream = null;
+    let scanning = false;
+    let detector = null;
+    let lastValue = "";
+
+    function setStatus(msg, cls = "") {
+      statusEl.textContent = msg;
+      statusEl.className = "status" + (cls ? " " + cls : "");
+    }
+
+    function setValue(v) {
+      const value = String(v || "").trim();
+      if (!value || value === lastValue) return;
+      lastValue = value;
+      Streamlit.setComponentValue(value);
+      setStatus("Detectado: " + value, "ok");
+    }
+
+    async function stopCamera() {
+      scanning = false;
+      if (stream) {
+        stream.getTracks().forEach(t => t.stop());
+        stream = null;
+      }
+      video.srcObject = null;
+      setStatus("Camara detenida.", "warn");
+    }
+
+    async function startCamera() {
+      await stopCamera();
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: { ideal: "environment" },
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          },
+          audio: false
+        });
+        video.srcObject = stream;
+        await video.play();
+        setStatus("Camara trasera activa. Enfoca el codigo.", "ok");
+      } catch (err) {
+        setStatus("No se pudo abrir camara trasera. Usa codigo manual.", "err");
+        manualBox.style.display = "grid";
+        return;
+      }
+
+      if ("BarcodeDetector" in window) {
+        try {
+          detector = new BarcodeDetector({
+            formats: ["code_128", "code_39", "ean_13", "ean_8", "upc_a", "upc_e", "qr_code"]
+          });
+        } catch (err) {
+          detector = new BarcodeDetector();
+        }
+      } else {
+        detector = null;
+        manualBox.style.display = "grid";
+        setStatus("Este navegador no soporta deteccion nativa. Usa codigo manual.", "warn");
+        return;
+      }
+
+      scanning = true;
+      scanLoop();
+    }
+
+    async function scanLoop() {
+      if (!scanning || !detector) return;
+      try {
+        const detections = await detector.detect(video);
+        if (detections && detections.length > 0) {
+          const raw = detections[0].rawValue || "";
+          if (raw) {
+            setValue(raw);
+          }
+        }
+      } catch (err) {
+      }
+      requestAnimationFrame(scanLoop);
+    }
+
+    function onRender(event) {
+      const args = event?.detail?.args || {};
+      if (args.label) {
+        labelEl.textContent = args.label;
+      }
+      Streamlit.setFrameHeight(430);
+    }
+
+    startBtn.addEventListener("click", startCamera);
+    stopBtn.addEventListener("click", stopCamera);
+    sendManualBtn.addEventListener("click", () => setValue(manualInput.value));
+
+    Streamlit.events.addEventListener(Streamlit.RENDER_EVENT, onRender);
+    Streamlit.setComponentReady();
+    Streamlit.setFrameHeight(430);
+  </script>
+</body>
+</html>
