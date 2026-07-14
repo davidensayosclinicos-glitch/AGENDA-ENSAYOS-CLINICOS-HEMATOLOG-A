@@ -4,6 +4,7 @@ import base64
 import html
 import random
 import re
+import hashlib
 from datetime import date, datetime
 from pathlib import Path
 
@@ -637,6 +638,57 @@ def normalizar_codigo(codigo: str) -> str:
     return codigo.strip().upper()
 
 
+def _decodificar_codigo_desde_imagen(image_bytes: bytes) -> str:
+    """Intenta decodificar codigo de barras/QR desde una foto capturada."""
+    try:
+        from PIL import Image
+    except Exception:
+        return ""
+
+    try:
+        from pyzbar.pyzbar import decode as zbar_decode
+    except Exception:
+        return ""
+
+    try:
+        imagen = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        resultados = zbar_decode(imagen)
+    except Exception:
+        return ""
+
+    for res in resultados:
+        try:
+            valor = res.data.decode("utf-8", errors="ignore").strip()
+        except Exception:
+            valor = ""
+        if valor:
+            return normalizar_codigo(valor)
+    return ""
+
+
+def _procesar_captura_camara(uploaded_file, key_codigo: str, key_hash: str) -> tuple[bool, str]:
+    """
+    Procesa una captura de camara una sola vez por imagen.
+    Devuelve (ok, mensaje).
+    """
+    if uploaded_file is None:
+        return False, ""
+
+    contenido = uploaded_file.getvalue()
+    digest = hashlib.sha1(contenido).hexdigest()
+    previo = str(st.session_state.get(key_hash, ""))
+    if digest == previo:
+        return False, ""
+
+    st.session_state[key_hash] = digest
+    codigo = _decodificar_codigo_desde_imagen(contenido)
+    if codigo:
+        st.session_state[key_codigo] = codigo
+        return True, f"Codigo detectado: {codigo}"
+
+    return False, "No se pudo leer el codigo en la foto. Prueba con mas luz o acercando la camara."
+
+
 def generar_codigo_automatico(ensayo: str, tipo_kit: str, caducidad: str) -> str:
     """Genera un numero aleatorio unico de 10 digitos."""
     return str(random.randint(1000000000, 9999999999))
@@ -906,6 +958,42 @@ for i, ensayo_tab in enumerate(lista_ensayos):
     with tabs[i]:
         data_ensayo = inventario[inventario["Ensayo"].astype(str).str.strip() == ensayo_tab].copy()
         st.caption(f"Ensayo: {ensayo_tab} | Cajas activas: {len(data_ensayo)}")
+
+        st.markdown("**Escaneo con camara (movil)**")
+        cam_col_alta, cam_col_salida = st.columns(2)
+        with cam_col_alta:
+            st.caption("Alta")
+            foto_alta = st.camera_input(
+                "Captura el codigo para alta",
+                key=f"cam_alta_{i}",
+            )
+            ok_alta, msg_alta = _procesar_captura_camara(
+                foto_alta,
+                key_codigo=f"codigo_alta_{i}",
+                key_hash=f"cam_alta_hash_{i}",
+            )
+            if ok_alta:
+                st.success(msg_alta)
+            elif foto_alta is not None and msg_alta:
+                st.warning(msg_alta)
+
+        with cam_col_salida:
+            st.caption("Salida")
+            foto_salida = st.camera_input(
+                "Captura el codigo para retirada",
+                key=f"cam_salida_{i}",
+            )
+            ok_salida, msg_salida = _procesar_captura_camara(
+                foto_salida,
+                key_codigo=f"codigo_salida_{i}",
+                key_hash=f"cam_salida_hash_{i}",
+            )
+            if ok_salida:
+                st.success(msg_salida)
+            elif foto_salida is not None and msg_salida:
+                st.warning(msg_salida)
+
+        st.caption("Si no detecta el codigo automaticamente, puedes escribirlo manualmente.")
 
         st.markdown("**Alta por escaneo**")
         with st.form(f"form_alta_{i}", clear_on_submit=True):
