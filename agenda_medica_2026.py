@@ -86,6 +86,10 @@ def construir_estilos_app():
             }}
             [data-testid="stAppViewContainer"] > .main .block-container {{
                 background: transparent !important;
+                max-width: 100% !important;
+                width: 100% !important;
+                padding-left: 1rem !important;
+                padding-right: 1rem !important;
             }}
             [data-testid="stAppViewContainer"] > .main,
             [data-testid="stHeader"],
