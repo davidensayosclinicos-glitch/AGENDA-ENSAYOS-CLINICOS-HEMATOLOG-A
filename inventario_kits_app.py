@@ -668,6 +668,24 @@ def normalizar_codigo(codigo: str) -> str:
     return codigo.strip().upper()
 
 
+def extraer_codigo_desde_texto_scan(texto: str) -> str:
+    """Intenta obtener un codigo util cuando solo hay OCR y no barcode nativo."""
+    if not isinstance(texto, str):
+        return ""
+
+    limpio = texto.upper().strip()
+    if not limpio:
+        return ""
+
+    candidatos = re.findall(r"[A-Z0-9][A-Z0-9\-_/]{5,}", limpio)
+    if not candidatos:
+        return ""
+
+    # Priorizamos el token con mas alfanumericos para evitar ruido de OCR.
+    mejor = max(candidatos, key=lambda c: len(re.sub(r"[^A-Z0-9]", "", c)))
+    return normalizar_codigo(mejor)
+
+
 def _normalizar_texto_libre(valor: str) -> str:
     txt = str(valor or "").strip().lower()
     txt = unicodedata.normalize("NFKD", txt)
@@ -896,7 +914,7 @@ def ejecutar_alta_kit(
         if _usar_postgres():
             if not _upsert_kit_postgres(codigo, ensayo, tipo_kit, cad_str):
                 raise RuntimeError("No se pudo guardar el kit en PostgreSQL")
-            nuevo_df = inventario_df
+            nuevo_df = cargar_inventario()
         else:
             nueva = pd.DataFrame([
                 {
@@ -943,7 +961,7 @@ def ejecutar_salida_kit(
         if _usar_postgres():
             if not _eliminar_kit_postgres(codigo_salida):
                 raise RuntimeError("No se pudo eliminar el kit en PostgreSQL")
-            nuevo_df = inventario_df
+            nuevo_df = cargar_inventario()
         else:
             nuevo_df = inventario_df.drop(index=idx[0]).reset_index(drop=True)
             guardar_inventario(nuevo_df)
@@ -1136,14 +1154,19 @@ for i, ensayo_tab in enumerate(lista_ensayos):
                     payload_alta_cam = {"code": "", "text": "", "source": "error"}
                     st.warning("Escaner avanzado no disponible en este entorno. Usa entrada manual.")
                 payload_alta = normalizar_payload_scan(payload_alta_cam)
-                codigo_alta_cam = normalizar_codigo(payload_alta.get("code", ""))
                 texto_alta_cam = payload_alta.get("text", "")
+                codigo_alta_cam = normalizar_codigo(payload_alta.get("code", ""))
+                if not codigo_alta_cam and texto_alta_cam:
+                    codigo_alta_cam = extraer_codigo_desde_texto_scan(texto_alta_cam)
 
                 if texto_alta_cam:
                     tipo_inferido = inferir_tipo_kit_desde_texto(texto_alta_cam, tipos_auto)
                     if tipo_inferido:
                         st.session_state[f"auto_tipo_sel_{i}"] = tipo_inferido
                         st.caption(f"Tipo detectado por texto: {tipo_inferido}")
+
+                if codigo_alta_cam and not payload_alta.get("code", ""):
+                    st.caption(f"Codigo inferido por OCR: {codigo_alta_cam}")
 
                 if codigo_alta_cam:
                     codigo_norm = codigo_alta_cam
@@ -1186,6 +1209,8 @@ for i, ensayo_tab in enumerate(lista_ensayos):
                     st.warning("Escaner avanzado no disponible en este entorno. Usa entrada manual.")
                 payload_salida = normalizar_payload_scan(payload_salida_cam)
                 codigo_salida_cam = normalizar_codigo(payload_salida.get("code", ""))
+                if not codigo_salida_cam:
+                    codigo_salida_cam = extraer_codigo_desde_texto_scan(payload_salida.get("text", ""))
                 if codigo_salida_cam:
                     codigo_norm = normalizar_codigo(codigo_salida_cam)
                     if st.session_state.get(f"rear_scan_last_salida_{i}") != codigo_norm:
