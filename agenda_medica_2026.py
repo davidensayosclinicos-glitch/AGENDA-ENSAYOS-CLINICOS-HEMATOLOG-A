@@ -257,17 +257,35 @@ def aplicar_marca_pestana(titulo_objetivo, ruta_logo):
     if not ruta_logo or not os.path.isfile(ruta_logo):
         return
     try:
-        with open(ruta_logo, "rb") as f_logo:
-            icono_b64 = base64.b64encode(f_logo.read()).decode("utf-8")
+        if Image is not None:
+            imagen_base = Image.open(ruta_logo).convert("RGBA")
+
+            def _a_data_url(tamano: tuple[int, int]) -> str:
+                imagen = imagen_base.copy()
+                imagen.thumbnail(tamano, Image.Resampling.LANCZOS)
+                lienzo = Image.new("RGBA", tamano, (0, 0, 0, 0))
+                offset = ((tamano[0] - imagen.width) // 2, (tamano[1] - imagen.height) // 2)
+                lienzo.paste(imagen, offset, imagen)
+                buffer = io.BytesIO()
+                lienzo.save(buffer, format="PNG")
+                return "data:image/png;base64," + base64.b64encode(buffer.getvalue()).decode("utf-8")
+
+            icono_32 = _a_data_url((32, 32))
+            icono_180 = _a_data_url((180, 180))
+        else:
+            with open(ruta_logo, "rb") as f_logo:
+                icono_b64 = base64.b64encode(f_logo.read()).decode("utf-8")
+            icono_32 = f"data:image/png;base64,{icono_b64}"
+            icono_180 = icono_32
     except Exception:
         return
 
-    icono_data_url = f"data:image/png;base64,{icono_b64}"
     components.html(
         f"""
         <script>
             const tituloObjetivo = {titulo_objetivo!r};
-            const iconoObjetivo = {icono_data_url!r};
+            const iconoFavicon = {icono_32!r};
+            const iconoApple = {icono_180!r};
 
             function aplicarMarca() {{
                 try {{
@@ -276,16 +294,27 @@ def aplicar_marca_pestana(titulo_objetivo, ruta_logo):
                         doc.title = tituloObjetivo;
                     }}
 
-                    const rels = ["icon", "shortcut icon", "apple-touch-icon"];
-                    rels.forEach((rel) => {{
+                    const iconos = [
+                        {{ rel: "icon", href: iconoFavicon, sizes: "32x32", type: "image/png" }},
+                        {{ rel: "shortcut icon", href: iconoFavicon, sizes: "32x32", type: "image/png" }},
+                        {{ rel: "apple-touch-icon", href: iconoApple, sizes: "180x180", type: "image/png" }},
+                    ];
+
+                    iconos.forEach(({{ rel, href, sizes, type }}) => {{
                         let icono = doc.querySelector(`link[rel='${{rel}}']`);
                         if (!icono) {{
                             icono = doc.createElement("link");
                             icono.setAttribute("rel", rel);
                             doc.head.appendChild(icono);
                         }}
-                        if (icono.getAttribute("href") !== iconoObjetivo) {{
-                            icono.setAttribute("href", iconoObjetivo);
+                        if (sizes) {{
+                            icono.setAttribute("sizes", sizes);
+                        }}
+                        if (type) {{
+                            icono.setAttribute("type", type);
+                        }}
+                        if (icono.getAttribute("href") !== href) {{
+                            icono.setAttribute("href", href);
                         }}
                     }});
                 }} catch (e) {{}}
