@@ -21,6 +21,7 @@ import webbrowser
 import tempfile
 import importlib
 import glob
+import runpy
 from urllib.parse import quote_plus
 
 try:
@@ -3793,6 +3794,24 @@ def render_resumen_manana():
                 st.write(f"• {tarea}")
 
 
+def renderizar_registro_kits_integrado():
+    ruta_kits = os.path.join(SCRIPT_DIR, "inventario_kits_app.py")
+    if not os.path.isfile(ruta_kits):
+        st.error("No se encuentra el modulo de registro de kits en el servidor.")
+        return
+
+    set_page_config_original = st.set_page_config
+    try:
+        # El modulo de kits tambien se ejecuta standalone y configura pagina.
+        # Al integrarlo dentro de la app principal anulamos esa llamada.
+        st.set_page_config = lambda *args, **kwargs: None
+        runpy.run_path(ruta_kits, run_name="__kits_integrado__")
+    except Exception as exc:
+        st.error(f"No se pudo cargar la pestaña de kits: {exc}")
+    finally:
+        st.set_page_config = set_page_config_original
+
+
 requerir_login_si_configurado()
 
 # Inicializamos DB una vez por sesion para evitar coste en cada rerun.
@@ -3827,6 +3846,7 @@ _ruta_backup_mostrada = st.session_state.get("_backup_diario_ruta", "")
 secciones_principales = [
     "Copia de seguridad",
     "Agenda",
+    "Registro de kits",
     "Citas ojos",
     "Calendario DREAMM10",
     "Prot. ensayo",
@@ -3888,6 +3908,9 @@ if seccion_activa == "Copia de seguridad":
             mime=st.session_state.get("_backup_descarga_mime", "application/octet-stream"),
             key="btn_descargar_backup_pc_tab",
         )
+
+if seccion_activa == "Registro de kits":
+    renderizar_registro_kits_integrado()
 
 if seccion_activa == "Prot. ensayo":
     st.subheader("📄 Protocolos de Ensayo")
