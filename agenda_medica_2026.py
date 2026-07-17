@@ -1061,24 +1061,41 @@ def _resolver_columna_nombre(cursor, tabla: str) -> str | None:
     return None
 
 
-def normalizar_ensayos_existentes(cursor):
-    visitas = cursor.execute("SELECT id, ensayo FROM visitas").fetchall()
-    for visita_id, ensayo in visitas:
-        ensayo_norm = normalizar_ensayo(ensayo)
-        if ensayo_norm != ("" if ensayo is None else str(ensayo)):
-            cursor.execute(
-                "UPDATE visitas SET ensayo = ? WHERE id = ?",
-                (ensayo_norm, visita_id)
-            )
+def _resolver_columna_ensayo(cursor, tabla: str) -> str | None:
+    columnas = _obtener_columnas_tabla(cursor, tabla)
+    candidatos = ["ensayo", "estudio", "protocolo", "trial"]
+    for cand in candidatos:
+        if cand in columnas:
+            return cand
+    return None
 
-    checklist = cursor.execute("SELECT id, ensayo FROM checklist_items").fetchall()
-    for item_id, ensayo in checklist:
-        ensayo_norm = normalizar_ensayo(ensayo)
-        if ensayo_norm != ("" if ensayo is None else str(ensayo)):
-            cursor.execute(
-                "UPDATE checklist_items SET ensayo = ? WHERE id = ?",
-                (ensayo_norm, item_id)
-            )
+
+def normalizar_ensayos_existentes(cursor):
+    col_ensayo_visitas = _resolver_columna_ensayo(cursor, "visitas")
+    if col_ensayo_visitas:
+        visitas = cursor.execute(
+            f"SELECT id, {col_ensayo_visitas} FROM visitas"
+        ).fetchall()
+        for visita_id, ensayo in visitas:
+            ensayo_norm = normalizar_ensayo(ensayo)
+            if ensayo_norm != ("" if ensayo is None else str(ensayo)):
+                cursor.execute(
+                    f"UPDATE visitas SET {col_ensayo_visitas} = ? WHERE id = ?",
+                    (ensayo_norm, visita_id)
+                )
+
+    col_ensayo_checklist = _resolver_columna_ensayo(cursor, "checklist_items")
+    if col_ensayo_checklist:
+        checklist = cursor.execute(
+            f"SELECT id, {col_ensayo_checklist} FROM checklist_items"
+        ).fetchall()
+        for item_id, ensayo in checklist:
+            ensayo_norm = normalizar_ensayo(ensayo)
+            if ensayo_norm != ("" if ensayo is None else str(ensayo)):
+                cursor.execute(
+                    f"UPDATE checklist_items SET {col_ensayo_checklist} = ? WHERE id = ?",
+                    (ensayo_norm, item_id)
+                )
 
 
 def anonimizar_nombres_existentes(cursor):
@@ -1112,8 +1129,11 @@ def anonimizar_nombres_existentes(cursor):
 
 
 def eliminar_ensayos_sin_pacientes(cursor):
+    col_nombre_pac = _resolver_columna_nombre(cursor, "pacientes") or "nombre"
+    col_ensayo_pac = _resolver_columna_ensayo(cursor, "pacientes") or "ensayo"
+
     filas_pacientes = cursor.execute(
-        "SELECT codigo, nombre, ensayo FROM pacientes"
+        f"SELECT codigo, {col_nombre_pac}, {col_ensayo_pac} FROM pacientes"
     ).fetchall()
     ensayos_validos = set()
     for codigo, nombre, ensayo in filas_pacientes:
@@ -1123,7 +1143,13 @@ def eliminar_ensayos_sin_pacientes(cursor):
         if ensayo_norm and (codigo_norm or nombre_norm):
             ensayos_validos.add(ensayo_norm)
 
-    filas_checklist = cursor.execute("SELECT id, ensayo FROM checklist_items").fetchall()
+    col_ensayo_checklist = _resolver_columna_ensayo(cursor, "checklist_items")
+    if not col_ensayo_checklist:
+        return
+
+    filas_checklist = cursor.execute(
+        f"SELECT id, {col_ensayo_checklist} FROM checklist_items"
+    ).fetchall()
     ids_borrar = []
     for item_id, ensayo in filas_checklist:
         if normalizar_clave_paciente(ensayo) not in ensayos_validos:
@@ -1362,6 +1388,13 @@ def init_db():
 
     # Migracion incremental de revision ocular para instalaciones existentes.
     if DB_BACKEND == "postgres":
+        c.execute("ALTER TABLE visitas ADD COLUMN IF NOT EXISTS nombre TEXT")
+        c.execute("ALTER TABLE visitas ADD COLUMN IF NOT EXISTS codigo TEXT")
+        c.execute("ALTER TABLE visitas ADD COLUMN IF NOT EXISTS ensayo TEXT")
+        c.execute("ALTER TABLE pacientes ADD COLUMN IF NOT EXISTS nombre TEXT")
+        c.execute("ALTER TABLE pacientes ADD COLUMN IF NOT EXISTS codigo TEXT")
+        c.execute("ALTER TABLE pacientes ADD COLUMN IF NOT EXISTS ensayo TEXT")
+        c.execute("ALTER TABLE checklist_items ADD COLUMN IF NOT EXISTS ensayo TEXT")
         c.execute("ALTER TABLE revision_ocular ADD COLUMN IF NOT EXISTS sede TEXT")
         c.execute("ALTER TABLE revision_ocular ADD COLUMN IF NOT EXISTS medico TEXT")
         c.execute("ALTER TABLE revision_ocular ADD COLUMN IF NOT EXISTS agenda_hospitalaria TEXT")
