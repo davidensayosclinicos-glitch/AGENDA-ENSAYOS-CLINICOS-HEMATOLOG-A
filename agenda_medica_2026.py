@@ -25,6 +25,11 @@ import runpy
 from urllib.parse import quote_plus
 
 try:
+    from PIL import Image
+except ImportError:
+    Image = None
+
+try:
     psycopg2 = importlib.import_module("psycopg2")
     PsycopgCursor = importlib.import_module("psycopg2.extensions").cursor
 except ImportError:
@@ -52,7 +57,13 @@ BOOT_LOGO_CANDIDATOS = [
 BOOT_PAGE_ICON = ""
 for _ruta_logo in BOOT_LOGO_CANDIDATOS:
     if os.path.isfile(_ruta_logo):
-        BOOT_PAGE_ICON = _ruta_logo
+        if Image is not None:
+            try:
+                BOOT_PAGE_ICON = Image.open(_ruta_logo)
+            except Exception:
+                BOOT_PAGE_ICON = _ruta_logo
+        else:
+            BOOT_PAGE_ICON = _ruta_logo
         break
 
 # --- CONFIGURACIÓN DE PÁGINA ---
