@@ -272,11 +272,15 @@ def aplicar_marca_pestana(titulo_objetivo, ruta_logo):
 
             icono_32 = _a_data_url((32, 32))
             icono_180 = _a_data_url((180, 180))
+            icono_192 = _a_data_url((192, 192))
+            icono_512 = _a_data_url((512, 512))
         else:
             with open(ruta_logo, "rb") as f_logo:
                 icono_b64 = base64.b64encode(f_logo.read()).decode("utf-8")
             icono_32 = f"data:image/png;base64,{icono_b64}"
             icono_180 = icono_32
+            icono_192 = icono_32
+            icono_512 = icono_32
     except Exception:
         return
 
@@ -286,6 +290,22 @@ def aplicar_marca_pestana(titulo_objetivo, ruta_logo):
             const tituloObjetivo = {titulo_objetivo!r};
             const iconoFavicon = {icono_32!r};
             const iconoApple = {icono_180!r};
+            const icono192 = {icono_192!r};
+            const icono512 = {icono_512!r};
+            const manifestData = {{
+                name: tituloObjetivo,
+                short_name: tituloObjetivo,
+                start_url: ".",
+                scope: ".",
+                display: "standalone",
+                background_color: "#dbeafe",
+                theme_color: "#dbeafe",
+                icons: [
+                    {{ src: icono192, sizes: "192x192", type: "image/png" }},
+                    {{ src: icono512, sizes: "512x512", type: "image/png" }},
+                ],
+            }};
+            const manifestHref = "data:application/manifest+json;charset=utf-8," + encodeURIComponent(JSON.stringify(manifestData));
 
             function aplicarMarca() {{
                 try {{
@@ -294,10 +314,31 @@ def aplicar_marca_pestana(titulo_objetivo, ruta_logo):
                         doc.title = tituloObjetivo;
                     }}
 
+                    const metaMobile = [
+                        {{ name: "apple-mobile-web-app-capable", content: "yes" }},
+                        {{ name: "apple-mobile-web-app-title", content: tituloObjetivo }},
+                        {{ name: "mobile-web-app-capable", content: "yes" }},
+                        {{ name: "theme-color", content: "#dbeafe" }},
+                    ];
+                    metaMobile.forEach((item) => {{
+                        const name = item.name;
+                        const content = item.content;
+                        let meta = doc.querySelector(`meta[name='${{name}}']`);
+                        if (!meta) {{
+                            meta = doc.createElement("meta");
+                            meta.setAttribute("name", name);
+                            doc.head.appendChild(meta);
+                        }}
+                        if (meta.getAttribute("content") !== content) {{
+                            meta.setAttribute("content", content);
+                        }}
+                    }});
+
                     const iconos = [
                         {{ rel: "icon", href: iconoFavicon, sizes: "32x32", type: "image/png" }},
                         {{ rel: "shortcut icon", href: iconoFavicon, sizes: "32x32", type: "image/png" }},
                         {{ rel: "apple-touch-icon", href: iconoApple, sizes: "180x180", type: "image/png" }},
+                        {{ rel: "manifest", href: manifestHref, type: "application/manifest+json" }},
                     ];
 
                     iconos.forEach(({{ rel, href, sizes, type }}) => {{
