@@ -2639,27 +2639,50 @@ def construir_eventos_calendario(df_visitas):
     if df_visitas.empty:
         return eventos
 
-    for _, row in df_visitas.iterrows():
-        titulo_evento = f"🆔 {row['codigo']} | {row['ensayo']}"
-        if row['medula']:
+    # Compatibilidad con esquemas heredados (PostgreSQL/SQLite) que pueden
+    # no incluir todas las columnas esperadas en calendario.
+    df_local = df_visitas.copy()
+    defaults = {
+        "id": "",
+        "nombre": "",
+        "codigo": "",
+        "ensayo": "",
+        "ciclo": "",
+        "medula": False,
+        "fecha": "",
+    }
+    for col, default_val in defaults.items():
+        if col not in df_local.columns:
+            df_local[col] = default_val
+
+    # Normalizamos medula a bool para evitar errores con None/NaN/textos.
+    df_local["medula"] = (
+        df_local["medula"]
+        .fillna(False)
+        .apply(lambda v: str(v).strip().lower() in {"1", "true", "t", "si", "sí", "yes", "y"} if isinstance(v, str) else bool(v))
+    )
+
+    for _, row in df_local.iterrows():
+        titulo_evento = f"🆔 {row.get('codigo', '')} | {row.get('ensayo', '')}"
+        if bool(row.get('medula', False)):
             titulo_evento += " 🩸"
 
         event = {
             "title": titulo_evento,
-            "start": row['fecha'],
+            "start": row.get('fecha', ''),
             "allDay": True,
             "extendedProps": {
-                "id": row['id'],
-                "nombre": row['nombre'],
-                "ciclo": row['ciclo'],
-                "medula": row['medula'],
-                "ensayo": row['ensayo']
+                "id": row.get('id', ''),
+                "nombre": row.get('nombre', ''),
+                "ciclo": row.get('ciclo', ''),
+                "medula": bool(row.get('medula', False)),
+                "ensayo": row.get('ensayo', '')
             },
-            "backgroundColor": "#ff4b4b" if row['medula'] else "#3788d8"
+            "backgroundColor": "#ff4b4b" if bool(row.get('medula', False)) else "#3788d8"
         }
         eventos.append(event)
 
-    eventos.extend(generar_visita_teorica_2274(df_visitas))
+    eventos.extend(generar_visita_teorica_2274(df_local))
     return eventos
 
 def listar_pdfs(directorio):
