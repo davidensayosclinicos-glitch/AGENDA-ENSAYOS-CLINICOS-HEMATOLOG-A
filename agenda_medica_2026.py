@@ -21,7 +21,6 @@ import webbrowser
 import tempfile
 import importlib
 import glob
-import runpy
 from urllib.parse import quote_plus
 
 try:
@@ -86,10 +85,6 @@ def construir_estilos_app():
             }}
             [data-testid="stAppViewContainer"] > .main .block-container {{
                 background: transparent !important;
-                max-width: 100% !important;
-                width: 100% !important;
-                padding-left: 1rem !important;
-                padding-right: 1rem !important;
             }}
             [data-testid="stAppViewContainer"] > .main,
             [data-testid="stHeader"],
@@ -1033,6 +1028,39 @@ def _es_deadlock_error(exc):
     return deadlock_cls is not None and isinstance(exc, deadlock_cls)
 
 
+def _obtener_columnas_tabla(cursor, tabla: str) -> set[str]:
+    tabla_limpia = str(tabla or "").strip()
+    if not tabla_limpia:
+        return set()
+
+    try:
+        if DB_BACKEND == "postgres":
+            filas = cursor.execute(
+                """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema = 'public'
+                  AND table_name = ?
+                """,
+                (tabla_limpia,),
+            ).fetchall()
+            return {str(f[0]).strip().lower() for f in filas if f and f[0] is not None}
+
+        filas = cursor.execute(f"PRAGMA table_info({tabla_limpia})").fetchall()
+        return {str(f[1]).strip().lower() for f in filas if len(f) > 1 and f[1] is not None}
+    except Exception:
+        return set()
+
+
+def _resolver_columna_nombre(cursor, tabla: str) -> str | None:
+    columnas = _obtener_columnas_tabla(cursor, tabla)
+    candidatos = ["nombre", "nombre_paciente", "paciente", "iniciales"]
+    for cand in candidatos:
+        if cand in columnas:
+            return cand
+    return None
+
+
 def normalizar_ensayos_existentes(cursor):
     visitas = cursor.execute("SELECT id, ensayo FROM visitas").fetchall()
     for visita_id, ensayo in visitas:
@@ -1054,25 +1082,33 @@ def normalizar_ensayos_existentes(cursor):
 
 
 def anonimizar_nombres_existentes(cursor):
-    visitas = cursor.execute("SELECT id, nombre FROM visitas").fetchall()
-    for visita_id, nombre in visitas:
-        nombre_norm = nombre_a_iniciales(nombre)
-        nombre_actual = "" if nombre is None else str(nombre)
-        if nombre_norm != nombre_actual:
-            cursor.execute(
-                "UPDATE visitas SET nombre = ? WHERE id = ?",
-                (nombre_norm, visita_id)
-            )
+    col_nombre_visitas = _resolver_columna_nombre(cursor, "visitas")
+    if col_nombre_visitas:
+        visitas = cursor.execute(
+            f"SELECT id, {col_nombre_visitas} FROM visitas"
+        ).fetchall()
+        for visita_id, nombre in visitas:
+            nombre_norm = nombre_a_iniciales(nombre)
+            nombre_actual = "" if nombre is None else str(nombre)
+            if nombre_norm != nombre_actual:
+                cursor.execute(
+                    f"UPDATE visitas SET {col_nombre_visitas} = ? WHERE id = ?",
+                    (nombre_norm, visita_id)
+                )
 
-    pacientes = cursor.execute("SELECT id, nombre FROM pacientes").fetchall()
-    for paciente_id, nombre in pacientes:
-        nombre_norm = nombre_a_iniciales(nombre)
-        nombre_actual = "" if nombre is None else str(nombre)
-        if nombre_norm != nombre_actual:
-            cursor.execute(
-                "UPDATE pacientes SET nombre = ? WHERE id = ?",
-                (nombre_norm, paciente_id)
-            )
+    col_nombre_pacientes = _resolver_columna_nombre(cursor, "pacientes")
+    if col_nombre_pacientes:
+        pacientes = cursor.execute(
+            f"SELECT id, {col_nombre_pacientes} FROM pacientes"
+        ).fetchall()
+        for paciente_id, nombre in pacientes:
+            nombre_norm = nombre_a_iniciales(nombre)
+            nombre_actual = "" if nombre is None else str(nombre)
+            if nombre_norm != nombre_actual:
+                cursor.execute(
+                    f"UPDATE pacientes SET {col_nombre_pacientes} = ? WHERE id = ?",
+                    (nombre_norm, paciente_id)
+                )
 
 
 def eliminar_ensayos_sin_pacientes(cursor):
@@ -1529,14 +1565,7 @@ def borrar_paciente_citas_ojos(codigo, nombre):
     ids_borrar = []
     for fila_id, codigo_db, nombre_db, ensayo_db in filas:
         ensayo_norm = _normalizar_ensayo_ojos(ensayo_db)
-        incluir_en_ojos = ensayo_norm in ENSAYOS_OJOS_PERMITIDOS
-        if not incluir_en_ojos:
-            tiene_revision = c.execute(
-                "SELECT 1 FROM revision_ocular WHERE visita_id = ? LIMIT 1",
-                (int(fila_id),)
-            ).fetchone()
-            incluir_en_ojos = bool(tiene_revision)
-        if not incluir_en_ojos:
+        if ensayo_norm not in ENSAYOS_OJOS_PERMITIDOS:
             continue
 
         codigo_norm = normalizar_clave_paciente(codigo_db)
@@ -1577,14 +1606,7 @@ def borrar_visitas_sin_paciente_citas_ojos():
     ids_borrar = []
     for fila_id, codigo_db, nombre_db, ensayo_db in filas:
         ensayo_norm = _normalizar_ensayo_ojos(ensayo_db)
-        incluir_en_ojos = ensayo_norm in ENSAYOS_OJOS_PERMITIDOS
-        if not incluir_en_ojos:
-            tiene_revision = c.execute(
-                "SELECT 1 FROM revision_ocular WHERE visita_id = ? LIMIT 1",
-                (int(fila_id),)
-            ).fetchone()
-            incluir_en_ojos = bool(tiene_revision)
-        if not incluir_en_ojos:
+        if ensayo_norm not in ENSAYOS_OJOS_PERMITIDOS:
             continue
 
         codigo_norm = normalizar_clave_paciente(codigo_db)
@@ -3715,24 +3737,6 @@ def render_resumen_manana():
                 st.write(f"• {tarea}")
 
 
-def renderizar_registro_kits_integrado():
-    ruta_kits = os.path.join(SCRIPT_DIR, "inventario_kits_app.py")
-    if not os.path.isfile(ruta_kits):
-        st.error("No se encuentra el modulo de registro de kits en el servidor.")
-        return
-
-    set_page_config_original = st.set_page_config
-    try:
-        # El modulo de kits tambien se ejecuta standalone y configura pagina.
-        # Al integrarlo dentro de la app principal anulamos esa llamada.
-        st.set_page_config = lambda *args, **kwargs: None
-        runpy.run_path(ruta_kits, run_name="__kits_integrado__")
-    except Exception as exc:
-        st.error(f"No se pudo cargar la pestaña de kits: {exc}")
-    finally:
-        st.set_page_config = set_page_config_original
-
-
 requerir_login_si_configurado()
 
 # Inicializamos DB una vez por sesion para evitar coste en cada rerun.
@@ -3767,7 +3771,6 @@ _ruta_backup_mostrada = st.session_state.get("_backup_diario_ruta", "")
 secciones_principales = [
     "Copia de seguridad",
     "Agenda",
-    "Registro de kits",
     "Citas ojos",
     "Calendario DREAMM10",
     "Prot. ensayo",
@@ -3829,9 +3832,6 @@ if seccion_activa == "Copia de seguridad":
             mime=st.session_state.get("_backup_descarga_mime", "application/octet-stream"),
             key="btn_descargar_backup_pc_tab",
         )
-
-if seccion_activa == "Registro de kits":
-    renderizar_registro_kits_integrado()
 
 if seccion_activa == "Prot. ensayo":
     st.subheader("📄 Protocolos de Ensayo")
@@ -4377,20 +4377,10 @@ if seccion_activa == "Citas ojos":
 
         df_visitas = df_visitas.copy()
         df_visitas["ensayo"] = df_visitas["ensayo"].apply(_normalizar_ensayo_ojos)
-        df_rev = get_revisiones_oculares_df()
-        ids_con_revision = set()
-        if not df_rev.empty and "visita_id" in df_rev.columns:
-            ids_con_revision = {
-                int(v)
-                for v in pd.to_numeric(df_rev["visita_id"], errors="coerce").dropna().tolist()
-            }
-        df_visitas = df_visitas[
-            df_visitas["ensayo"].isin(ENSAYOS_OJOS_PERMITIDOS)
-            | df_visitas["id"].isin(ids_con_revision)
-        ].copy()
+        df_visitas = df_visitas[df_visitas["ensayo"].isin(ENSAYOS_OJOS_PERMITIDOS)].copy()
         if df_visitas.empty:
-            st.info("No hay pacientes de DREAMM 10, DREAMM-8, Fuera de Ensayo ni con revisión ocular registrada.")
-            st.caption("Puedes crear un paciente en 'Fuera de Ensayo' con el formulario superior o guardar una cita de ojos desde Agenda.")
+            st.info("No hay pacientes de DREAMM 10, DREAMM-8 o Fuera de Ensayo.")
+            st.caption("Puedes crear un paciente en 'Fuera de Ensayo' con el formulario superior.")
             st.stop()
 
         with st.expander("🧹 Limpiar filas sin paciente", expanded=False):
@@ -4467,6 +4457,7 @@ if seccion_activa == "Citas ojos":
                         else:
                             st.info("No se encontraron visitas para eliminar.")
 
+        df_rev = get_revisiones_oculares_df()
         base = df_visitas.copy()
         base = base.merge(df_rev, how="left", left_on="id", right_on="visita_id")
 
@@ -4495,14 +4486,6 @@ if seccion_activa == "Citas ojos":
         tabla["ESTADO"] = tabla.apply(_estado_fila, axis=1)
         tabla = tabla.set_index("VISITA_ID")
 
-        ensayos_tabla = sorted(
-            {
-                e
-                for e in tabla["ENSAYO"].fillna("").astype(str).tolist()
-                if str(e).strip()
-            }.union(set(ENSAYOS_OJOS_PERMITIDOS))
-        )
-
         st.caption("Edición directa en la tabla. Marca 'REALIZADO' y guarda para pasar la fecha actual a 'FECHAS PREVIAS'.")
         editada = st.data_editor(
             tabla,
@@ -4513,7 +4496,7 @@ if seccion_activa == "Citas ojos":
             column_config={
                 "ENSAYO": st.column_config.SelectboxColumn(
                     "ENSAYO",
-                    options=ensayos_tabla,
+                    options=ENSAYOS_OJOS_PERMITIDOS,
                     required=True,
                 ),
                 "SEDE": st.column_config.SelectboxColumn(

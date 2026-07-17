@@ -156,19 +156,33 @@
     let stream = null;
     let scanning = false;
     let detector = null;
+    let textDetector = null;
     let lastValue = "";
+    let lastText = "";
+    let frameTick = 0;
 
     function setStatus(msg, cls = "") {
       statusEl.textContent = msg;
       statusEl.className = "status" + (cls ? " " + cls : "");
     }
 
-    function setValue(v) {
-      const value = String(v || "").trim();
-      if (!value || value === lastValue) return;
-      lastValue = value;
-      Streamlit.setComponentValue(value);
-      setStatus("Detectado: " + value, "ok");
+    function sendPayload(payload) {
+      const code = String(payload?.code || "").trim();
+      const text = String(payload?.text || "").trim();
+      const key = code + "::" + text;
+      if (!code && !text) return;
+      if (key === lastValue) return;
+      lastValue = key;
+      Streamlit.setComponentValue({
+        code,
+        text,
+        source: payload?.source || "unknown",
+      });
+      if (code) {
+        setStatus("Codigo detectado: " + code, "ok");
+      } else {
+        setStatus("Texto detectado: " + text, "ok");
+      }
     }
 
     async function stopCamera() {
@@ -213,25 +227,56 @@
         detector = null;
         manualBox.style.display = "grid";
         setStatus("Este navegador no soporta deteccion nativa. Usa codigo manual.", "warn");
-        return;
+      }
+
+      if ("TextDetector" in window) {
+        try {
+          textDetector = new TextDetector();
+        } catch (err) {
+          textDetector = null;
+        }
       }
 
       scanning = true;
       scanLoop();
     }
 
-    async function scanLoop() {
-      if (!scanning || !detector) return;
+    async function detectTextEveryFrames() {
+      if (!textDetector) return;
+      if ((frameTick % 8) !== 0) return;
       try {
-        const detections = await detector.detect(video);
-        if (detections && detections.length > 0) {
-          const raw = detections[0].rawValue || "";
-          if (raw) {
-            setValue(raw);
+        const blocks = await textDetector.detect(video);
+        if (blocks && blocks.length) {
+          const joined = blocks
+            .map(b => String(b.rawValue || "").trim())
+            .filter(Boolean)
+            .join(" ")
+            .trim();
+          if (joined && joined !== lastText) {
+            lastText = joined;
+            sendPayload({ code: "", text: joined, source: "text" });
           }
         }
       } catch (err) {
       }
+    }
+
+    async function scanLoop() {
+      if (!scanning) return;
+      frameTick += 1;
+      if (detector) {
+        try {
+          const detections = await detector.detect(video);
+          if (detections && detections.length > 0) {
+            const raw = detections[0].rawValue || "";
+            if (raw) {
+              sendPayload({ code: raw, text: lastText, source: "barcode" });
+            }
+          }
+        } catch (err) {
+        }
+      }
+      await detectTextEveryFrames();
       requestAnimationFrame(scanLoop);
     }
 
@@ -245,7 +290,9 @@
 
     startBtn.addEventListener("click", startCamera);
     stopBtn.addEventListener("click", stopCamera);
-    sendManualBtn.addEventListener("click", () => setValue(manualInput.value));
+    sendManualBtn.addEventListener("click", () => {
+      sendPayload({ code: manualInput.value, text: "", source: "manual" });
+    });
 
     Streamlit.events.addEventListener(Streamlit.RENDER_EVENT, onRender);
     Streamlit.setComponentReady();

@@ -8,6 +8,7 @@ import difflib
 import unicodedata
 from datetime import date, datetime
 from pathlib import Path
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import pandas as pd
 import streamlit as st
@@ -98,6 +99,48 @@ SECRETS_CANDIDATES = [
 ]
 
 _RESOLUCION_TABLA_CACHE: dict[str, tuple[str, list[str]]] = {}
+_PREFIJOS_POSTGRES = ("postgres://", "postgresql://", "postgresql+psycopg2://")
+
+
+def _parsear_bool_flag(valor, default: bool = False) -> bool:
+    if valor is None:
+        return default
+    txt = str(valor).strip().lower()
+    if not txt:
+        return default
+    if txt in {"1", "true", "yes", "y", "on", "si", "s"}:
+        return True
+    if txt in {"0", "false", "no", "n", "off"}:
+        return False
+    return default
+
+
+def _permitir_fallback_local() -> bool:
+    env_val = os.getenv("ALLOW_SQLITE_FALLBACK")
+    if env_val is not None:
+        return _parsear_bool_flag(env_val, default=False)
+
+    try:
+        sec_val = st.secrets.get("ALLOW_SQLITE_FALLBACK", None)
+        if sec_val is not None:
+            return _parsear_bool_flag(sec_val, default=False)
+    except Exception:
+        pass
+
+    for secrets_path in SECRETS_CANDIDATES:
+        data = _leer_toml(secrets_path)
+        if "ALLOW_SQLITE_FALLBACK" in data:
+            return _parsear_bool_flag(data.get("ALLOW_SQLITE_FALLBACK"), default=False)
+
+    return False
+
+
+def _activar_modo_local_temporal(origen: str, error: Exception | str) -> None:
+    try:
+        st.session_state["_inventario_forzar_local"] = True
+        st.session_state["_inventario_motivo_local"] = f"{origen}: {error}"
+    except Exception:
+        pass
 
 
 def _leer_toml(path: Path) -> dict:
@@ -110,15 +153,39 @@ def _leer_toml(path: Path) -> dict:
         return {}
 
 
+def _normalizar_database_url(url: str) -> str:
+    url_limpia = str(url or "").strip()
+    if not url_limpia:
+        return ""
+
+    if url_limpia.startswith("postgres://"):
+        url_limpia = "postgresql://" + url_limpia[len("postgres://") :]
+
+    partes = urlsplit(url_limpia)
+    if partes.scheme not in {"postgresql", "postgresql+psycopg2"}:
+        return url_limpia
+
+    host = (partes.hostname or "").lower()
+    es_supabase = "supabase" in host
+    params = dict(parse_qsl(partes.query, keep_blank_values=True))
+
+    # Supabase requiere SSL; si no viene definido, forzamos sslmode=require.
+    if es_supabase and "sslmode" not in params:
+        params["sslmode"] = "require"
+
+    query = urlencode(params)
+    return urlunsplit((partes.scheme, partes.netloc, partes.path, query, partes.fragment))
+
+
 def obtener_database_url() -> str:
     env_url = (os.getenv("DATABASE_URL") or "").strip()
     if env_url:
-        return env_url
+        return _normalizar_database_url(env_url)
 
     try:
         secret_url = str(st.secrets.get("DATABASE_URL", "")).strip()
         if secret_url:
-            return secret_url
+            return _normalizar_database_url(secret_url)
     except Exception:
         pass
 
@@ -126,7 +193,7 @@ def obtener_database_url() -> str:
         data = _leer_toml(secrets_path)
         url = str(data.get("DATABASE_URL") or "").strip()
         if url:
-            return url
+            return _normalizar_database_url(url)
 
     return ""
 
@@ -135,7 +202,12 @@ DATABASE_URL = obtener_database_url()
 
 
 def _usar_postgres() -> bool:
-    return bool(DATABASE_URL and psycopg2 is not None)
+    try:
+        if st.session_state.get("_inventario_forzar_local", False):
+            return False
+    except Exception:
+        pass
+    return bool(DATABASE_URL and DATABASE_URL.startswith(_PREFIJOS_POSTGRES) and psycopg2 is not None)
 
 
 def _conexion_postgres():
@@ -189,10 +261,24 @@ def _asegurar_esquema_postgres() -> None:
         """,
     ]
 
+    idx_ddl = [
+        f"CREATE UNIQUE INDEX IF NOT EXISTS idx_{TABLA_INVENTARIO}_codigo_barras ON {TABLA_INVENTARIO} (codigo_barras)",
+        f"CREATE UNIQUE INDEX IF NOT EXISTS idx_{TABLA_CATALOGO_TIPOS}_ensayo_tipo ON {TABLA_CATALOGO_TIPOS} (ensayo, tipo_de_kit)",
+        f"CREATE UNIQUE INDEX IF NOT EXISTS idx_{TABLA_ENSAYOS}_ensayo ON {TABLA_ENSAYOS} (ensayo)",
+    ]
+
     with _conexion_postgres() as conn:
         with conn.cursor() as cur:
             for sentencia in ddl:
                 cur.execute(sentencia)
+        conn.commit()
+        for index_sql in idx_ddl:
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(index_sql)
+                conn.commit()
+            except Exception:
+                conn.rollback()
 
 
 def _normalizar_para_sql(valor) -> str:
@@ -201,6 +287,19 @@ def _normalizar_para_sql(valor) -> str:
     if pd.isna(valor):
         return ""
     return str(valor)
+
+
+def _error_parece_esquema_postgres(exc: Exception) -> bool:
+    txt = str(exc).lower()
+    claves = [
+        "no se resolvió",
+        "does not exist",
+        "undefined table",
+        "undefined column",
+        "relation",
+        "column",
+    ]
+    return any(k in txt for k in claves)
 
 
 def _normalizar_identificador(texto: str) -> str:
@@ -293,6 +392,19 @@ def _resolver_mapeo_columnas(cur, config: dict) -> tuple[str | None, list[str] |
             ui_col,
             ui_col.replace("_", " "),
         ]
+        alias_map = {
+            "codigo_barras": ["codigo", "barcode", "codigo_barra", "id_kit", "barras", "cod", "codigo de barras"],
+            "ensayo": ["protocolo", "estudio", "trial", "id_ensayo"],
+            "tipo_de_kit": ["tipo", "kit", "kit_type", "tipo_kit", "tipo de kit"],
+            "caducidad": ["vencimiento", "fecha_caducidad", "expiracion", "exp", "expiry", "fecha_vencimiento", "fecha de caducidad"],
+        }
+        norm_db = _normalizar_identificador(db_col)
+        norm_ui = _normalizar_identificador(ui_col)
+        for key, alt_list in alias_map.items():
+            if norm_db == key or norm_ui == key:
+                candidatos.extend(alt_list)
+                break
+
         encontrado = ""
         for cand in candidatos:
             norm = _normalizar_identificador(cand)
@@ -309,58 +421,100 @@ def _resolver_mapeo_columnas(cur, config: dict) -> tuple[str | None, list[str] |
 
 def _upsert_kit_postgres(codigo: str, ensayo: str, tipo_kit: str, caducidad: str) -> bool:
     config = DB_TABLAS.get(ARCHIVO_INVENTARIO)
-    if not config or not _usar_postgres():
-        return False
+    if not config:
+        raise RuntimeError("Configuracion de inventario no encontrada para PostgreSQL.")
+    if not _usar_postgres():
+        raise RuntimeError("PostgreSQL no esta habilitado (DATABASE_URL o psycopg2 no disponible).")
 
-    try:
-        with _conexion_postgres() as conn:
-            with conn.cursor() as cur:
-                tabla_real, columnas_reales = _resolver_mapeo_columnas(cur, config)
-                if not tabla_real or not columnas_reales:
-                    return False
+    ultimo_error: Exception | None = None
+    for intento in range(2):
+        try:
+            with _conexion_postgres() as conn:
+                with conn.cursor() as cur:
+                    tabla_real, columnas_reales = _resolver_mapeo_columnas(cur, config)
+                    if not tabla_real or not columnas_reales:
+                        raise RuntimeError(f"No se resolvió el mapeo de la tabla '{config['tabla']}' o sus columnas en PostgreSQL.")
 
-                columnas_sql = ", ".join(_qident(col) for col in columnas_reales)
-                marcadores = ", ".join(["%s"] * len(columnas_reales))
-                col_codigo = _qident(columnas_reales[0])
-                col_ensayo = _qident(columnas_reales[1])
-                col_tipo = _qident(columnas_reales[2])
-                col_cad = _qident(columnas_reales[3])
+                    col_codigo = _qident(columnas_reales[0])
+                    col_ensayo = _qident(columnas_reales[1])
+                    col_tipo = _qident(columnas_reales[2])
+                    col_cad = _qident(columnas_reales[3])
+                    columnas_sql = ", ".join(_qident(col) for col in columnas_reales)
+                    marcadores = ", ".join(["%s"] * len(columnas_reales))
 
-                cur.execute(
-                    f"""
-                    INSERT INTO {_qident(tabla_real)} ({columnas_sql})
-                    VALUES ({marcadores})
-                    ON CONFLICT ({col_codigo}) DO UPDATE SET
-                        {col_ensayo} = EXCLUDED.{col_ensayo},
-                        {col_tipo} = EXCLUDED.{col_tipo},
-                        {col_cad} = EXCLUDED.{col_cad}
-                    """,
-                    [codigo, ensayo, tipo_kit, caducidad],
-                )
-        return True
-    except Exception:
-        return False
+                    cur.execute(
+                        f"SELECT {col_codigo} FROM {_qident(tabla_real)} WHERE {col_codigo} = %s LIMIT 1",
+                        [codigo],
+                    )
+                    fila_existente = cur.fetchone()
+
+                    if fila_existente:
+                        cur.execute(
+                            f"""
+                            UPDATE {_qident(tabla_real)}
+                            SET {col_ensayo} = %s,
+                                {col_tipo} = %s,
+                                {col_cad} = %s
+                            WHERE {col_codigo} = %s
+                            """,
+                            [ensayo, tipo_kit, caducidad, codigo],
+                        )
+                    else:
+                        try:
+                            cur.execute(
+                                f"""
+                                INSERT INTO {_qident(tabla_real)} ({columnas_sql})
+                                VALUES ({marcadores})
+                                ON CONFLICT ({col_codigo}) DO UPDATE SET
+                                    {col_ensayo} = EXCLUDED.{col_ensayo},
+                                    {col_tipo} = EXCLUDED.{col_tipo},
+                                    {col_cad} = EXCLUDED.{col_cad}
+                                """,
+                                [codigo, ensayo, tipo_kit, caducidad],
+                            )
+                        except Exception:
+                            conn.rollback()
+                            with conn.cursor() as cur_fallback:
+                                cur_fallback.execute(
+                                    f"""
+                                    INSERT INTO {_qident(tabla_real)} ({columnas_sql})
+                                    VALUES ({marcadores})
+                                    """,
+                                    [codigo, ensayo, tipo_kit, caducidad],
+                                )
+            return True
+        except Exception as exc:
+            ultimo_error = exc
+            if intento == 0 and _error_parece_esquema_postgres(exc):
+                _RESOLUCION_TABLA_CACHE.clear()
+                _asegurar_esquema_postgres()
+                continue
+            break
+
+    raise RuntimeError(f"Error en PostgreSQL ({config.get('tabla', 'inventario_kits')}): {ultimo_error}") from ultimo_error
 
 
 def _eliminar_kit_postgres(codigo: str) -> bool:
     config = DB_TABLAS.get(ARCHIVO_INVENTARIO)
-    if not config or not _usar_postgres():
-        return False
+    if not config:
+        raise RuntimeError("Configuracion de inventario no encontrada para PostgreSQL.")
+    if not _usar_postgres():
+        raise RuntimeError("PostgreSQL no esta habilitado (DATABASE_URL o psycopg2 no disponible).")
 
     try:
         with _conexion_postgres() as conn:
             with conn.cursor() as cur:
                 tabla_real, columnas_reales = _resolver_mapeo_columnas(cur, config)
                 if not tabla_real or not columnas_reales:
-                    return False
+                    raise RuntimeError(f"No se resolvió la tabla '{config['tabla']}' en PostgreSQL.")
                 col_codigo = _qident(columnas_reales[0])
                 cur.execute(
                     f"DELETE FROM {_qident(tabla_real)} WHERE {col_codigo} = %s",
                     [codigo],
                 )
         return True
-    except Exception:
-        return False
+    except Exception as exc:
+        raise RuntimeError(f"Error en PostgreSQL al eliminar kit: {exc}") from exc
 
 
 def _leer_tabla_postgres(path: str, columnas_ui: list[str]) -> pd.DataFrame:
@@ -378,7 +532,9 @@ def _leer_tabla_postgres(path: str, columnas_ui: list[str]) -> pd.DataFrame:
                 columnas_sql = ", ".join(_qident(col) for col in columnas_reales)
                 cur.execute(f"SELECT {columnas_sql} FROM {_qident(tabla_real)}")
                 filas = cur.fetchall()
-    except Exception:
+    except Exception as exc:
+        if DATABASE_URL:
+            st.warning(f"Aviso: no se pudo leer {path} de PostgreSQL: {exc}")
         return pd.DataFrame(columns=columnas_ui)
 
     if not filas:
@@ -402,7 +558,7 @@ def _reemplazar_tabla_postgres(path: str, df: pd.DataFrame, columnas_ui: list[st
             with conn.cursor() as cur:
                 tabla_real, columnas_reales = _resolver_mapeo_columnas(cur, config)
                 if not tabla_real or not columnas_reales:
-                    return False
+                    raise RuntimeError(f"No se resolvió la tabla '{config['tabla']}' en PostgreSQL.")
 
                 cur.execute(f"TRUNCATE TABLE {_qident(tabla_real)}")
                 if df.empty:
@@ -419,8 +575,8 @@ def _reemplazar_tabla_postgres(path: str, df: pd.DataFrame, columnas_ui: list[st
                     filas,
                 )
         return True
-    except Exception:
-        return False
+    except Exception as exc:
+        raise RuntimeError(f"Error en PostgreSQL al reemplazar tabla ({config.get('tabla', path)}): {exc}") from exc
 
 
 def _insertar_fila_postgres(path: str, datos: dict) -> bool:
@@ -443,7 +599,9 @@ def _insertar_fila_postgres(path: str, datos: dict) -> bool:
                     valores,
                 )
         return True
-    except Exception:
+    except Exception as exc:
+        if DATABASE_URL:
+            st.warning(f"Aviso: no se pudo insertar fila en {path}: {exc}")
         return False
 
 
@@ -578,7 +736,8 @@ def agregar_ensayo_configurado(ensayo: str) -> bool:
     if nuevo in actuales:
         return False
 
-    if _usar_postgres() and _insertar_fila_postgres(ARCHIVO_ENSAYOS, {"Ensayo": nuevo}):
+    if _usar_postgres():
+        _insertar_fila_postgres(ARCHIVO_ENSAYOS, {"Ensayo": nuevo})
         return True
 
     guardar_ensayos_configurados(actuales + [nuevo])
@@ -599,10 +758,11 @@ def registrar_tipo_ensayo(ensayo: str, tipo_kit: str) -> None:
     if not ensayo or not tipo_kit:
         return
 
-    if _usar_postgres() and _insertar_fila_postgres(
-        ARCHIVO_CATALOGO_TIPOS,
-        {"Ensayo": ensayo, "Tipo de kit": tipo_kit},
-    ):
+    if _usar_postgres():
+        _insertar_fila_postgres(
+            ARCHIVO_CATALOGO_TIPOS,
+            {"Ensayo": ensayo, "Tipo de kit": tipo_kit},
+        )
         return
 
     catalogo = cargar_catalogo_tipos()
@@ -879,7 +1039,8 @@ def registrar_movimiento(accion: str, codigo: str, ensayo: str, tipo_kit: str, c
         "Detalle": detalle,
     }
 
-    if _usar_postgres() and _insertar_fila_postgres(ARCHIVO_HISTORIAL, fila):
+    if _usar_postgres():
+        _insertar_fila_postgres(ARCHIVO_HISTORIAL, fila)
         return
 
     hist = cargar_historial()
@@ -912,8 +1073,7 @@ def ejecutar_alta_kit(
 
     try:
         if _usar_postgres():
-            if not _upsert_kit_postgres(codigo, ensayo, tipo_kit, cad_str):
-                raise RuntimeError("No se pudo guardar el kit en PostgreSQL")
+            _upsert_kit_postgres(codigo, ensayo, tipo_kit, cad_str)
             nuevo_df = cargar_inventario()
         else:
             nueva = pd.DataFrame([
@@ -926,13 +1086,61 @@ def ejecutar_alta_kit(
             ])
             nuevo_df = pd.concat([inventario_df, nueva], ignore_index=True)
             guardar_inventario(nuevo_df)
-
-        registrar_tipo_ensayo(ensayo, tipo_kit)
-        registrar_movimiento("ENTRADA", codigo, ensayo, tipo_kit, cad_str, detalle)
     except Exception as exc:
+        if _permitir_fallback_local():
+            try:
+                _activar_modo_local_temporal("Fallo guardando en PostgreSQL", exc)
+                nueva = pd.DataFrame([
+                    {
+                        "Codigo de barras": codigo,
+                        "Ensayo": ensayo,
+                        "Tipo de kit": tipo_kit,
+                        "Caducidad": cad_str,
+                    }
+                ])
+                nuevo_df = pd.concat([inventario_df, nueva], ignore_index=True)
+                guardar_inventario(nuevo_df)
+                aviso = (
+                    "PostgreSQL no estuvo disponible y se activo guardado local temporal. "
+                    "Revisa DATABASE_URL/permisos y luego recarga la app para volver a PostgreSQL."
+                )
+
+                avisos: list[str] = [aviso]
+                try:
+                    registrar_tipo_ensayo(ensayo, tipo_kit)
+                except Exception as exc_cat:
+                    avisos.append(f"catalogo no actualizado ({exc_cat})")
+
+                try:
+                    registrar_movimiento("ENTRADA", codigo, ensayo, tipo_kit, cad_str, detalle)
+                except Exception as exc_hist:
+                    avisos.append(f"historial no registrado ({exc_hist})")
+
+                msg_ok = f"Caja guardada en {ensayo}: {codigo}"
+                if avisos:
+                    msg_ok += " | Aviso: " + "; ".join(avisos)
+                return nuevo_df, True, msg_ok
+            except Exception as exc_local:
+                return inventario_df, False, f"No se pudo guardar la caja (PostgreSQL y fallback local): {exc_local}"
+
         return inventario_df, False, f"No se pudo guardar la caja: {exc}"
 
-    return nuevo_df, True, f"Caja guardada en {ensayo}: {codigo}"
+    avisos: list[str] = []
+    try:
+        registrar_tipo_ensayo(ensayo, tipo_kit)
+    except Exception as exc:
+        avisos.append(f"catalogo no actualizado ({exc})")
+
+    try:
+        registrar_movimiento("ENTRADA", codigo, ensayo, tipo_kit, cad_str, detalle)
+    except Exception as exc:
+        avisos.append(f"historial no registrado ({exc})")
+
+    msg_ok = f"Caja guardada en {ensayo}: {codigo}"
+    if avisos:
+        msg_ok += " | Aviso: " + "; ".join(avisos)
+
+    return nuevo_df, True, msg_ok
 
 
 def ejecutar_salida_kit(
@@ -965,12 +1173,24 @@ def ejecutar_salida_kit(
         else:
             nuevo_df = inventario_df.drop(index=idx[0]).reset_index(drop=True)
             guardar_inventario(nuevo_df)
+    except Exception as exc:
+        if _permitir_fallback_local():
+            try:
+                _activar_modo_local_temporal("Fallo retirando en PostgreSQL", exc)
+                nuevo_df = inventario_df.drop(index=idx[0]).reset_index(drop=True)
+                guardar_inventario(nuevo_df)
+            except Exception as exc_local:
+                return inventario_df, False, f"No se pudo retirar la caja (PostgreSQL y fallback local): {exc_local}"
+        else:
+            return inventario_df, False, f"No se pudo retirar la caja en base de datos: {exc}"
 
+    aviso = ""
+    try:
         registrar_movimiento("SALIDA", codigo_salida, ensayo, tipo_kit, cad, detalle)
     except Exception as exc:
-        return inventario_df, False, f"No se pudo retirar la caja en base de datos: {exc}"
+        aviso = f" | Aviso: historial no registrado ({exc})"
 
-    return nuevo_df, True, f"Caja retirada de {ensayo}: {codigo_salida} | Tipo: {tipo_kit}"
+    return nuevo_df, True, f"Caja retirada de {ensayo}: {codigo_salida} | Tipo: {tipo_kit}{aviso}"
 
 
 def resolver_tipo_kit_auto(i: int, tipo_auto_sel: str, tipo_auto_manual: str) -> str:
@@ -1064,6 +1284,15 @@ st.write(
     "Escaneas una caja para darla de alta con su ensayo, tipo y caducidad. "
     "Cuando se usa, la vuelves a escanear y se elimina del inventario activo."
 )
+
+if st.session_state.get("_inventario_forzar_local", False):
+    detalle_local = str(st.session_state.get("_inventario_motivo_local", "")).strip()
+    msg_local = (
+        "Modo local temporal activo para inventario de kits: PostgreSQL fallo y ahora se usa CSV local."
+    )
+    if detalle_local:
+        msg_local += f" Detalle: {detalle_local}"
+    st.warning(msg_local)
 
 inventario = cargar_inventario()
 sincronizar_catalogo_desde_inventario(inventario)
@@ -1389,13 +1618,12 @@ for i, ensayo_tab in enumerate(lista_ensayos):
                             nueva_cad_str = formatear_fecha(nueva_cad) if nueva_cad else ""
                             try:
                                 if _usar_postgres():
-                                    if not _upsert_kit_postgres(
+                                    _upsert_kit_postgres(
                                         str(row["Codigo de barras"]).strip(),
                                         str(row["Ensayo"]).strip(),
                                         str(nuevo_tipo).strip(),
                                         nueva_cad_str,
-                                    ):
-                                        raise RuntimeError("No se pudo actualizar el kit en PostgreSQL")
+                                    )
                                 else:
                                     inventario.loc[inventario["Codigo de barras"].astype(str).str.strip().str.upper() == str(row['Codigo de barras']).upper(), "Tipo de kit"] = nuevo_tipo
                                     inventario.loc[inventario["Codigo de barras"].astype(str).str.strip().str.upper() == str(row['Codigo de barras']).upper(), "Caducidad"] = nueva_cad_str
@@ -1419,8 +1647,7 @@ for i, ensayo_tab in enumerate(lista_ensayos):
                         if st.button("Sí, eliminar", key=f"confirm_del_si_{ensayo_tab}_{idx_row}"):
                             try:
                                 if _usar_postgres():
-                                    if not _eliminar_kit_postgres(str(row["Codigo de barras"]).strip().upper()):
-                                        raise RuntimeError("No se pudo eliminar el kit en PostgreSQL")
+                                    _eliminar_kit_postgres(str(row["Codigo de barras"]).strip().upper())
                                 else:
                                     inventario = inventario[inventario["Codigo de barras"].astype(str).str.strip().str.upper() != str(row['Codigo de barras']).upper()].reset_index(drop=True)
                                     guardar_inventario(inventario)

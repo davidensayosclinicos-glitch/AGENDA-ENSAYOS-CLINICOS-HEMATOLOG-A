@@ -35,3 +35,8 @@ CREATE TABLE IF NOT EXISTS ensayos_configurados (
     id BIGSERIAL PRIMARY KEY,
     ensayo TEXT NOT NULL UNIQUE
 );
+
+-- Índices únicos para asegurar el funcionamiento de ON CONFLICT en tablas preexistentes
+CREATE UNIQUE INDEX IF NOT EXISTS idx_inventario_kits_codigo_barras ON inventario_kits (codigo_barras);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_catalogo_tipos_ensayo_tipo ON catalogo_tipos_por_ensayo (ensayo, tipo_de_kit);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ensayos_configurados_ensayo ON ensayos_configurados (ensayo);
