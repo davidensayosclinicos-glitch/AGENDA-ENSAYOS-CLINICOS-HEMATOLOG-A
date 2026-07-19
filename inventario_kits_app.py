@@ -12,6 +12,14 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import pandas as pd
 import streamlit as st
+from kits_tipo_resolver import (
+    limpiar_catalogo_ciclos,
+    limpiar_catalogo_tipos,
+    normalizar_ciclo,
+    normalizar_ensayo,
+    normalizar_tipo_kit,
+    resolver_tipo_kit,
+)
 
 try:
     from components.rear_barcode_scanner import rear_barcode_scanner
@@ -39,17 +47,20 @@ except Exception:
 ARCHIVO_INVENTARIO = "inventario_kits.csv"
 ARCHIVO_HISTORIAL = "historial_kits.csv"
 ARCHIVO_CATALOGO_TIPOS = "catalogo_tipos_por_ensayo.csv"
+ARCHIVO_CATALOGO_CICLOS = "catalogo_kits_por_ciclo.csv"
 ARCHIVO_ENSAYOS = "ensayos_configurados.csv"
 
 BASE_DIR = Path(__file__).resolve().parent
 ARCHIVO_INVENTARIO = str(BASE_DIR / ARCHIVO_INVENTARIO)
 ARCHIVO_HISTORIAL = str(BASE_DIR / ARCHIVO_HISTORIAL)
 ARCHIVO_CATALOGO_TIPOS = str(BASE_DIR / ARCHIVO_CATALOGO_TIPOS)
+ARCHIVO_CATALOGO_CICLOS = str(BASE_DIR / ARCHIVO_CATALOGO_CICLOS)
 ARCHIVO_ENSAYOS = str(BASE_DIR / ARCHIVO_ENSAYOS)
 
 TABLA_INVENTARIO = "inventario_kits"
 TABLA_HISTORIAL = "historial_kits"
 TABLA_CATALOGO_TIPOS = "catalogo_tipos_por_ensayo"
+TABLA_CATALOGO_CICLOS = "catalogo_kits_por_ciclo"
 TABLA_ENSAYOS = "ensayos_configurados"
 
 DB_TABLAS = {
@@ -85,6 +96,11 @@ DB_TABLAS = {
         "tabla": TABLA_CATALOGO_TIPOS,
         "columnas_ui": ["Ensayo", "Tipo de kit"],
         "columnas_db": ["ensayo", "tipo_de_kit"],
+    },
+    ARCHIVO_CATALOGO_CICLOS: {
+        "tabla": TABLA_CATALOGO_CICLOS,
+        "columnas_ui": ["Ensayo", "Ciclo", "Tipo de kit"],
+        "columnas_db": ["ensayo", "ciclo", "tipo_de_kit"],
     },
     ARCHIVO_ENSAYOS: {
         "tabla": TABLA_ENSAYOS,
@@ -254,6 +270,15 @@ def _asegurar_esquema_postgres() -> None:
         )
         """,
         f"""
+        CREATE TABLE IF NOT EXISTS {TABLA_CATALOGO_CICLOS} (
+            id BIGSERIAL PRIMARY KEY,
+            ensayo TEXT NOT NULL,
+            ciclo TEXT NOT NULL,
+            tipo_de_kit TEXT NOT NULL,
+            UNIQUE (ensayo, ciclo)
+        )
+        """,
+        f"""
         CREATE TABLE IF NOT EXISTS {TABLA_ENSAYOS} (
             id BIGSERIAL PRIMARY KEY,
             ensayo TEXT NOT NULL UNIQUE
@@ -264,6 +289,7 @@ def _asegurar_esquema_postgres() -> None:
     idx_ddl = [
         f"CREATE UNIQUE INDEX IF NOT EXISTS idx_{TABLA_INVENTARIO}_codigo_barras ON {TABLA_INVENTARIO} (codigo_barras)",
         f"CREATE UNIQUE INDEX IF NOT EXISTS idx_{TABLA_CATALOGO_TIPOS}_ensayo_tipo ON {TABLA_CATALOGO_TIPOS} (ensayo, tipo_de_kit)",
+        f"CREATE UNIQUE INDEX IF NOT EXISTS idx_{TABLA_CATALOGO_CICLOS}_ensayo_ciclo ON {TABLA_CATALOGO_CICLOS} (ensayo, ciclo)",
         f"CREATE UNIQUE INDEX IF NOT EXISTS idx_{TABLA_ENSAYOS}_ensayo ON {TABLA_ENSAYOS} (ensayo)",
     ]
 
@@ -395,6 +421,7 @@ def _resolver_mapeo_columnas(cur, config: dict) -> tuple[str | None, list[str] |
         alias_map = {
             "codigo_barras": ["codigo", "barcode", "codigo_barra", "id_kit", "barras", "cod", "codigo de barras"],
             "ensayo": ["protocolo", "estudio", "trial", "id_ensayo"],
+            "ciclo": ["cycle", "ciclo_dia", "ciclo dia", "dia", "visit_cycle"],
             "tipo_de_kit": ["tipo", "kit", "kit_type", "tipo_kit", "tipo de kit"],
             "caducidad": ["vencimiento", "fecha_caducidad", "expiracion", "exp", "expiry", "fecha_vencimiento", "fecha de caducidad"],
         }
@@ -623,6 +650,7 @@ COLUMNAS_HISTORIAL = [
     "Detalle",
 ]
 COLUMNAS_CATALOGO = ["Ensayo", "Tipo de kit"]
+COLUMNAS_CATALOGO_CICLOS = ["Ensayo", "Ciclo", "Tipo de kit"]
 COLUMNAS_ENSAYOS = ["Ensayo"]
 
 DIAS_AVISO_CADUCIDAD = 30
@@ -706,10 +734,12 @@ def guardar_historial(df: pd.DataFrame) -> None:
 
 def cargar_catalogo_tipos() -> pd.DataFrame:
     df = cargar_tabla(ARCHIVO_CATALOGO_TIPOS, COLUMNAS_CATALOGO)
-    df["Ensayo"] = df["Ensayo"].str.strip()
-    df["Tipo de kit"] = df["Tipo de kit"].str.strip()
-    df = df[(df["Ensayo"] != "") & (df["Tipo de kit"] != "")].drop_duplicates().reset_index(drop=True)
-    return df
+    return limpiar_catalogo_tipos(df)
+
+
+def cargar_catalogo_ciclos() -> pd.DataFrame:
+    df = cargar_tabla(ARCHIVO_CATALOGO_CICLOS, COLUMNAS_CATALOGO_CICLOS)
+    return limpiar_catalogo_ciclos(df)
 
 
 def cargar_ensayos_configurados() -> list[str]:
@@ -745,16 +775,16 @@ def agregar_ensayo_configurado(ensayo: str) -> bool:
 
 
 def guardar_catalogo_tipos(df: pd.DataFrame) -> None:
-    out = df.copy()
-    out["Ensayo"] = out["Ensayo"].fillna("").astype(str).str.strip()
-    out["Tipo de kit"] = out["Tipo de kit"].fillna("").astype(str).str.strip()
-    out = out[(out["Ensayo"] != "") & (out["Tipo de kit"] != "")].drop_duplicates().reset_index(drop=True)
-    guardar_tabla(ARCHIVO_CATALOGO_TIPOS, out, COLUMNAS_CATALOGO)
+    guardar_tabla(ARCHIVO_CATALOGO_TIPOS, limpiar_catalogo_tipos(df), COLUMNAS_CATALOGO)
+
+
+def guardar_catalogo_ciclos(df: pd.DataFrame) -> None:
+    guardar_tabla(ARCHIVO_CATALOGO_CICLOS, limpiar_catalogo_ciclos(df), COLUMNAS_CATALOGO_CICLOS)
 
 
 def registrar_tipo_ensayo(ensayo: str, tipo_kit: str) -> None:
-    ensayo = str(ensayo).strip()
-    tipo_kit = str(tipo_kit).strip()
+    ensayo = normalizar_ensayo(ensayo)
+    tipo_kit = normalizar_tipo_kit(tipo_kit)
     if not ensayo or not tipo_kit:
         return
 
@@ -774,8 +804,56 @@ def registrar_tipo_ensayo(ensayo: str, tipo_kit: str) -> None:
 
 def obtener_tipos_por_ensayo(ensayo: str) -> list[str]:
     catalogo = cargar_catalogo_tipos()
-    tipos = catalogo[catalogo["Ensayo"] == str(ensayo).strip()]["Tipo de kit"].tolist()
+    tipos = catalogo[catalogo["Ensayo"] == normalizar_ensayo(ensayo)]["Tipo de kit"].tolist()
     return sorted(set(tipos), key=str.lower)
+
+
+def guardar_regla_tipo_por_ciclo(ensayo: str, ciclo: str, tipo_kit: str) -> bool:
+    ensayo_norm = normalizar_ensayo(ensayo)
+    ciclo_norm = normalizar_ciclo(ciclo)
+    tipo_norm = normalizar_tipo_kit(tipo_kit)
+    if not ensayo_norm or not ciclo_norm or not tipo_norm:
+        return False
+
+    if _usar_postgres():
+        config = DB_TABLAS.get(ARCHIVO_CATALOGO_CICLOS)
+        if not config:
+            return False
+        try:
+            with _conexion_postgres() as conn:
+                with conn.cursor() as cur:
+                    tabla_real, columnas_reales = _resolver_mapeo_columnas(cur, config)
+                    if not tabla_real or not columnas_reales or len(columnas_reales) < 3:
+                        return False
+                    col_ensayo = _qident(columnas_reales[0])
+                    col_ciclo = _qident(columnas_reales[1])
+                    col_tipo = _qident(columnas_reales[2])
+                    cur.execute(
+                        f"""
+                        INSERT INTO {_qident(tabla_real)} ({col_ensayo}, {col_ciclo}, {col_tipo})
+                        VALUES (%s, %s, %s)
+                        ON CONFLICT ({col_ensayo}, {col_ciclo})
+                        DO UPDATE SET {col_tipo} = EXCLUDED.{col_tipo}
+                        """,
+                        [ensayo_norm, ciclo_norm, tipo_norm],
+                    )
+            return True
+        except Exception:
+            return False
+
+    catalogo = cargar_catalogo_ciclos()
+    mask = (catalogo["Ensayo"] == ensayo_norm) & (catalogo["Ciclo"] == ciclo_norm)
+    if mask.any():
+        catalogo.loc[mask, "Tipo de kit"] = tipo_norm
+    else:
+        nuevo = pd.DataFrame([{"Ensayo": ensayo_norm, "Ciclo": ciclo_norm, "Tipo de kit": tipo_norm}])
+        catalogo = pd.concat([catalogo, nuevo], ignore_index=True)
+    guardar_catalogo_ciclos(catalogo)
+    return True
+
+
+def obtener_tipo_kit_sugerido(ensayo: str, ciclo: str) -> str:
+    return resolver_tipo_kit(ensayo, ciclo, cargar_catalogo_ciclos(), cargar_catalogo_tipos())
 
 
 def sincronizar_catalogo_desde_inventario(df_inventario: pd.DataFrame) -> None:
@@ -787,8 +865,8 @@ def sincronizar_catalogo_desde_inventario(df_inventario: pd.DataFrame) -> None:
         if st.session_state.get("_catalogo_sync_done", False):
             return
 
-        desde_inv["Ensayo"] = desde_inv["Ensayo"].fillna("").astype(str).str.strip()
-        desde_inv["Tipo de kit"] = desde_inv["Tipo de kit"].fillna("").astype(str).str.strip()
+        desde_inv["Ensayo"] = desde_inv["Ensayo"].apply(normalizar_ensayo)
+        desde_inv["Tipo de kit"] = desde_inv["Tipo de kit"].apply(normalizar_tipo_kit)
         desde_inv = desde_inv[(desde_inv["Ensayo"] != "") & (desde_inv["Tipo de kit"] != "")].drop_duplicates()
         if desde_inv.empty:
             st.session_state["_catalogo_sync_done"] = True
@@ -1057,7 +1135,8 @@ def ejecutar_alta_kit(
     detalle: str = "Alta por escaneo",
 ) -> tuple[pd.DataFrame, bool, str]:
     codigo = normalizar_codigo(codigo_raw)
-    tipo_kit = str(tipo_kit_raw).strip()
+    ensayo = normalizar_ensayo(ensayo)
+    tipo_kit = normalizar_tipo_kit(tipo_kit_raw)
     cad_str = str(caducidad_str or "").strip()
 
     codigos_existentes = set(
@@ -1342,26 +1421,81 @@ lista_ensayos = ensayos_disponibles(inventario)
 tabs = st.tabs(lista_ensayos)
 historial_global = cargar_historial()
 catalogo_global = cargar_catalogo_tipos()
+catalogo_ciclos_global = cargar_catalogo_ciclos()
 tipos_por_ensayo_map: dict[str, list[str]] = {}
 if not catalogo_global.empty:
     for ensayo_valor, grupo in catalogo_global.groupby("Ensayo"):
-        tipos_por_ensayo_map[str(ensayo_valor).strip()] = sorted(
+        tipos_por_ensayo_map[normalizar_ensayo(ensayo_valor)] = sorted(
             set(grupo["Tipo de kit"].astype(str).str.strip().replace("", pd.NA).dropna().tolist()),
             key=str.lower,
         )
 
+with st.expander("Reglas de tipo de kit por ensayo + ciclo", expanded=False):
+    if not lista_ensayos:
+        st.info("No hay ensayos disponibles todavía.")
+    else:
+        ensayo_regla = st.selectbox("Ensayo", options=lista_ensayos, key="regla_ciclo_ensayo")
+        ciclo_regla = st.text_input("Ciclo (Ej. C1D1)", key="regla_ciclo_valor")
+        tipos_regla = tipos_por_ensayo_map.get(normalizar_ensayo(ensayo_regla), [])
+        opciones_tipos_regla = (tipos_regla + ["+ Nuevo tipo de kit"]) if tipos_regla else ["+ Nuevo tipo de kit"]
+        tipo_regla_sel = st.selectbox("Tipo de kit", opciones_tipos_regla, key="regla_ciclo_tipo_sel")
+        tipo_regla_manual = ""
+        if tipo_regla_sel == "+ Nuevo tipo de kit":
+            tipo_regla_manual = st.text_input("Nuevo tipo de kit (regla)", key="regla_ciclo_tipo_manual")
+
+        if st.button("Guardar regla ensayo + ciclo", key="guardar_regla_ensayo_ciclo"):
+            tipo_regla = (
+                str(tipo_regla_manual).strip()
+                if tipo_regla_sel == "+ Nuevo tipo de kit"
+                else str(tipo_regla_sel).strip()
+            )
+            ok_regla = guardar_regla_tipo_por_ciclo(ensayo_regla, ciclo_regla, tipo_regla)
+            if ok_regla:
+                st.success(
+                    f"Regla guardada: {normalizar_ensayo(ensayo_regla)} + {normalizar_ciclo(ciclo_regla)} -> {tipo_regla}"
+                )
+                st.rerun()
+            else:
+                st.error("No se pudo guardar la regla. Revisa ensayo, ciclo y tipo.")
+
+        reglas_ensayo = catalogo_ciclos_global[
+            catalogo_ciclos_global["Ensayo"] == normalizar_ensayo(ensayo_regla)
+        ].copy()
+        if reglas_ensayo.empty:
+            st.caption("Sin reglas por ciclo para este ensayo.")
+        else:
+            st.dataframe(
+                reglas_ensayo.sort_values(by=["Ciclo", "Tipo de kit"]),
+                use_container_width=True,
+                hide_index=True,
+            )
+
 for i, ensayo_tab in enumerate(lista_ensayos):
     with tabs[i]:
-        data_ensayo = inventario[inventario["Ensayo"].astype(str).str.strip() == ensayo_tab].copy()
+        ensayo_tab_norm = normalizar_ensayo(ensayo_tab)
+        data_ensayo = inventario[inventario["Ensayo"].apply(normalizar_ensayo) == ensayo_tab_norm].copy()
         st.caption(f"Ensayo: {ensayo_tab} | Cajas activas: {len(data_ensayo)}")
+        ciclo_contexto = st.text_input(
+            "Ciclo para sugerencia automática de tipo (opcional)",
+            key=f"ciclo_contexto_{i}",
+        )
+        tipo_sugerido = obtener_tipo_kit_sugerido(ensayo_tab, ciclo_contexto)
+        if tipo_sugerido:
+            st.info(f"Sugerencia automática: {tipo_sugerido} (según ensayo/ciclo)")
+        else:
+            st.caption("Sin regla específica de ciclo; se usa el comportamiento manual o catálogo general por ensayo.")
 
         st.markdown("**Escaneo con camara (movil)**")
         cam_col_alta, cam_col_salida = st.columns(2)
         with cam_col_alta:
             st.caption("Alta")
-            tipos_auto = tipos_por_ensayo_map.get(str(ensayo_tab).strip(), [])
+            tipos_auto = tipos_por_ensayo_map.get(ensayo_tab_norm, [])
+            if tipo_sugerido and tipo_sugerido not in tipos_auto:
+                tipos_auto = [tipo_sugerido] + tipos_auto
             auto_alta = st.checkbox("Alta automatica al detectar", value=True, key=f"auto_alta_enabled_{i}")
             opciones_auto_tipos = (tipos_auto + ["+ Nuevo tipo de kit"]) if tipos_auto else ["+ Nuevo tipo de kit"]
+            if tipo_sugerido and tipo_sugerido in opciones_auto_tipos and f"auto_tipo_sel_{i}" not in st.session_state:
+                st.session_state[f"auto_tipo_sel_{i}"] = tipo_sugerido
             tipo_auto_sel = st.selectbox("Tipo auto", opciones_auto_tipos, key=f"auto_tipo_sel_{i}")
             tipo_auto_manual = ""
             if tipo_auto_sel == "+ Nuevo tipo de kit":
@@ -1474,8 +1608,12 @@ for i, ensayo_tab in enumerate(lista_ensayos):
                     key=f"codigo_alta_{i}",
                 )
             with col2:
-                tipos = tipos_por_ensayo_map.get(str(ensayo_tab).strip(), [])
+                tipos = tipos_por_ensayo_map.get(ensayo_tab_norm, [])
+                if tipo_sugerido and tipo_sugerido not in tipos:
+                    tipos = [tipo_sugerido] + tipos
                 opciones_tipos = ["+ Nuevo tipo de kit"] + tipos
+                if tipo_sugerido and tipo_sugerido in opciones_tipos and f"tipo_sel_{i}" not in st.session_state:
+                    st.session_state[f"tipo_sel_{i}"] = tipo_sugerido
                 tipo_sel = st.selectbox("Tipo de kit", opciones_tipos, key=f"tipo_sel_{i}")
                 tipo_manual = ""
                 if tipo_sel == "+ Nuevo tipo de kit":
