@@ -4582,8 +4582,8 @@ def render_interfaz_medica():
             [data-testid="stVerticalBlock"] > [style*="flex-direction: column"] > [data-testid="stVerticalBlock"] {gap: 0.15rem !important;}
             h3, h4 {margin-top: 0.08rem !important; margin-bottom: 0.12rem !important; font-size: 0.95rem !important;}
             div[data-testid="stCheckbox"] {
-                background: #edf1f6;
-                border: 1px solid #d6deea;
+                background: #eff6ff;
+                border: 1px solid #bfdbfe;
                 border-radius: 8px;
                 padding: 2px 5px;
                 margin-bottom: 2px;
@@ -4595,29 +4595,29 @@ def render_interfaz_medica():
                 margin: 0 !important;
             }
             div[data-testid="stCheckbox"]:has(input:checked) {
-                background: linear-gradient(135deg, #0f4aa6, #0a68c7);
-                border-color: #0f4aa6;
-                box-shadow: 0 3px 8px rgba(15, 74, 166, 0.18);
+                background: linear-gradient(135deg, #3b82f6, #2563eb);
+                border-color: #2563eb;
+                box-shadow: 0 3px 8px rgba(37, 99, 235, 0.2);
             }
             div[data-testid="stCheckbox"]:has(input:checked) label p {
                 color: #ffffff !important;
             }
-            .im-shell {background: linear-gradient(160deg, #ffffff 0%, #f5f9ff 58%, #f2fbf5 100%); border: 1px solid #d7e2f3; border-radius: 12px; box-shadow: 0 6px 14px rgba(18,50,94,0.05); padding: 6px 8px; margin-bottom: 3px;}
+            .im-shell {background: linear-gradient(160deg, #ffffff 0%, #f4f9ff 100%); border: 1px solid #bfdbfe; border-radius: 12px; box-shadow: 0 6px 14px rgba(30, 64, 175, 0.08); padding: 6px 8px; margin-bottom: 3px;}
             .im-top {display: flex; align-items: center; gap: 5px; margin-bottom: 2px;}
             .im-avatar {width: 26px; height: 26px; border-radius: 50%; display:flex; align-items:center; justify-content:center; background: linear-gradient(135deg, #dbe9ff, #c8f3e1); border: 1px solid #c4d9ff; color: #1f3b66; font-size: 0.8rem; font-weight: 700;}
             .im-title {font-size: 0.95rem; font-weight: 800; color: #22314a; margin-bottom: 0; line-height: 1.05;}
             .im-sub {font-size: 0.8rem; color: #55729a; margin-bottom: 0; line-height: 1.08;}
             .im-banner {border-radius: 8px; padding: 4px 6px; font-size: 0.8rem; font-weight: 700; margin-top: 2px; border: 1px solid #d6e3f8;}
-            .im-day-card {border: 1px solid #b8d0ef; background: linear-gradient(135deg, #f8fbff, #eef6ff); border-radius: 12px; padding: 8px 10px; margin-bottom: 6px;}
+            .im-day-card {border: 1px solid #93c5fd; background: linear-gradient(135deg, #eff6ff, #dbeafe); border-radius: 12px; padding: 8px 10px; margin-bottom: 6px;}
             .im-day-top {display:flex; align-items:center; justify-content:space-between; gap:8px;}
-            .im-day-title {font-size: 0.78rem; color:#5a7093; font-weight:700; text-transform: uppercase; letter-spacing: 0.04em;}
-            .im-day-date {font-size: 1.28rem; color:#12345d; font-weight:900; line-height:1; margin-top:2px;}
-            .im-day-count {font-size: 0.8rem; color:#355a87; margin-top:2px;}
-            .im-day-badge {font-size:0.76rem; font-weight:800; padding:4px 8px; border-radius:999px; border:1px solid #8ab4e6; background:#ffffff; color:#0f4aa6;}
-            .im-day-badge-true {background:#0f4aa6; color:#ffffff; border-color:#0f4aa6;}
-            .im-chip {padding: 4px 8px; border-radius: 999px; border: 1px solid #d5def0; font-size: 0.73rem; color: #4b5d7f; background: #ffffff;}
-            .im-chip-active {padding: 4px 8px; border-radius: 999px; border: 1px solid #0f4aa6; font-size: 0.73rem; color: #ffffff; background: linear-gradient(90deg, #0f4aa6, #0a68c7);}
-            .im-mini-card {border: 1px solid #d9e4f4; background: #ffffff; border-radius: 12px; padding: 8px 10px; margin-bottom: 7px; font-size: 0.86rem; color: #2b3a54;}
+            .im-day-title {font-size: 0.78rem; color:#1e3a8a; font-weight:700; text-transform: uppercase; letter-spacing: 0.04em;}
+            .im-day-date {font-size: 1.28rem; color:#1e40af; font-weight:900; line-height:1; margin-top:2px;}
+            .im-day-count {font-size: 0.8rem; color:#1d4ed8; margin-top:2px;}
+            .im-day-badge {font-size:0.76rem; font-weight:800; padding:4px 8px; border-radius:999px; border:1px solid #60a5fa; background:#eff6ff; color:#1e40af;}
+            .im-day-badge-true {background:#3b82f6; color:#ffffff; border-color:#3b82f6;}
+            .im-chip {padding: 4px 8px; border-radius: 999px; border: 1px solid #bfdbfe; font-size: 0.73rem; color: #1e3a8a; background: #eff6ff;}
+            .im-chip-active {padding: 4px 8px; border-radius: 999px; border: 1px solid #2563eb; font-size: 0.73rem; color: #ffffff; background: linear-gradient(90deg, #2563eb, #3b82f6);}
+            .im-mini-card {border: 1px solid #bfdbfe; background: #ffffff; border-radius: 12px; padding: 8px 10px; margin-bottom: 7px; font-size: 0.86rem; color: #1f2937;}
             .im-ok {border-left: 4px solid #1b9f66;}
             .im-warn {border-left: 4px solid #db6a1a;}
             .im-danger {border-left: 4px solid #c0392b;}
@@ -4664,24 +4664,24 @@ def render_interfaz_medica():
                 display: none !important;
             }
             div[data-testid="stVerticalBlockBorderWrapper"]:has(.im-box-select-marker) {
-                background: linear-gradient(180deg, #eef6ff 0%, #f8fbff 100%) !important;
-                border: 1px solid #c8dbf5 !important;
+                background: linear-gradient(180deg, #eff6ff 0%, #dbeafe 100%) !important;
+                border: 1px solid #93c5fd !important;
                 border-radius: 12px !important;
                 min-height: 42vh !important;
                 max-height: 42vh !important;
                 overflow: hidden !important;
             }
             div[data-testid="stVerticalBlockBorderWrapper"]:has(.im-box-picked-marker) {
-                background: linear-gradient(180deg, #ecfbf5 0%, #f6fffb 100%) !important;
-                border: 1px solid #b9ead8 !important;
+                background: linear-gradient(180deg, #f3f8ff 0%, #eaf3ff 100%) !important;
+                border: 1px solid #93c5fd !important;
                 border-radius: 12px !important;
                 min-height: 48vh !important;
                 max-height: 48vh !important;
                 overflow: hidden !important;
             }
             div[data-testid="stVerticalBlockBorderWrapper"]:has(.im-box-content-marker) {
-                background: linear-gradient(180deg, #fff8ea 0%, #fffdf7 100%) !important;
-                border: 1px solid #f3dec0 !important;
+                background: linear-gradient(180deg, #f8fbff 0%, #eff6ff 100%) !important;
+                border: 1px solid #93c5fd !important;
                 border-radius: 12px !important;
                 min-height: 90vh !important;
                 max-height: 90vh !important;
@@ -5065,7 +5065,7 @@ def render_interfaz_medica():
     with panel_der:
         st.markdown("<div class='im-box-content-marker'></div>", unsafe_allow_html=True)
         st.markdown(
-            "<div style='background:linear-gradient(90deg,#fff8ea,#fffdf7);border:1px solid #f3dec0;border-radius:10px;padding:6px 10px;margin-bottom:6px;color:#5e4a2b;font-weight:700;'>Contenido clinico</div>",
+            "<div style='background:linear-gradient(90deg,#eff6ff,#dbeafe);border:1px solid #93c5fd;border-radius:10px;padding:6px 10px;margin-bottom:6px;color:#1e3a8a;font-weight:700;'>Contenido clínico</div>",
             unsafe_allow_html=True,
         )
         st.caption("Formulario clínico")
