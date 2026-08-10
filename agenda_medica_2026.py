@@ -4578,7 +4578,7 @@ def render_interfaz_medica():
     st.markdown(
         """
         <style>
-            .block-container {padding-top: 0.06rem !important; padding-bottom: 0.28rem !important; max-width: 1200px !important;}
+            .block-container {padding-top: 0.06rem !important; padding-bottom: 0.18rem !important; max-width: 1200px !important; height: calc(100vh - 0.5rem) !important; overflow: hidden !important;}
             [data-testid="stVerticalBlock"] > [style*="flex-direction: column"] > [data-testid="stVerticalBlock"] {gap: 0.15rem !important;}
             h3, h4 {margin-top: 0.08rem !important; margin-bottom: 0.12rem !important; font-size: 0.95rem !important;}
             div[data-testid="stCheckbox"] {
@@ -4658,6 +4658,40 @@ def render_interfaz_medica():
                 overflow-wrap: normal !important;
                 hyphens: none !important;
             }
+            .im-box-select-marker,
+            .im-box-picked-marker,
+            .im-box-content-marker {
+                display: none !important;
+            }
+            div[data-testid="stVerticalBlockBorderWrapper"]:has(.im-box-select-marker) {
+                background: linear-gradient(180deg, #eef6ff 0%, #f8fbff 100%) !important;
+                border: 1px solid #c8dbf5 !important;
+                border-radius: 12px !important;
+                min-height: 42vh !important;
+                max-height: 42vh !important;
+                overflow: hidden !important;
+            }
+            div[data-testid="stVerticalBlockBorderWrapper"]:has(.im-box-picked-marker) {
+                background: linear-gradient(180deg, #ecfbf5 0%, #f6fffb 100%) !important;
+                border: 1px solid #b9ead8 !important;
+                border-radius: 12px !important;
+                min-height: 48vh !important;
+                max-height: 48vh !important;
+                overflow: hidden !important;
+            }
+            div[data-testid="stVerticalBlockBorderWrapper"]:has(.im-box-content-marker) {
+                background: linear-gradient(180deg, #fff8ea 0%, #fffdf7 100%) !important;
+                border: 1px solid #f3dec0 !important;
+                border-radius: 12px !important;
+                min-height: 90vh !important;
+                max-height: 90vh !important;
+                overflow: hidden !important;
+            }
+            div[data-testid="stVerticalBlockBorderWrapper"]:has(.im-box-select-marker) > div,
+            div[data-testid="stVerticalBlockBorderWrapper"]:has(.im-box-picked-marker) > div,
+            div[data-testid="stVerticalBlockBorderWrapper"]:has(.im-box-content-marker) > div {
+                height: 100% !important;
+            }
         </style>
         """,
         unsafe_allow_html=True,
@@ -4709,6 +4743,7 @@ def render_interfaz_medica():
     es_hoy = fecha_sel == hoy
 
     caja_seleccion = panel_izq.container(border=True)
+    caja_seleccion.markdown("<div class='im-box-select-marker'></div>", unsafe_allow_html=True)
 
     caja_seleccion.markdown(
         f"""
@@ -4963,6 +4998,7 @@ def render_interfaz_medica():
         return estado_dict[campo]
 
     caja_paciente = panel_izq.container(border=True)
+    caja_paciente.markdown("<div class='im-box-picked-marker'></div>", unsafe_allow_html=True)
 
     caja_paciente.markdown(
         f"""
@@ -5001,6 +5037,7 @@ def render_interfaz_medica():
                     st.rerun()
 
     with panel_der:
+        st.markdown("<div class='im-box-content-marker'></div>", unsafe_allow_html=True)
         st.markdown(
             "<div style='background:linear-gradient(90deg,#fff8ea,#fffdf7);border:1px solid #f3dec0;border-radius:10px;padding:6px 10px;margin-bottom:6px;color:#5e4a2b;font-weight:700;'>Contenido clinico</div>",
             unsafe_allow_html=True,
