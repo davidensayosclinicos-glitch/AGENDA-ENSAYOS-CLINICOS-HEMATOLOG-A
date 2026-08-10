@@ -1822,6 +1822,21 @@ def _normalizar_lista_texto(raw_valor):
     return [p.strip() for p in partes if p and p.strip()]
 
 
+def _lista_unica(items):
+    vistos = set()
+    salida = []
+    for item in items or []:
+        txt = str(item or "").strip()
+        if not txt:
+            continue
+        clave = txt.casefold()
+        if clave in vistos:
+            continue
+        vistos.add(clave)
+        salida.append(txt)
+    return salida
+
+
 def _estado_base_interfaz_medica(visita_row):
     otras = _normalizar_lista_texto(visita_row.get("otras_pruebas", ""))
     if bool(visita_row.get("medula")):
@@ -1918,6 +1933,180 @@ def _crear_tabla_interfaz_medica_si_falta(cursor):
         )
 
 
+def _fila_a_estado_interfaz_guardado(fila):
+    if not fila:
+        return None
+    return {
+        "estado_constantes": _json_a_dict_seguro(fila[0]),
+        "estado_comentarios": _json_a_dict_seguro(fila[1]),
+        "estado_pruebas": _json_a_dict_seguro(fila[2]),
+        "estado_farmacos_estudio": _json_a_dict_seguro(fila[3]),
+        "estado_medicacion_concomitante": _json_a_dict_seguro(fila[4]),
+        "estado_aes": _json_a_dict_seguro(fila[5]),
+        "estado_decision": _json_a_dict_seguro(fila[6]),
+        "nota_clinica": str(fila[7] or ""),
+    }
+
+
+def _get_estado_interfaz_guardado_por_visita(visita_id):
+    conn = connect_db()
+    c = conn.cursor()
+    try:
+        fila = c.execute(
+            '''
+            SELECT estado_constantes, estado_comentarios, estado_pruebas,
+                   estado_farmacos_estudio, estado_medicacion_concomitante,
+                   estado_aes, estado_decision, nota_clinica
+            FROM interfaz_medica_visita
+            WHERE visita_id = ?
+            ''',
+            (int(visita_id),),
+        ).fetchone()
+    except Exception:
+        fila = None
+    conn.close()
+    return _fila_a_estado_interfaz_guardado(fila)
+
+
+def _estado_arrastrable_desde_visitas_previas(df_visitas_all, visita_row):
+    cod = normalizar_clave_paciente(str(visita_row.get("codigo", "") or ""))
+    nom = normalizar_clave_paciente(str(visita_row.get("nombre", "") or ""))
+    ens = normalizar_clave_paciente(str(visita_row.get("ensayo", "") or ""))
+    visita_id_actual = int(visita_row.get("id"))
+
+    base = df_visitas_all.copy()
+    base["_ens_norm"] = base["ensayo"].fillna("").astype(str).apply(normalizar_clave_paciente)
+    base["_cod_norm"] = base["codigo"].fillna("").astype(str).apply(normalizar_clave_paciente)
+    base["_nom_norm"] = base["nombre"].fillna("").astype(str).apply(normalizar_clave_paciente)
+    base["_fecha_dt"] = pd.to_datetime(base["fecha"], errors="coerce")
+    base["_id_int"] = pd.to_numeric(base["id"], errors="coerce")
+
+    mask = base["_ens_norm"] == ens
+    if cod:
+        mask = mask & (base["_cod_norm"] == cod)
+    else:
+        mask = mask & (base["_nom_norm"] == nom)
+
+    base = base[mask].copy()
+    if base.empty:
+        return None
+
+    fila_actual = base[base["_id_int"] == visita_id_actual]
+    fecha_actual = fila_actual["_fecha_dt"].iloc[0] if not fila_actual.empty else pd.NaT
+
+    if pd.notna(fecha_actual):
+        prev_mask = (base["_fecha_dt"] < fecha_actual) | (
+            (base["_fecha_dt"] == fecha_actual) & (base["_id_int"] < visita_id_actual)
+        )
+    else:
+        prev_mask = base["_id_int"] < visita_id_actual
+
+    previas = base[prev_mask].sort_values(by=["_fecha_dt", "_id_int"], ascending=[False, False])
+    if previas.empty:
+        return None
+
+    for _, row in previas.iterrows():
+        estado_prev = _get_estado_interfaz_guardado_por_visita(int(row["_id_int"]))
+        if estado_prev:
+            return estado_prev
+    return None
+
+
+def _aplicar_arrastre_checklists(estado_destino, estado_origen):
+    if not isinstance(estado_origen, dict):
+        return estado_destino
+
+    mapeo_listas = [
+        ("estado_comentarios", "sintomas"),
+        ("estado_pruebas", "pruebas"),
+        ("estado_medicacion_concomitante", "medicaciones"),
+        ("estado_aes", "eventos"),
+    ]
+    mapeo_aux = {
+        "estado_comentarios": ["sintomas_custom", "sintomas_expandido"],
+        "estado_pruebas": ["pruebas_custom", "pruebas_expandido"],
+        "estado_medicacion_concomitante": ["medicaciones_custom", "medicaciones_expandido"],
+        "estado_aes": ["eventos_custom", "eventos_expandido"],
+    }
+
+    for seccion, campo in mapeo_listas:
+        sec_dest = estado_destino.get(seccion, {})
+        sec_orig = estado_origen.get(seccion, {})
+        if not isinstance(sec_dest, dict) or not isinstance(sec_orig, dict):
+            continue
+        lista = sec_orig.get(campo, [])
+        if isinstance(lista, list):
+            sec_dest[campo] = _lista_unica(lista)
+        for extra_key in mapeo_aux.get(seccion, []):
+            if extra_key in sec_orig:
+                sec_dest[extra_key] = sec_orig.get(extra_key)
+        estado_destino[seccion] = sec_dest
+
+    return estado_destino
+
+
+def _resumen_cambios_interfaz_para_ficha(estado_anterior, estado_actual):
+    cambios = []
+    estado_anterior = estado_anterior or _estado_base_interfaz_medica({})
+
+    def _diff_lista(seccion, campo, titulo):
+        ant = _lista_unica((estado_anterior.get(seccion, {}) or {}).get(campo, []))
+        act = _lista_unica((estado_actual.get(seccion, {}) or {}).get(campo, []))
+        set_ant = {x.casefold() for x in ant}
+        set_act = {x.casefold() for x in act}
+        anadidos = [x for x in act if x.casefold() not in set_ant]
+        quitados = [x for x in ant if x.casefold() not in set_act]
+        if anadidos or quitados:
+            partes = []
+            if anadidos:
+                partes.append("+ " + ", ".join(anadidos[:5]))
+            if quitados:
+                partes.append("- " + ", ".join(quitados[:5]))
+            cambios.append(f"{titulo}: {' | '.join(partes)}")
+
+    _diff_lista("estado_comentarios", "sintomas", "Sintomas")
+    _diff_lista("estado_pruebas", "pruebas", "Pruebas")
+    _diff_lista("estado_medicacion_concomitante", "medicaciones", "Medicacion")
+    _diff_lista("estado_aes", "eventos", "AEs")
+
+    dec_ant = str((estado_anterior.get("estado_decision", {}) or {}).get("decision", "Pendiente") or "Pendiente")
+    dec_act = str((estado_actual.get("estado_decision", {}) or {}).get("decision", "Pendiente") or "Pendiente")
+    if dec_ant != dec_act:
+        cambios.append(f"Decision: {dec_ant} -> {dec_act}")
+
+    com_ant = str((estado_anterior.get("estado_comentarios", {}) or {}).get("comentario_libre", "") or "").strip()
+    com_act = str((estado_actual.get("estado_comentarios", {}) or {}).get("comentario_libre", "") or "").strip()
+    if com_ant != com_act:
+        cambios.append("Comentario libre actualizado")
+
+    return cambios
+
+
+def _registrar_cambios_interfaz_en_ficha(visita_id, estado_anterior, estado_actual):
+    cambios = _resumen_cambios_interfaz_para_ficha(estado_anterior, estado_actual)
+    if not cambios:
+        return
+
+    df_visitas = get_visitas()
+    if df_visitas.empty:
+        return
+    fila = df_visitas[pd.to_numeric(df_visitas["id"], errors="coerce") == int(visita_id)]
+    if fila.empty:
+        return
+    visita = fila.iloc[0]
+    codigo = str(visita.get("codigo", "") or "")
+    nombre = str(visita.get("nombre", "") or "")
+    ensayo = str(visita.get("ensayo", "") or "")
+    fecha_txt = formatear_fecha_visita(visita.get("fecha"))
+
+    adenda = get_adenda_paciente(codigo, nombre, ensayo)
+    texto_actual = str((adenda or {}).get("texto", "") or "").rstrip()
+    ts = ahora_local().strftime("%Y-%m-%d %H:%M")
+    entrada = f"[{ts}] Interfaz medica visita #{int(visita_id)} ({fecha_txt}): " + "; ".join(cambios)
+    nuevo_texto = (texto_actual + "\n" + entrada).strip() if texto_actual else entrada
+    guardar_adenda_paciente(codigo, nombre, ensayo, nuevo_texto)
+
+
 def get_estado_interfaz_medica(visita_row):
     visita_id = int(visita_row.get("id"))
     estado = _estado_base_interfaz_medica(visita_row)
@@ -1947,6 +2136,13 @@ def get_estado_interfaz_medica(visita_row):
     conn.close()
 
     if not fila:
+        try:
+            df_visitas = get_visitas()
+            estado_prev = _estado_arrastrable_desde_visitas_previas(df_visitas, visita_row)
+            if estado_prev:
+                estado = _aplicar_arrastre_checklists(estado, estado_prev)
+        except Exception:
+            pass
         return estado
 
     columnas = [
@@ -1975,20 +2171,37 @@ def guardar_estado_interfaz_medica(visita_id, estado):
     visita_id = int(visita_id)
     conn = connect_db()
     c = conn.cursor()
+    estado_previo = None
     try:
-        existe = c.execute(
-            "SELECT id FROM interfaz_medica_visita WHERE visita_id = ?",
+        fila_existente = c.execute(
+            '''
+            SELECT estado_constantes, estado_comentarios, estado_pruebas,
+                   estado_farmacos_estudio, estado_medicacion_concomitante,
+                   estado_aes, estado_decision, nota_clinica
+            FROM interfaz_medica_visita
+            WHERE visita_id = ?
+            ''',
             (visita_id,),
         ).fetchone()
+        existe = bool(fila_existente)
+        estado_previo = _fila_a_estado_interfaz_guardado(fila_existente)
     except Exception as exc:
         if _es_error_tabla_interfaz_no_existe(exc):
             try:
                 _crear_tabla_interfaz_medica_si_falta(c)
                 conn.commit()
-                existe = c.execute(
-                    "SELECT id FROM interfaz_medica_visita WHERE visita_id = ?",
+                fila_existente = c.execute(
+                    '''
+                    SELECT estado_constantes, estado_comentarios, estado_pruebas,
+                           estado_farmacos_estudio, estado_medicacion_concomitante,
+                           estado_aes, estado_decision, nota_clinica
+                    FROM interfaz_medica_visita
+                    WHERE visita_id = ?
+                    ''',
                     (visita_id,),
                 ).fetchone()
+                existe = bool(fila_existente)
+                estado_previo = _fila_a_estado_interfaz_guardado(fila_existente)
             except Exception:
                 conn.rollback()
                 conn.close()
@@ -2010,6 +2223,7 @@ def guardar_estado_interfaz_medica(visita_id, estado):
         "ultima_actualizacion": datetime.now().strftime("%Y-%m-%d %H:%M"),
     }
 
+    guardado_ok = False
     try:
         if existe:
             c.execute(
@@ -2057,10 +2271,17 @@ def guardar_estado_interfaz_medica(visita_id, estado):
                     payload["ultima_actualizacion"],
                 ),
             )
+        guardado_ok = True
         conn.commit()
     except Exception:
         conn.rollback()
     conn.close()
+
+    if guardado_ok:
+        try:
+            _registrar_cambios_interfaz_en_ficha(visita_id, estado_previo, estado)
+        except Exception:
+            pass
 
 
 def _listar_bases_backup_locales():
