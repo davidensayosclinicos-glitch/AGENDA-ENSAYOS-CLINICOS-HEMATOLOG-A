@@ -4634,6 +4634,20 @@ def render_interfaz_medica():
                 font-size: 0.9rem !important;
             }
             .stCaption {font-size: 0.75rem !important; margin: 1px 0 !important;}
+            [data-testid="stButton"] > button,
+            div[data-testid="stCheckbox"] label p,
+            .im-mini-card,
+            .im-banner,
+            .im-title,
+            .im-sub {
+                word-break: keep-all !important;
+                overflow-wrap: normal !important;
+                hyphens: none !important;
+            }
+            [data-testid="stButton"] > button {
+                white-space: normal !important;
+                line-height: 1.15 !important;
+            }
         </style>
         """,
         unsafe_allow_html=True,
@@ -4944,9 +4958,8 @@ def render_interfaz_medica():
         unsafe_allow_html=True,
     )
 
-    # Barra de navegación rápida entre pasos
-    # Barra de navegación rápida en 2 filas para que el texto no se corte
-    for fila_inicio, fila_fin in [(0, 6), (6, 11)]:
+    # Barra de navegación rápida en 3 filas para evitar cortes de palabras.
+    for fila_inicio, fila_fin in [(0, 4), (4, 8), (8, 11)]:
         step_cols = panel_izq.columns(fila_fin - fila_inicio)
         for si in range(fila_inicio, fila_fin):
             ico_barra = iconos_barra[si]
