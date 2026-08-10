@@ -4575,12 +4575,10 @@ def renderizar_registro_kits_integrado():
 
 
 def render_interfaz_medica():
-    st.subheader("Interfaz medica")
-
     st.markdown(
         """
         <style>
-            .block-container {padding-top: 0.4rem !important; padding-bottom: 0.35rem !important; max-width: 1200px !important;}
+            .block-container {padding-top: 0.06rem !important; padding-bottom: 0.28rem !important; max-width: 1200px !important;}
             [data-testid="stVerticalBlock"] > [style*="flex-direction: column"] > [data-testid="stVerticalBlock"] {gap: 0.15rem !important;}
             h3, h4 {margin-top: 0.08rem !important; margin-bottom: 0.12rem !important; font-size: 0.95rem !important;}
             div[data-testid="stCheckbox"] {
