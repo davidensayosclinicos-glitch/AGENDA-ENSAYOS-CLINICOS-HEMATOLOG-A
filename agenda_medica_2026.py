@@ -4812,6 +4812,86 @@ def render_interfaz_medica():
     if paso == 11:
         st.write("Protocolos, citas y notas en el menu lateral.")
 
+    # Componente de detección de swipe horizontal
+    swipe_html = f"""
+    <div id="swipe-detector" style="width:100%; height:100vh; position:fixed; top:0; left:0; z-index:0; pointer-events:none;"></div>
+    <script>
+    (function() {{
+        let touchStartX = 0;
+        let touchStartY = 0;
+        const minSwipeDistance = 50;
+        
+        document.addEventListener('touchstart', function(e) {{
+            if (e.touches.length > 0) {{
+                touchStartX = e.touches[0].clientX;
+                touchStartY = e.touches[0].clientY;
+            }}
+        }}, false);
+        
+        document.addEventListener('touchend', function(e) {{
+            if (e.changedTouches.length > 0) {{
+                const touchEndX = e.changedTouches[0].clientX;
+                const touchEndY = e.changedTouches[0].clientY;
+                const deltaX = touchEndX - touchStartX;
+                const deltaY = touchEndY - touchStartY;
+                
+                if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > minSwipeDistance) {{
+                    if (deltaX > 0) {{
+                        // Swipe derecha = Anterior
+                        const botones = document.querySelectorAll('button');
+                        for (let btn of botones) {{
+                            if (btn.textContent.includes('Atras') && !btn.disabled) {{
+                                btn.click();
+                                break;
+                            }}
+                        }}
+                    }} else {{
+                        // Swipe izquierda = Siguiente
+                        const botones = document.querySelectorAll('button');
+                        for (let btn of botones) {{
+                            if (btn.textContent.includes('Siguiente') && !btn.disabled) {{
+                                btn.click();
+                                break;
+                            }}
+                        }}
+                    }}
+                }}
+            }}
+        }}, false);
+        
+        // También permite mouse drag en desktop
+        let mouseDownX = 0;
+        document.addEventListener('mousedown', function(e) {{
+            mouseDownX = e.clientX;
+        }}, false);
+        
+        document.addEventListener('mouseup', function(e) {{
+            const deltaX = e.clientX - mouseDownX;
+            if (Math.abs(deltaX) > minSwipeDistance) {{
+                if (deltaX > 0) {{
+                    const botones = document.querySelectorAll('button');
+                    for (let btn of botones) {{
+                        if (btn.textContent.includes('Atras') && !btn.disabled) {{
+                            btn.click();
+                            break;
+                        }}
+                    }}
+                }} else {{
+                    const botones = document.querySelectorAll('button');
+                    for (let btn of botones) {{
+                        if (btn.textContent.includes('Siguiente') && !btn.disabled) {{
+                            btn.click();
+                            break;
+                        }}
+                    }}
+                }}
+            }}
+        }}, false);
+    }})();
+    </script>
+    """
+    components.html(swipe_html, height=0)
+
     nav1, nav2, nav3 = st.columns([1, 1.2, 1])
     if nav1.button("Atras", disabled=(paso <= 1), key=f"im_prev_{visita_id}"):
         st.session_state[step_key] = max(1, paso - 1)
