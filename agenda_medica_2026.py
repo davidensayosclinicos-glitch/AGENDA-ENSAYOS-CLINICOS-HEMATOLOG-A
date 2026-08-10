@@ -1705,7 +1705,10 @@ def get_ensayos_existentes():
 def borrar_visita(id_visita):
     conn = connect_db()
     c = conn.cursor()
-    c.execute("DELETE FROM interfaz_medica_visita WHERE visita_id=?", (id_visita,))
+    try:
+        c.execute("DELETE FROM interfaz_medica_visita WHERE visita_id=?", (id_visita,))
+    except Exception:
+        pass
     c.execute("DELETE FROM visitas WHERE id=?", (id_visita,))
     sincronizar_pacientes_desde_visitas(c)
     eliminar_ensayos_sin_pacientes(c)
@@ -1748,7 +1751,10 @@ def borrar_paciente_citas_ojos(codigo, nombre):
         return 0
 
     placeholders = ",".join(["?"] * len(ids_borrar))
-    c.execute(f"DELETE FROM interfaz_medica_visita WHERE visita_id IN ({placeholders})", tuple(ids_borrar))
+    try:
+        c.execute(f"DELETE FROM interfaz_medica_visita WHERE visita_id IN ({placeholders})", tuple(ids_borrar))
+    except Exception:
+        pass
     c.execute(f"DELETE FROM revision_ocular WHERE visita_id IN ({placeholders})", tuple(ids_borrar))
     c.execute(f"DELETE FROM visitas WHERE id IN ({placeholders})", tuple(ids_borrar))
 
@@ -1783,7 +1789,10 @@ def borrar_visitas_sin_paciente_citas_ojos():
         return 0
 
     placeholders = ",".join(["?"] * len(ids_borrar))
-    c.execute(f"DELETE FROM interfaz_medica_visita WHERE visita_id IN ({placeholders})", tuple(ids_borrar))
+    try:
+        c.execute(f"DELETE FROM interfaz_medica_visita WHERE visita_id IN ({placeholders})", tuple(ids_borrar))
+    except Exception:
+        pass
     c.execute(f"DELETE FROM revision_ocular WHERE visita_id IN ({placeholders})", tuple(ids_borrar))
     c.execute(f"DELETE FROM visitas WHERE id IN ({placeholders})", tuple(ids_borrar))
 
@@ -1857,21 +1866,84 @@ def _estado_base_interfaz_medica(visita_row):
     }
 
 
+def _es_error_tabla_interfaz_no_existe(exc):
+    txt = str(exc or "").lower()
+    return (
+        "interfaz_medica_visita" in txt
+        and (
+            "does not exist" in txt
+            or "undefinedtable" in txt
+            or "no such table" in txt
+        )
+    )
+
+
+def _crear_tabla_interfaz_medica_si_falta(cursor):
+    if DB_BACKEND == "postgres":
+        cursor.execute(
+            '''
+            CREATE TABLE IF NOT EXISTS interfaz_medica_visita (
+                id BIGSERIAL PRIMARY KEY,
+                visita_id BIGINT UNIQUE,
+                estado_constantes TEXT,
+                estado_comentarios TEXT,
+                estado_pruebas TEXT,
+                estado_farmacos_estudio TEXT,
+                estado_medicacion_concomitante TEXT,
+                estado_aes TEXT,
+                estado_decision TEXT,
+                nota_clinica TEXT,
+                ultima_actualizacion TEXT
+            )
+            '''
+        )
+    else:
+        cursor.execute(
+            '''
+            CREATE TABLE IF NOT EXISTS interfaz_medica_visita (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                visita_id INTEGER UNIQUE,
+                estado_constantes TEXT,
+                estado_comentarios TEXT,
+                estado_pruebas TEXT,
+                estado_farmacos_estudio TEXT,
+                estado_medicacion_concomitante TEXT,
+                estado_aes TEXT,
+                estado_decision TEXT,
+                nota_clinica TEXT,
+                ultima_actualizacion TEXT,
+                FOREIGN KEY(visita_id) REFERENCES visitas(id)
+            )
+            '''
+        )
+
+
 def get_estado_interfaz_medica(visita_row):
     visita_id = int(visita_row.get("id"))
     estado = _estado_base_interfaz_medica(visita_row)
     conn = connect_db()
     c = conn.cursor()
-    fila = c.execute(
-        '''
-        SELECT estado_constantes, estado_comentarios, estado_pruebas,
-               estado_farmacos_estudio, estado_medicacion_concomitante,
-               estado_aes, estado_decision, nota_clinica
-        FROM interfaz_medica_visita
-        WHERE visita_id = ?
-        ''',
-        (visita_id,)
-    ).fetchone()
+    try:
+        fila = c.execute(
+            '''
+            SELECT estado_constantes, estado_comentarios, estado_pruebas,
+                   estado_farmacos_estudio, estado_medicacion_concomitante,
+                   estado_aes, estado_decision, nota_clinica
+            FROM interfaz_medica_visita
+            WHERE visita_id = ?
+            ''',
+            (visita_id,)
+        ).fetchone()
+    except Exception as exc:
+        if _es_error_tabla_interfaz_no_existe(exc):
+            try:
+                _crear_tabla_interfaz_medica_si_falta(c)
+                conn.commit()
+                fila = None
+            except Exception:
+                fila = None
+        else:
+            fila = None
     conn.close()
 
     if not fila:
@@ -1903,10 +1975,28 @@ def guardar_estado_interfaz_medica(visita_id, estado):
     visita_id = int(visita_id)
     conn = connect_db()
     c = conn.cursor()
-    existe = c.execute(
-        "SELECT id FROM interfaz_medica_visita WHERE visita_id = ?",
-        (visita_id,),
-    ).fetchone()
+    try:
+        existe = c.execute(
+            "SELECT id FROM interfaz_medica_visita WHERE visita_id = ?",
+            (visita_id,),
+        ).fetchone()
+    except Exception as exc:
+        if _es_error_tabla_interfaz_no_existe(exc):
+            try:
+                _crear_tabla_interfaz_medica_si_falta(c)
+                conn.commit()
+                existe = c.execute(
+                    "SELECT id FROM interfaz_medica_visita WHERE visita_id = ?",
+                    (visita_id,),
+                ).fetchone()
+            except Exception:
+                conn.rollback()
+                conn.close()
+                return
+        else:
+            conn.rollback()
+            conn.close()
+            return
 
     payload = {
         "estado_constantes": json.dumps(estado.get("estado_constantes", {}), ensure_ascii=False),
@@ -1920,54 +2010,56 @@ def guardar_estado_interfaz_medica(visita_id, estado):
         "ultima_actualizacion": datetime.now().strftime("%Y-%m-%d %H:%M"),
     }
 
-    if existe:
-        c.execute(
-            '''
-            UPDATE interfaz_medica_visita
-            SET estado_constantes = ?, estado_comentarios = ?, estado_pruebas = ?,
-                estado_farmacos_estudio = ?, estado_medicacion_concomitante = ?,
-                estado_aes = ?, estado_decision = ?, nota_clinica = ?,
-                ultima_actualizacion = ?
-            WHERE visita_id = ?
-            ''',
-            (
-                payload["estado_constantes"],
-                payload["estado_comentarios"],
-                payload["estado_pruebas"],
-                payload["estado_farmacos_estudio"],
-                payload["estado_medicacion_concomitante"],
-                payload["estado_aes"],
-                payload["estado_decision"],
-                payload["nota_clinica"],
-                payload["ultima_actualizacion"],
-                visita_id,
-            ),
-        )
-    else:
-        c.execute(
-            '''
-            INSERT INTO interfaz_medica_visita (
-                visita_id, estado_constantes, estado_comentarios, estado_pruebas,
-                estado_farmacos_estudio, estado_medicacion_concomitante, estado_aes,
-                estado_decision, nota_clinica, ultima_actualizacion
+    try:
+        if existe:
+            c.execute(
+                '''
+                UPDATE interfaz_medica_visita
+                SET estado_constantes = ?, estado_comentarios = ?, estado_pruebas = ?,
+                    estado_farmacos_estudio = ?, estado_medicacion_concomitante = ?,
+                    estado_aes = ?, estado_decision = ?, nota_clinica = ?,
+                    ultima_actualizacion = ?
+                WHERE visita_id = ?
+                ''',
+                (
+                    payload["estado_constantes"],
+                    payload["estado_comentarios"],
+                    payload["estado_pruebas"],
+                    payload["estado_farmacos_estudio"],
+                    payload["estado_medicacion_concomitante"],
+                    payload["estado_aes"],
+                    payload["estado_decision"],
+                    payload["nota_clinica"],
+                    payload["ultima_actualizacion"],
+                    visita_id,
+                ),
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''',
-            (
-                visita_id,
-                payload["estado_constantes"],
-                payload["estado_comentarios"],
-                payload["estado_pruebas"],
-                payload["estado_farmacos_estudio"],
-                payload["estado_medicacion_concomitante"],
-                payload["estado_aes"],
-                payload["estado_decision"],
-                payload["nota_clinica"],
-                payload["ultima_actualizacion"],
-            ),
-        )
-
-    conn.commit()
+        else:
+            c.execute(
+                '''
+                INSERT INTO interfaz_medica_visita (
+                    visita_id, estado_constantes, estado_comentarios, estado_pruebas,
+                    estado_farmacos_estudio, estado_medicacion_concomitante, estado_aes,
+                    estado_decision, nota_clinica, ultima_actualizacion
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''',
+                (
+                    visita_id,
+                    payload["estado_constantes"],
+                    payload["estado_comentarios"],
+                    payload["estado_pruebas"],
+                    payload["estado_farmacos_estudio"],
+                    payload["estado_medicacion_concomitante"],
+                    payload["estado_aes"],
+                    payload["estado_decision"],
+                    payload["nota_clinica"],
+                    payload["ultima_actualizacion"],
+                ),
+            )
+        conn.commit()
+    except Exception:
+        conn.rollback()
     conn.close()
 
 
