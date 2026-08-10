@@ -4349,11 +4349,14 @@ def render_interfaz_medica():
         visita_sel = st.selectbox("Visita", options=opciones_visita, key="im_visita")
     visita_row = mapa_visitas[visita_sel]
     visita_id = int(visita_row["id"])
+    fecha_visita_txt = formatear_fecha_visita(visita_row.get("fecha"))
+    fecha_agenda_txt = fecha_sel.strftime("%d/%m/%Y")
+    fecha_real_hoy_txt = fecha_hoy_local().strftime("%d/%m/%Y")
 
     estado = get_estado_interfaz_medica(visita_row)
 
     pasos = [
-        "Resumen hoy",
+        "Resumen de visita",
         "Constantes y parametros",
         "Comentarios del paciente",
         "Pruebas a realizar",
@@ -4405,7 +4408,7 @@ def render_interfaz_medica():
                     <div>
                         <div class=\"im-title\">{html.escape(nombre_pac or 'Paciente')}</div>
                         <div class=\"im-sub\">{html.escape(str(visita_row.get('codigo', '') or '-'))} · {html.escape(str(visita_row.get('ensayo', '') or '-'))}</div>
-                        <div class=\"im-sub\">Ciclo {html.escape(str(visita_row.get('ciclo', '') or '-'))} · {html.escape(formatear_fecha_visita(visita_row.get('fecha')))}</div>
+                        <div class="im-sub">Ciclo {html.escape(str(visita_row.get('ciclo', '') or '-'))} · Agenda {html.escape(fecha_agenda_txt)}</div>
                     </div>
                 </div>
                 <div class=\"im-banner\" style=\"background:{color_actual}12; color:{color_actual}; border-color:{color_actual}55;\">{html.escape(iconos[paso-1])} · Paso {paso}/{len(pasos)} · {html.escape(pasos[paso-1])}</div>
@@ -4453,7 +4456,9 @@ def render_interfaz_medica():
         k2.metric("Pruebas", str(len(estado.get("estado_pruebas", {}).get("pruebas", []))))
         k3.metric("AEs", str(len(estado.get("estado_aes", {}).get("eventos", []))))
         st.info("Esta vista resume el estado global antes de pasar a cada modulo clinico.")
-        st.write(f"Visita: {formatear_fecha_visita(visita_row.get('fecha'))} | Ciclo: {visita_row.get('ciclo', '')}")
+        st.write(f"Fecha agenda seleccionada: {fecha_agenda_txt} | Fecha visita registrada: {fecha_visita_txt} | Hoy real: {fecha_real_hoy_txt}")
+        if fecha_agenda_txt != fecha_real_hoy_txt:
+            st.warning("Estas viendo una fecha de agenda distinta de hoy.")
         st.write(f"Comentarios base de agenda: {str(visita_row.get('comentarios', '') or 'Sin comentarios')}")
 
     if paso == 2:
