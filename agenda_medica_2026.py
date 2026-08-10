@@ -4730,9 +4730,15 @@ def render_interfaz_medica():
         return
 
     fechas_disponibles = sorted(ids_por_fecha.keys(), reverse=True)
-    hoy = fecha_hoy_local()
+    hoy = st.session_state.get("agenda_hoy_referencia", fecha_hoy_local())
     key_fecha = "im_fecha_sel"
+    key_hoy_ref = "im_hoy_ref"
     if key_fecha not in st.session_state:
+        st.session_state[key_fecha] = hoy
+        st.session_state[key_hoy_ref] = hoy
+    elif st.session_state.get(key_hoy_ref) != hoy:
+        # Si cambia el "hoy" de referencia (p.ej. nuevo día), resincronizamos.
+        st.session_state[key_hoy_ref] = hoy
         st.session_state[key_fecha] = hoy
 
     panel_izq, panel_der = st.columns([1, 1], gap="large")
@@ -7185,6 +7191,9 @@ if seccion_activa == "Agenda":
     # 1. Preparar eventos para el calendario
     df_visitas = get_visitas()
     calendar_events = construir_eventos_calendario(df_visitas)
+    hoy_agenda = fecha_hoy_local()
+    st.session_state["agenda_hoy_referencia"] = hoy_agenda
+    tz_cal = APP_TIMEZONE if APP_TIMEZONE else "local"
 
     # 2. Configuración del Calendario
     calendar_options = {
@@ -7196,7 +7205,8 @@ if seccion_activa == "Agenda":
             "center": "title",
             "right": "dayGridMonth,listDay"
         },
-        "initialDate": fecha_hoy_local().isoformat(),
+        "initialDate": hoy_agenda.isoformat(),
+        "timeZone": tz_cal,
         "firstDay": 1,
         "selectable": True,
     }
