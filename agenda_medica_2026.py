@@ -2107,6 +2107,69 @@ def _registrar_cambios_interfaz_en_ficha(visita_id, estado_anterior, estado_actu
     guardar_adenda_paciente(codigo, nombre, ensayo, nuevo_texto)
 
 
+def _resumen_lista_interfaz(items, limite=4):
+    vals = _lista_unica(items)
+    if not vals:
+        return ""
+    if len(vals) <= limite:
+        return ", ".join(vals)
+    return ", ".join(vals[:limite]) + f" (+{len(vals) - limite})"
+
+
+@st.cache_data(show_spinner=False, ttl=3)
+def get_interfaz_medica_visitas_df():
+    conn = connect_db()
+    try:
+        df = pd.read_sql(
+            '''
+            SELECT visita_id, estado_comentarios, estado_pruebas,
+                   estado_medicacion_concomitante, estado_aes,
+                   estado_decision, nota_clinica, ultima_actualizacion
+            FROM interfaz_medica_visita
+            ''',
+            conn,
+        )
+    except Exception:
+        df = pd.DataFrame(
+            columns=[
+                "visita_id",
+                "IM_SINTOMAS",
+                "IM_PRUEBAS",
+                "IM_MEDICACION",
+                "IM_AES",
+                "IM_DECISION",
+                "IM_COMENTARIO_LIBRE",
+                "IM_NOTA_CLINICA",
+                "IM_ULT_ACT",
+            ]
+        )
+    conn.close()
+
+    if df.empty:
+        return df
+
+    def _safe_dict(raw):
+        return _json_a_dict_seguro(raw)
+
+    comentarios = df["estado_comentarios"].apply(_safe_dict)
+    pruebas = df["estado_pruebas"].apply(_safe_dict)
+    medicaciones = df["estado_medicacion_concomitante"].apply(_safe_dict)
+    aes = df["estado_aes"].apply(_safe_dict)
+    decision = df["estado_decision"].apply(_safe_dict)
+
+    out = pd.DataFrame()
+    out["visita_id"] = pd.to_numeric(df["visita_id"], errors="coerce")
+    out["IM_SINTOMAS"] = comentarios.apply(lambda d: _resumen_lista_interfaz((d or {}).get("sintomas", [])))
+    out["IM_PRUEBAS"] = pruebas.apply(lambda d: _resumen_lista_interfaz((d or {}).get("pruebas", [])))
+    out["IM_MEDICACION"] = medicaciones.apply(lambda d: _resumen_lista_interfaz((d or {}).get("medicaciones", [])))
+    out["IM_AES"] = aes.apply(lambda d: _resumen_lista_interfaz((d or {}).get("eventos", [])))
+    out["IM_DECISION"] = decision.apply(lambda d: str((d or {}).get("decision", "") or ""))
+    out["IM_COMENTARIO_LIBRE"] = comentarios.apply(lambda d: str((d or {}).get("comentario_libre", "") or "").strip())
+    out["IM_NOTA_CLINICA"] = df["nota_clinica"].fillna("").astype(str)
+    out["IM_ULT_ACT"] = df["ultima_actualizacion"].fillna("").astype(str)
+    return out
+
+
 def get_estado_interfaz_medica(visita_row):
     visita_id = int(visita_row.get("id"))
     estado = _estado_base_interfaz_medica(visita_row)
@@ -2280,6 +2343,10 @@ def guardar_estado_interfaz_medica(visita_id, estado):
     if guardado_ok:
         try:
             _registrar_cambios_interfaz_en_ficha(visita_id, estado_previo, estado)
+        except Exception:
+            pass
+        try:
+            get_interfaz_medica_visitas_df.clear()
         except Exception:
             pass
 
@@ -5801,6 +5868,15 @@ if seccion_activa == "Ficha paciente":
                         }
                     )
                     df_ficha.drop(columns=["visita_id"], inplace=True, errors="ignore")
+                    df_im = get_interfaz_medica_visitas_df()
+                    if not df_im.empty:
+                        df_ficha = df_ficha.merge(
+                            df_im,
+                            how="left",
+                            left_on="id",
+                            right_on="visita_id"
+                        )
+                        df_ficha.drop(columns=["visita_id"], inplace=True, errors="ignore")
 
             if df_ficha.empty and nombre_sel:
                 nombre_sel_norm = normalizar_clave_paciente(nombre_sel)
@@ -5828,6 +5904,15 @@ if seccion_activa == "Ficha paciente":
                         }
                     )
                     df_ficha.drop(columns=["visita_id"], inplace=True, errors="ignore")
+                    df_im = get_interfaz_medica_visitas_df()
+                    if not df_im.empty:
+                        df_ficha = df_ficha.merge(
+                            df_im,
+                            how="left",
+                            left_on="id",
+                            right_on="visita_id"
+                        )
+                        df_ficha.drop(columns=["visita_id"], inplace=True, errors="ignore")
 
             if df_ficha.empty:
                 st.warning("No se encontraron visitas para este paciente.")
@@ -5850,6 +5935,19 @@ if seccion_activa == "Ficha paciente":
                 df_ficha["fecha_revision"] = df_ficha["fecha_revision"].apply(formatear_fecha_visita)
                 df_ficha["tablet"] = df_ficha["tablet"].apply(lambda v: "Si" if v else "No")
                 df_ficha["medula"] = df_ficha["medula"].apply(lambda v: "Si" if v else "No")
+                for col in [
+                    "IM_SINTOMAS",
+                    "IM_PRUEBAS",
+                    "IM_MEDICACION",
+                    "IM_AES",
+                    "IM_DECISION",
+                    "IM_COMENTARIO_LIBRE",
+                    "IM_NOTA_CLINICA",
+                    "IM_ULT_ACT",
+                ]:
+                    if col not in df_ficha.columns:
+                        df_ficha[col] = ""
+                    df_ficha[col] = df_ficha[col].fillna("").astype(str)
 
                 df_ficha = df_ficha.rename(
                     columns={
@@ -5863,6 +5961,14 @@ if seccion_activa == "Ficha paciente":
                         "medula": "MEDULA",
                         "otras_pruebas": "OTRAS PRUEBAS",
                         "comentarios": "COMENTARIOS",
+                        "IM_SINTOMAS": "IM SINTOMAS",
+                        "IM_PRUEBAS": "IM PRUEBAS",
+                        "IM_MEDICACION": "IM MEDICACION",
+                        "IM_AES": "IM AEs",
+                        "IM_DECISION": "IM DECISION",
+                        "IM_COMENTARIO_LIBRE": "IM COMENTARIO",
+                        "IM_NOTA_CLINICA": "IM NOTA CLINICA",
+                        "IM_ULT_ACT": "IM ULT ACT",
                         "sede_ocular": "REVISION OCULAR (SEDE)",
                         "agenda_hospitalaria_ocular": "AGENDA HOSPITALARIA (OCULAR)",
                         "fecha_revision": "REVISION OCULAR (FECHA)",
@@ -5881,6 +5987,14 @@ if seccion_activa == "Ficha paciente":
                         "MEDULA",
                         "OTRAS PRUEBAS",
                         "COMENTARIOS",
+                        "IM SINTOMAS",
+                        "IM PRUEBAS",
+                        "IM MEDICACION",
+                        "IM AEs",
+                        "IM DECISION",
+                        "IM COMENTARIO",
+                        "IM NOTA CLINICA",
+                        "IM ULT ACT",
                         "REVISION OCULAR (SEDE)",
                         "AGENDA HOSPITALARIA (OCULAR)",
                         "REVISION OCULAR (FECHA)",
