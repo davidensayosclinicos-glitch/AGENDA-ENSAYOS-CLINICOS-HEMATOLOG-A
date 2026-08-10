@@ -4615,9 +4615,6 @@ def render_interfaz_medica():
             .im-day-count {font-size: 0.8rem; color:#355a87; margin-top:2px;}
             .im-day-badge {font-size:0.76rem; font-weight:800; padding:4px 8px; border-radius:999px; border:1px solid #8ab4e6; background:#ffffff; color:#0f4aa6;}
             .im-day-badge-true {background:#0f4aa6; color:#ffffff; border-color:#0f4aa6;}
-            .im-left-select-box {background: linear-gradient(180deg, #f8fbff 0%, #eef6ff 100%); border: 1px solid #c8dbf5; border-radius: 14px; padding: 8px; margin-bottom: 8px;}
-            .im-left-picked-box {background: linear-gradient(180deg, #f6fffb 0%, #ecfbf5 100%); border: 1px solid #b9ead8; border-radius: 14px; padding: 8px; margin-bottom: 8px;}
-            .im-right-content-box {background: linear-gradient(180deg, #fffdf7 0%, #fff8ea 100%); border: 1px solid #f3dec0; border-radius: 14px; padding: 10px;}
             .im-chip {padding: 4px 8px; border-radius: 999px; border: 1px solid #d5def0; font-size: 0.73rem; color: #4b5d7f; background: #ffffff;}
             .im-chip-active {padding: 4px 8px; border-radius: 999px; border: 1px solid #0f4aa6; font-size: 0.73rem; color: #ffffff; background: linear-gradient(90deg, #0f4aa6, #0a68c7);}
             .im-mini-card {border: 1px solid #d9e4f4; background: #ffffff; border-radius: 12px; padding: 8px 10px; margin-bottom: 7px; font-size: 0.86rem; color: #2b3a54;}
@@ -4705,14 +4702,15 @@ def render_interfaz_medica():
         st.session_state[key_fecha] = hoy
 
     panel_izq, panel_der = st.columns([1, 1], gap="large")
+    panel_der = panel_der.container(border=True)
 
     fecha_sel = st.session_state.get(key_fecha, hoy)
     pacientes_en_fecha = len(ids_por_fecha.get(fecha_sel, set()))
     es_hoy = fecha_sel == hoy
 
-    panel_izq.markdown("<div class='im-left-select-box'>", unsafe_allow_html=True)
+    caja_seleccion = panel_izq.container(border=True)
 
-    panel_izq.markdown(
+    caja_seleccion.markdown(
         f"""
         <div class=\"im-day-card\">
             <div class=\"im-day-top\">
@@ -4728,7 +4726,7 @@ def render_interfaz_medica():
         unsafe_allow_html=True,
     )
 
-    nav_fecha = panel_izq.columns(5)
+    nav_fecha = caja_seleccion.columns(5)
     if nav_fecha[0].button("-7d", key="im_dia_menos_7", use_container_width=True):
         st.session_state[key_fecha] = fecha_sel - timedelta(days=7)
         st.rerun()
@@ -4745,7 +4743,7 @@ def render_interfaz_medica():
         st.session_state[key_fecha] = fecha_sel + timedelta(days=7)
         st.rerun()
 
-    fecha_picker = panel_izq.date_input(
+    fecha_picker = caja_seleccion.date_input(
         "Cambiar día",
         value=fecha_sel,
         key="im_fecha_picker",
@@ -4783,7 +4781,7 @@ def render_interfaz_medica():
     max_por_fila = 3
     for fila_inicio in range(0, len(opciones_paciente), max_por_fila):
         sub = opciones_paciente[fila_inicio:fila_inicio + max_por_fila]
-        pac_cols = panel_izq.columns(len(sub))
+        pac_cols = caja_seleccion.columns(len(sub))
         for j, etiqueta in enumerate(sub):
             i = fila_inicio + j
             cod_i, nom_i, ens_i = pacientes_map[etiqueta]
@@ -4807,8 +4805,6 @@ def render_interfaz_medica():
                 ):
                     st.session_state[pac_sel_key] = etiqueta
                     st.rerun()
-
-    panel_izq.markdown("</div>", unsafe_allow_html=True)
 
     cod_sel, nom_sel, ens_sel = pacientes_map[paciente_sel]
 
@@ -4966,9 +4962,9 @@ def render_interfaz_medica():
         st.caption(f"{len(estado_dict[campo])} seleccionada(s)")
         return estado_dict[campo]
 
-    panel_izq.markdown("<div class='im-left-picked-box'>", unsafe_allow_html=True)
+    caja_paciente = panel_izq.container(border=True)
 
-    panel_izq.markdown(
+    caja_paciente.markdown(
         f"""
         <div class=\"im-shell\" style=\"display:flex;align-items:center;justify-content:space-between;gap:6px;padding:4px 6px;\">
             <div style=\"flex:1;min-width:0;\">
@@ -4987,7 +4983,7 @@ def render_interfaz_medica():
 
     # Barra de navegación rápida en 3 filas para evitar cortes de palabras.
     for fila_inicio, fila_fin in [(0, 4), (4, 8), (8, 11)]:
-        step_cols = panel_izq.columns(fila_fin - fila_inicio)
+        step_cols = caja_paciente.columns(fila_fin - fila_inicio)
         for si in range(fila_inicio, fila_fin):
             ico_barra = iconos_barra[si]
             nombre_paso = pasos[si]
@@ -5004,10 +5000,11 @@ def render_interfaz_medica():
                     st.session_state[step_key] = num
                     st.rerun()
 
-    panel_izq.markdown("</div>", unsafe_allow_html=True)
-
     with panel_der:
-        st.markdown("<div class='im-right-content-box'>", unsafe_allow_html=True)
+        st.markdown(
+            "<div style='background:linear-gradient(90deg,#fff8ea,#fffdf7);border:1px solid #f3dec0;border-radius:10px;padding:6px 10px;margin-bottom:6px;color:#5e4a2b;font-weight:700;'>Contenido clinico</div>",
+            unsafe_allow_html=True,
+        )
         st.caption("Formulario clínico")
 
         completadas = 0
@@ -5417,8 +5414,6 @@ def render_interfaz_medica():
             guardar_estado_interfaz_medica(visita_id, estado)
             st.session_state[step_key] = min(len(pasos), paso + 1)
             st.rerun()
-
-        st.markdown("</div>", unsafe_allow_html=True)
     
     
 requerir_login_si_configurado()
