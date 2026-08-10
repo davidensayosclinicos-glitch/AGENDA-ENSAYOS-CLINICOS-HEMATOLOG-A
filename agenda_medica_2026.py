@@ -242,7 +242,7 @@ IMG_DIR_ESQUEMAS = resolver_directorio(
 )
 DREAMM10_XLSX_DIR = os.path.join(SCRIPT_DIR, "DREAMM10 calendario pacientes")
 CHECKLIST_GLOBAL_XLSX = os.path.join(SCRIPT_DIR, "checklist_todos_los_ensayos.xlsx")
-APP_TIMEZONE = "Europe/Madrid"
+APP_TIMEZONE = str(os.getenv("APP_TIMEZONE", "")).strip()
 DB_PATH = os.path.join(SCRIPT_DIR, "agenda_ensayos.db")
 DB_BACKUP_DIR = os.path.join(SCRIPT_DIR, "backups_db")
 BACKUP_ENSAYOS_DIR = r"H:\ENSAYOS\ENSAYOS\BASE DE DATOS APP ENSAYOS"
@@ -883,7 +883,7 @@ def restore_db_from_bytes(db_bytes):
 
 
 def fecha_hoy_local():
-    if ZoneInfo is not None:
+    if APP_TIMEZONE and ZoneInfo is not None:
         try:
             return datetime.now(ZoneInfo(APP_TIMEZONE)).date()
         except Exception:
@@ -892,7 +892,7 @@ def fecha_hoy_local():
 
 
 def ahora_local():
-    if ZoneInfo is not None:
+    if APP_TIMEZONE and ZoneInfo is not None:
         try:
             return datetime.now(ZoneInfo(APP_TIMEZONE))
         except Exception:
@@ -4610,6 +4610,13 @@ def render_interfaz_medica():
             .im-title {font-size: 0.95rem; font-weight: 800; color: #22314a; margin-bottom: 0; line-height: 1.05;}
             .im-sub {font-size: 0.8rem; color: #55729a; margin-bottom: 0; line-height: 1.08;}
             .im-banner {border-radius: 8px; padding: 4px 6px; font-size: 0.8rem; font-weight: 700; margin-top: 2px; border: 1px solid #d6e3f8;}
+            .im-day-card {border: 1px solid #b8d0ef; background: linear-gradient(135deg, #f8fbff, #eef6ff); border-radius: 12px; padding: 8px 10px; margin-bottom: 6px;}
+            .im-day-top {display:flex; align-items:center; justify-content:space-between; gap:8px;}
+            .im-day-title {font-size: 0.78rem; color:#5a7093; font-weight:700; text-transform: uppercase; letter-spacing: 0.04em;}
+            .im-day-date {font-size: 1.28rem; color:#12345d; font-weight:900; line-height:1; margin-top:2px;}
+            .im-day-count {font-size: 0.8rem; color:#355a87; margin-top:2px;}
+            .im-day-badge {font-size:0.76rem; font-weight:800; padding:4px 8px; border-radius:999px; border:1px solid #8ab4e6; background:#ffffff; color:#0f4aa6;}
+            .im-day-badge-true {background:#0f4aa6; color:#ffffff; border-color:#0f4aa6;}
             .im-chip {padding: 4px 8px; border-radius: 999px; border: 1px solid #d5def0; font-size: 0.73rem; color: #4b5d7f; background: #ffffff;}
             .im-chip-active {padding: 4px 8px; border-radius: 999px; border: 1px solid #0f4aa6; font-size: 0.73rem; color: #ffffff; background: linear-gradient(90deg, #0f4aa6, #0a68c7);}
             .im-mini-card {border: 1px solid #d9e4f4; background: #ffffff; border-radius: 12px; padding: 8px 10px; margin-bottom: 7px; font-size: 0.86rem; color: #2b3a54;}
@@ -4699,26 +4706,50 @@ def render_interfaz_medica():
     panel_izq, panel_der = st.columns([1, 1], gap="large")
 
     fecha_sel = st.session_state.get(key_fecha, hoy)
+    pacientes_en_fecha = len(ids_por_fecha.get(fecha_sel, set()))
+    es_hoy = fecha_sel == hoy
 
-    # Barra de navegación de día con date_input + botones
-    dc1, dc2, dc3, dc4 = panel_izq.columns([0.28, 1.8, 0.55, 0.28])
-    if dc1.button("◀", key="im_dia_ant"):
+    panel_izq.markdown(
+        f"""
+        <div class=\"im-day-card\">
+            <div class=\"im-day-top\">
+                <div>
+                    <div class=\"im-day-title\">Día activo</div>
+                    <div class=\"im-day-date\">{fecha_sel.strftime('%d/%m/%Y')}</div>
+                    <div class=\"im-day-count\">{pacientes_en_fecha} paciente(s)</div>
+                </div>
+                <div class=\"im-day-badge {'im-day-badge-true' if es_hoy else ''}\">{'HOY' if es_hoy else 'SELECCIONADO'}</div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    nav_fecha = panel_izq.columns(5)
+    if nav_fecha[0].button("-7d", key="im_dia_menos_7", use_container_width=True):
+        st.session_state[key_fecha] = fecha_sel - timedelta(days=7)
+        st.rerun()
+    if nav_fecha[1].button("Ayer", key="im_dia_ant", use_container_width=True):
         st.session_state[key_fecha] = fecha_sel - timedelta(days=1)
         st.rerun()
-    fecha_picker = dc2.date_input(
-        "Dia",
+    if nav_fecha[2].button("Hoy", key="im_fecha_hoy", use_container_width=True, type="primary"):
+        st.session_state[key_fecha] = hoy
+        st.rerun()
+    if nav_fecha[3].button("Mañana", key="im_dia_sig", use_container_width=True):
+        st.session_state[key_fecha] = fecha_sel + timedelta(days=1)
+        st.rerun()
+    if nav_fecha[4].button("+7d", key="im_dia_mas_7", use_container_width=True):
+        st.session_state[key_fecha] = fecha_sel + timedelta(days=7)
+        st.rerun()
+
+    fecha_picker = panel_izq.date_input(
+        "Cambiar día",
         value=fecha_sel,
         key="im_fecha_picker",
-        label_visibility="collapsed",
+        help="Puedes escribir la fecha o seleccionarla en calendario",
     )
     if fecha_picker != fecha_sel:
         st.session_state[key_fecha] = fecha_picker
-        st.rerun()
-    if dc3.button("Hoy", key="im_fecha_hoy"):
-        st.session_state[key_fecha] = hoy
-        st.rerun()
-    if dc4.button("▶", key="im_dia_sig"):
-        st.session_state[key_fecha] = fecha_sel + timedelta(days=1)
         st.rerun()
 
     ids_dia = ids_por_fecha.get(fecha_sel, set())
