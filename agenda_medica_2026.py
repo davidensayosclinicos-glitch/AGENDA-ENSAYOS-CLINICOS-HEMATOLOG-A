@@ -4648,6 +4648,11 @@ def render_interfaz_medica():
                 white-space: normal !important;
                 line-height: 1.15 !important;
             }
+            [data-testid="stButton"] > button * {
+                word-break: keep-all !important;
+                overflow-wrap: normal !important;
+                hyphens: none !important;
+            }
         </style>
         """,
         unsafe_allow_html=True,
@@ -4753,36 +4758,33 @@ def render_interfaz_medica():
         st.session_state[pac_sel_key] = opciones_paciente[0]
     paciente_sel = st.session_state[pac_sel_key]
 
-    pac_cols = panel_izq.columns(len(opciones_paciente))
-    for i, etiqueta in enumerate(opciones_paciente):
-        cod_i, nom_i, ens_i = pacientes_map[etiqueta]
-        sexo_i = _inferir_sexo(nom_i)
-        svg_i = _SVG_SILUETA_F if sexo_i == "F" else _SVG_SILUETA_M
-        df_pac_i = df_fil[
-            df_fil["codigo"].str.strip().str.casefold() == cod_i.casefold()
-        ] if cod_i else df_fil[df_fil["nombre"].str.strip().str.casefold() == nom_i.casefold()]
-        ciclo_i = str(df_pac_i.iloc[0].get("ciclo", "") if not df_pac_i.empty else "") or "-"
-        iniciales_i = "".join([t[0] for t in nom_i.split()[:2]]).upper() if nom_i else cod_i[:2].upper()
-        is_sel = (etiqueta == paciente_sel)
-        color_sil = "#0f4aa6" if is_sel else "#7a9cc4"
-        bg = "#dbeafe" if is_sel else "#f0f4fa"
-        border = "2px solid #0f4aa6" if is_sel else "1px solid #d6deea"
-        with pac_cols[i]:
-            # Silueta SVG encima, no interactiva
-            st.markdown(
-                f'<div style="text-align:center;color:{color_sil};width:26px;margin:0 auto 2px auto">{svg_i}</div>',
-                unsafe_allow_html=True,
-            )
-            # Botón real con iniciales + ciclo, estilizado como tarjeta
-            btn_label = f"{nom_i or cod_i}\n{ens_i}"
-            if st.button(
-                btn_label,
-                key=f"im_pac_{i}",
-                use_container_width=True,
-                type="primary" if is_sel else "secondary",
-            ):
-                st.session_state[pac_sel_key] = etiqueta
-                st.rerun()
+    max_por_fila = 3
+    for fila_inicio in range(0, len(opciones_paciente), max_por_fila):
+        sub = opciones_paciente[fila_inicio:fila_inicio + max_por_fila]
+        pac_cols = panel_izq.columns(len(sub))
+        for j, etiqueta in enumerate(sub):
+            i = fila_inicio + j
+            cod_i, nom_i, ens_i = pacientes_map[etiqueta]
+            sexo_i = _inferir_sexo(nom_i)
+            svg_i = _SVG_SILUETA_F if sexo_i == "F" else _SVG_SILUETA_M
+            iniciales_i = "".join([t[0] for t in nom_i.split()[:2]]).upper() if nom_i else cod_i[:2].upper()
+            is_sel = etiqueta == paciente_sel
+            color_sil = "#0f4aa6" if is_sel else "#7a9cc4"
+            with pac_cols[j]:
+                st.markdown(
+                    f'<div style="text-align:center;color:{color_sil};width:26px;margin:0 auto 2px auto">{svg_i}</div>',
+                    unsafe_allow_html=True,
+                )
+                btn_label = f"{nom_i or cod_i} | {ens_i}"
+                if st.button(
+                    btn_label,
+                    key=f"im_pac_{i}",
+                    use_container_width=True,
+                    type="primary" if is_sel else "secondary",
+                    help=f"{iniciales_i}"
+                ):
+                    st.session_state[pac_sel_key] = etiqueta
+                    st.rerun()
 
     cod_sel, nom_sel, ens_sel = pacientes_map[paciente_sel]
 
