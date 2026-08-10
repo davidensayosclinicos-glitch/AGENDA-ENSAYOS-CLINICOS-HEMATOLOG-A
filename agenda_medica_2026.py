@@ -4403,12 +4403,30 @@ def render_interfaz_medica():
 
     fecha_sel = fechas_disponibles[st.session_state[key_idx]]
 
-    # Barra compacta de navegación de día
-    dc1, dc2, dc3, dc4 = st.columns([0.38, 1.4, 0.65, 0.38])
+    # Barra de navegación de día con date_input + botones
+    dc1, dc2, dc3, dc4 = st.columns([0.28, 1.8, 0.55, 0.28])
     if dc1.button("◀", key="im_dia_ant"):
         st.session_state[key_idx] = min(len(fechas_disponibles) - 1, st.session_state[key_idx] + 1)
         st.rerun()
-    dc2.markdown(f"<p style='text-align:center;font-weight:700;font-size:0.88rem;margin:5px 0'>{fecha_sel.strftime('%d/%m/%Y')}</p>", unsafe_allow_html=True)
+    fecha_picker = dc2.date_input(
+        "Dia",
+        value=fecha_sel,
+        min_value=min(fechas_disponibles),
+        max_value=max(fechas_disponibles),
+        key="im_fecha_picker",
+        label_visibility="collapsed",
+    )
+    if fecha_picker != fecha_sel:
+        if fecha_picker in fechas_disponibles:
+            st.session_state[key_idx] = fechas_disponibles.index(fecha_picker)
+        else:
+            # Encuentra el día disponible más cercano
+            import bisect
+            fechas_asc = sorted(fechas_disponibles)
+            pos = bisect.bisect_left(fechas_asc, fecha_picker)
+            pos = min(pos, len(fechas_asc) - 1)
+            st.session_state[key_idx] = fechas_disponibles.index(fechas_asc[pos])
+        st.rerun()
     if dc3.button("Hoy", key="im_fecha_hoy"):
         st.session_state[key_idx] = idx_hoy
         st.rerun()
@@ -4647,39 +4665,27 @@ def render_interfaz_medica():
 
     if paso == 1:
         prev_row, prev_estado = _get_estado_visita_anterior(df_visitas, visita_row)
-
-        col_izq, col_der = st.columns([1.4, 1])
-        with col_izq:
-            st.markdown("**Visita anterior**")
-            if prev_row is None or prev_estado is None:
-                st.caption("Sin visitas previas registradas.")
-            else:
-                fecha_prev = formatear_fecha_visita(prev_row.get("fecha"))
-                ciclo_prev = str(prev_row.get("ciclo", "") or "-")
-                c_prev = prev_estado.get("estado_constantes", {})
-                com_prev = prev_estado.get("estado_comentarios", {})
-                ae_prev = prev_estado.get("estado_aes", {}).get("eventos", [])
-                dec_prev = prev_estado.get("estado_decision", {}).get("decision", "Pendiente")
-                sint_prev = com_prev.get("sintomas", [])
-
-                st.markdown(
-                    f"<div class='im-mini-card im-ok' style='font-size:0.8rem;padding:5px 7px;'>"
-                    f"<b>{ciclo_prev}</b> · {fecha_prev}<br>"
-                    f"TA {c_prev.get('tension_arterial','-')} · FC {c_prev.get('fc','-')} · "
-                    f"Peso {c_prev.get('peso','-')} kg · SatO2 {c_prev.get('sat_o2','-')}<br>"
-                    f"Síntomas: {', '.join(sint_prev) if sint_prev else 'ninguno'}<br>"
-                    f"AEs: {len(ae_prev)} · Decisión: {html.escape(dec_prev)}"
-                    f"</div>",
-                    unsafe_allow_html=True,
-                )
-
-        with col_der:
-            st.markdown("**Visita actual**")
-            k1, k2, k3 = st.columns(3)
-            k1.metric("Progreso", f"{completadas}/7")
-            k2.metric("Pruebas", str(len(estado.get("estado_pruebas", {}).get("pruebas", []))))
-            k3.metric("AEs", str(len(estado.get("estado_aes", {}).get("eventos", []))))
-            st.caption(f"Hoy: {fecha_real_hoy_txt}")
+        st.markdown("**Visita anterior**")
+        if prev_row is None or prev_estado is None:
+            st.caption("Sin visitas previas registradas.")
+        else:
+            fecha_prev = formatear_fecha_visita(prev_row.get("fecha"))
+            ciclo_prev = str(prev_row.get("ciclo", "") or "-")
+            c_prev = prev_estado.get("estado_constantes", {})
+            com_prev = prev_estado.get("estado_comentarios", {})
+            ae_prev = prev_estado.get("estado_aes", {}).get("eventos", [])
+            dec_prev = prev_estado.get("estado_decision", {}).get("decision", "Pendiente")
+            sint_prev = com_prev.get("sintomas", [])
+            st.markdown(
+                f"<div class='im-mini-card im-ok' style='font-size:0.8rem;padding:5px 7px;'>"
+                f"<b>{ciclo_prev}</b> · {fecha_prev}<br>"
+                f"TA {c_prev.get('tension_arterial','-')} · FC {c_prev.get('fc','-')} · "
+                f"Peso {c_prev.get('peso','-')} kg · SatO2 {c_prev.get('sat_o2','-')}<br>"
+                f"Síntomas: {', '.join(sint_prev) if sint_prev else 'ninguno'}<br>"
+                f"AEs: {len(ae_prev)} · Decisión: {html.escape(dec_prev)}"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
 
     if paso == 2:
         st.markdown("#### Constantes y parametros")
