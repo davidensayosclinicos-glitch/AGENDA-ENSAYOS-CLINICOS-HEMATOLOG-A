@@ -4679,10 +4679,12 @@ def render_interfaz_medica():
         st.session_state[key_idx] = idx_hoy
     st.session_state[key_idx] = max(0, min(int(st.session_state[key_idx]), len(fechas_disponibles) - 1))
 
+    panel_izq, panel_der = st.columns([1, 1], gap="large")
+
     fecha_sel = fechas_disponibles[st.session_state[key_idx]]
 
     # Barra de navegación de día con date_input + botones
-    dc1, dc2, dc3, dc4 = st.columns([0.28, 1.8, 0.55, 0.28])
+    dc1, dc2, dc3, dc4 = panel_izq.columns([0.28, 1.8, 0.55, 0.28])
     if dc1.button("◀", key="im_dia_ant"):
         st.session_state[key_idx] = min(len(fechas_disponibles) - 1, st.session_state[key_idx] + 1)
         st.rerun()
@@ -4737,7 +4739,7 @@ def render_interfaz_medica():
         st.session_state[pac_sel_key] = opciones_paciente[0]
     paciente_sel = st.session_state[pac_sel_key]
 
-    pac_cols = st.columns(len(opciones_paciente))
+    pac_cols = panel_izq.columns(len(opciones_paciente))
     for i, etiqueta in enumerate(opciones_paciente):
         cod_i, nom_i, ens_i = pacientes_map[etiqueta]
         sexo_i = _inferir_sexo(nom_i)
@@ -4924,7 +4926,7 @@ def render_interfaz_medica():
         st.caption(f"{len(estado_dict[campo])} seleccionada(s)")
         return estado_dict[campo]
 
-    st.markdown(
+    panel_izq.markdown(
         f"""
         <div class=\"im-shell\" style=\"display:flex;align-items:center;justify-content:space-between;gap:6px;\">
             <div style=\"flex:1;min-width:0;\">
@@ -4945,7 +4947,7 @@ def render_interfaz_medica():
     # Barra de navegación rápida entre pasos
     # Barra de navegación rápida en 2 filas para que el texto no se corte
     for fila_inicio, fila_fin in [(0, 6), (6, 11)]:
-        step_cols = st.columns(fila_fin - fila_inicio)
+        step_cols = panel_izq.columns(fila_fin - fila_inicio)
         for si in range(fila_inicio, fila_fin):
             ico_barra = iconos_barra[si]
             nombre_paso = pasos[si]
@@ -4962,415 +4964,419 @@ def render_interfaz_medica():
                     st.session_state[step_key] = num
                     st.rerun()
 
-    completadas = 0
-    if estado.get("estado_constantes", {}).get("tension_arterial"):
-        completadas += 1
-    if estado.get("estado_comentarios", {}).get("comentario_libre"):
-        completadas += 1
-    if estado.get("estado_pruebas", {}).get("pruebas"):
-        completadas += 1
-    if estado.get("estado_farmacos_estudio", {}).get("farmacos"):
-        completadas += 1
-    if estado.get("estado_medicacion_concomitante", {}).get("medicaciones"):
-        completadas += 1
-    if estado.get("estado_aes", {}).get("eventos"):
-        completadas += 1
-    if estado.get("estado_decision", {}).get("decision", "") != "Pendiente":
-        completadas += 1
+    with panel_der:
+        st.caption("Formulario clínico")
 
-    if paso == 1:
-        prev_row, prev_estado = _get_estado_visita_anterior(df_visitas, visita_row)
-        st.markdown("**Visita anterior**")
-        if prev_row is None or prev_estado is None:
-            st.caption("Sin visitas previas registradas.")
-        else:
-            fecha_prev = formatear_fecha_visita(prev_row.get("fecha"))
-            ciclo_prev = str(prev_row.get("ciclo", "") or "-")
-            c_prev = prev_estado.get("estado_constantes", {})
-            com_prev = prev_estado.get("estado_comentarios", {})
-            ae_prev = prev_estado.get("estado_aes", {}).get("eventos", [])
-            dec_prev = prev_estado.get("estado_decision", {}).get("decision", "Pendiente")
-            sint_prev = com_prev.get("sintomas", [])
-            st.markdown(
-                f"<div class='im-mini-card im-ok' style='font-size:0.8rem;padding:5px 7px;'>"
-                f"<b>{ciclo_prev}</b> · {fecha_prev}<br>"
-                f"TA {c_prev.get('tension_arterial','-')} · FC {c_prev.get('fc','-')} · "
-                f"Peso {c_prev.get('peso','-')} kg · SatO2 {c_prev.get('sat_o2','-')}<br>"
-                f"Síntomas: {', '.join(sint_prev) if sint_prev else 'ninguno'}<br>"
-                f"AEs: {len(ae_prev)} · Decisión: {html.escape(dec_prev)}"
-                f"</div>",
-                unsafe_allow_html=True,
+    with panel_der:
+        completadas = 0
+        if estado.get("estado_constantes", {}).get("tension_arterial"):
+            completadas += 1
+        if estado.get("estado_comentarios", {}).get("comentario_libre"):
+            completadas += 1
+        if estado.get("estado_pruebas", {}).get("pruebas"):
+            completadas += 1
+        if estado.get("estado_farmacos_estudio", {}).get("farmacos"):
+            completadas += 1
+        if estado.get("estado_medicacion_concomitante", {}).get("medicaciones"):
+            completadas += 1
+        if estado.get("estado_aes", {}).get("eventos"):
+            completadas += 1
+        if estado.get("estado_decision", {}).get("decision", "") != "Pendiente":
+            completadas += 1
+    
+        if paso == 1:
+            prev_row, prev_estado = _get_estado_visita_anterior(df_visitas, visita_row)
+            st.markdown("**Visita anterior**")
+            if prev_row is None or prev_estado is None:
+                st.caption("Sin visitas previas registradas.")
+            else:
+                fecha_prev = formatear_fecha_visita(prev_row.get("fecha"))
+                ciclo_prev = str(prev_row.get("ciclo", "") or "-")
+                c_prev = prev_estado.get("estado_constantes", {})
+                com_prev = prev_estado.get("estado_comentarios", {})
+                ae_prev = prev_estado.get("estado_aes", {}).get("eventos", [])
+                dec_prev = prev_estado.get("estado_decision", {}).get("decision", "Pendiente")
+                sint_prev = com_prev.get("sintomas", [])
+                st.markdown(
+                    f"<div class='im-mini-card im-ok' style='font-size:0.8rem;padding:5px 7px;'>"
+                    f"<b>{ciclo_prev}</b> · {fecha_prev}<br>"
+                    f"TA {c_prev.get('tension_arterial','-')} · FC {c_prev.get('fc','-')} · "
+                    f"Peso {c_prev.get('peso','-')} kg · SatO2 {c_prev.get('sat_o2','-')}<br>"
+                    f"Síntomas: {', '.join(sint_prev) if sint_prev else 'ninguno'}<br>"
+                    f"AEs: {len(ae_prev)} · Decisión: {html.escape(dec_prev)}"
+                    f"</div>",
+                    unsafe_allow_html=True,
+                )
+    
+        if paso == 2:
+            st.markdown("#### Constantes y parametros")
+            c = estado["estado_constantes"]
+            a1, a2, a3 = st.columns(3)
+            c["tension_arterial"] = a1.text_input("Tension arterial", value=str(c.get("tension_arterial", "")), key=f"im_ta_{visita_id}")
+            c["fc"] = a2.text_input("Frecuencia cardiaca", value=str(c.get("fc", "")), key=f"im_fc_{visita_id}")
+            c["fr"] = a3.text_input("Frecuencia respiratoria", value=str(c.get("fr", "")), key=f"im_fr_{visita_id}")
+            b1, b2, b3 = st.columns(3)
+            c["temperatura"] = b1.text_input("Temperatura", value=str(c.get("temperatura", "")), key=f"im_temp_{visita_id}")
+            c["sat_o2"] = b2.text_input("Saturacion O2", value=str(c.get("sat_o2", "")), key=f"im_sato2_{visita_id}")
+            c["peso"] = b3.text_input("Peso (kg)", value=str(c.get("peso", "")), key=f"im_peso_{visita_id}")
+            d1, d2, d3 = st.columns(3)
+            c["talla"] = d1.text_input("Talla (cm)", value=str(c.get("talla", "")), key=f"im_talla_{visita_id}")
+            c["imc"] = d2.text_input("IMC", value=str(c.get("imc", "")), key=f"im_imc_{visita_id}")
+            c["superficie_corporal"] = d3.text_input("Superficie corporal", value=str(c.get("superficie_corporal", "")), key=f"im_sc_{visita_id}")
+    
+        if paso == 3:
+            st.markdown("#### Comentarios del paciente")
+            sintomas_base = [
+                "Astenia/fatiga",
+                "Dolor oseo",
+                "Dolor neuropatico",
+                "Fiebre",
+                "Disnea",
+                "Tos",
+                "Nauseas",
+                "Diarrea",
+                "Estrenimiento",
+                "Perdida de apetito",
+                "Edema",
+                "Sangrado/moretones",
+            ]
+            sintomas_extra = [
+                "Prurito",
+                "Mucositis",
+                "Infecciones respiratorias",
+                "Mareo",
+                "Perdida de peso",
+                "Dolor abdominal",
+                "Cefalea",
+                "Insomnio",
+            ]
+            com = estado["estado_comentarios"]
+            com["sintomas"] = _render_checklist_onoff(
+                "Sintomas referidos",
+                com,
+                "sintomas",
+                sintomas_base,
+                sintomas_extra,
+                "sintomas",
+                columnas=4,
             )
-
-    if paso == 2:
-        st.markdown("#### Constantes y parametros")
-        c = estado["estado_constantes"]
-        a1, a2, a3 = st.columns(3)
-        c["tension_arterial"] = a1.text_input("Tension arterial", value=str(c.get("tension_arterial", "")), key=f"im_ta_{visita_id}")
-        c["fc"] = a2.text_input("Frecuencia cardiaca", value=str(c.get("fc", "")), key=f"im_fc_{visita_id}")
-        c["fr"] = a3.text_input("Frecuencia respiratoria", value=str(c.get("fr", "")), key=f"im_fr_{visita_id}")
-        b1, b2, b3 = st.columns(3)
-        c["temperatura"] = b1.text_input("Temperatura", value=str(c.get("temperatura", "")), key=f"im_temp_{visita_id}")
-        c["sat_o2"] = b2.text_input("Saturacion O2", value=str(c.get("sat_o2", "")), key=f"im_sato2_{visita_id}")
-        c["peso"] = b3.text_input("Peso (kg)", value=str(c.get("peso", "")), key=f"im_peso_{visita_id}")
-        d1, d2, d3 = st.columns(3)
-        c["talla"] = d1.text_input("Talla (cm)", value=str(c.get("talla", "")), key=f"im_talla_{visita_id}")
-        c["imc"] = d2.text_input("IMC", value=str(c.get("imc", "")), key=f"im_imc_{visita_id}")
-        c["superficie_corporal"] = d3.text_input("Superficie corporal", value=str(c.get("superficie_corporal", "")), key=f"im_sc_{visita_id}")
-
-    if paso == 3:
-        st.markdown("#### Comentarios del paciente")
-        sintomas_base = [
-            "Astenia/fatiga",
-            "Dolor oseo",
-            "Dolor neuropatico",
-            "Fiebre",
-            "Disnea",
-            "Tos",
-            "Nauseas",
-            "Diarrea",
-            "Estrenimiento",
-            "Perdida de apetito",
-            "Edema",
-            "Sangrado/moretones",
-        ]
-        sintomas_extra = [
-            "Prurito",
-            "Mucositis",
-            "Infecciones respiratorias",
-            "Mareo",
-            "Perdida de peso",
-            "Dolor abdominal",
-            "Cefalea",
-            "Insomnio",
-        ]
-        com = estado["estado_comentarios"]
-        com["sintomas"] = _render_checklist_onoff(
-            "Sintomas referidos",
-            com,
-            "sintomas",
-            sintomas_base,
-            sintomas_extra,
-            "sintomas",
-            columnas=4,
-        )
-        com["comentario_libre"] = st.text_area(
-            "Comentario libre",
-            value=str(com.get("comentario_libre", "")),
-            height=55,
-            key=f"im_comentario_{visita_id}",
-        )
-        com["estado_general"] = st.selectbox(
-            "Estado general",
-            options=["", "ECOG 0 - Asintomatico", "ECOG 1 - Restriccion leve", "ECOG 2 - Restriccion moderada", "ECOG 3 - Limitado"],
-            index=["", "ECOG 0 - Asintomatico", "ECOG 1 - Restriccion leve", "ECOG 2 - Restriccion moderada", "ECOG 3 - Limitado"].index(str(com.get("estado_general", "")) if str(com.get("estado_general", "")) in ["", "ECOG 0 - Asintomatico", "ECOG 1 - Restriccion leve", "ECOG 2 - Restriccion moderada", "ECOG 3 - Limitado"] else ""),
-            key=f"im_estado_general_{visita_id}",
-        )
-
-    if paso == 4:
-        st.markdown("#### Pruebas a realizar")
-        pruebas = estado["estado_pruebas"]
-        pruebas_base = [
-            "Hemograma completo",
-            "Bioquimica basica",
-            "Perfil renal y hepatica",
-            "LDH",
-            "Beta-2 microglobulina",
-            "Proteinograma",
-            "Inmunofijacion suero",
-            "Cadenas ligeras libres",
-            "Calcio",
-            "Creatinina",
-        ]
-        pruebas_extra = [
-            "Inmunofijacion orina 24h",
-            "Cuantificacion de inmunoglobulinas",
-            "Aspirado/biopsia medula osea",
-            "Citometria de flujo",
-            "FISH/citogenetica",
-            "PET-TC",
-            "RMN columna",
-            "ECOG Performance Status",
-            "Serologias",
-            "Coagulacion",
-        ]
-        pruebas["pruebas"] = _render_checklist_onoff(
-            "Listado de pruebas",
-            pruebas,
-            "pruebas",
-            pruebas_base,
-            pruebas_extra,
-            "pruebas",
-            columnas=3,
-        )
-        for item in pruebas["pruebas"]:
-            st.markdown(f"<div class='im-mini-card im-ok'>{html.escape(item)}</div>", unsafe_allow_html=True)
-
-    if paso == 5:
-        st.markdown("#### Farmacos de estudio")
-        far = estado["estado_farmacos_estudio"]
-        far_txt = st.text_area(
-            "Farmacos (una linea por farmaco con dosis)",
-            value="\n".join(far.get("farmacos", [])),
-            height=78,
-            key=f"im_farmacos_{visita_id}",
-        )
-        far["farmacos"] = [p.strip() for p in far_txt.split("\n") if p.strip()]
-        for item in far["farmacos"]:
-            st.markdown(f"<div class='im-mini-card im-ok'>{html.escape(item)}</div>", unsafe_allow_html=True)
-
-    if paso == 6:
-        st.markdown("#### Medicacion concomitante")
-        med = estado["estado_medicacion_concomitante"]
-        med_base = [
-            "Aciclovir profilaxis",
-            "Cotrimoxazol profilaxis",
-            "Omeprazol",
-            "Alopurinol",
-            "Ondansetron",
-            "Paracetamol",
-            "Loperamida",
-            "Calcio + vitamina D",
-            "Bifosfonato (zoledronato)",
-            "Heparina profilactica",
-        ]
-        med_extra = [
-            "Levofloxacino profilaxis",
-            "Fluconazol profilaxis",
-            "G-CSF",
-            "Eritropoyetina",
-            "Morfina rescate",
-            "Gabapentina",
-            "AAS",
-            "DOAC",
-            "IECA/ARA-II",
-            "Insulina",
-        ]
-        med["medicaciones"] = _render_checklist_onoff(
-            "Medicacion concomitante",
-            med,
-            "medicaciones",
-            med_base,
-            med_extra,
-            "concom",
-            columnas=3,
-        )
-        for item in med["medicaciones"]:
-            st.markdown(f"<div class='im-mini-card'>{html.escape(item)}</div>", unsafe_allow_html=True)
-
-    if paso == 7:
-        st.markdown("#### Efectos adversos (AEs)")
-        ae = estado["estado_aes"]
-        ae_base = [
-            "Neutropenia G1-2",
-            "Neutropenia G3-4",
-            "Anemia G1-2",
-            "Trombocitopenia G1-2",
-            "Neuropatia periferica G1-2",
-            "Nauseas/vomitos G1-2",
-            "Diarrea G1-2",
-            "Infeccion respiratoria",
-            "Mucositis oral",
-            "Fatiga intensa",
-        ]
-        ae_extra = [
-            "Fiebre neutropenica",
-            "Trombosis venosa",
-            "Rash cutaneo",
-            "Toxicidad hepatica",
-            "Toxicidad renal",
-            "Reaccion infusion",
-            "Hipocalcemia",
-            "Hiperglucemia por corticoides",
-        ]
-        ae["eventos"] = _render_checklist_onoff(
-            "AEs detectados",
-            ae,
-            "eventos",
-            ae_base,
-            ae_extra,
-            "aes",
-            columnas=3,
-        )
-        if ae["eventos"]:
-            for item in ae["eventos"]:
-                st.markdown(f"<div class='im-mini-card im-danger'>{html.escape(item)}</div>", unsafe_allow_html=True)
-            st.error(f"AEs registrados: {len(ae['eventos'])}")
-        else:
-            st.success("Sin AEs registrados")
-
-    if paso == 8:
-        st.markdown("#### Decision de tratamiento")
-        dec = estado["estado_decision"]
-        opciones_dec = ["Pendiente", "Si administrar", "No administrar"]
-        dec_actual = str(dec.get("decision", "Pendiente") or "Pendiente")
-        if dec_actual not in opciones_dec:
-            dec_actual = "Pendiente"
-        dec["decision"] = st.radio(
-            "Decision",
-            options=opciones_dec,
-            index=opciones_dec.index(dec_actual),
-            horizontal=True,
-            key=f"im_decision_{visita_id}",
-        )
-        dec["accion"] = st.text_input("Accion recomendada", value=str(dec.get("accion", "")), key=f"im_accion_{visita_id}")
-        dec["motivo"] = st.text_area("Motivo", value=str(dec.get("motivo", "")), height=55, key=f"im_motivo_{visita_id}")
-
-    if paso == 9:
-        st.markdown("#### Confirmacion")
-        dec = estado["estado_decision"]
-        st.markdown(f"<div class='im-mini-card im-ok'>Decision: {html.escape(str(dec.get('decision', 'Pendiente')))}</div>", unsafe_allow_html=True)
-        st.markdown(f"<div class='im-mini-card'>Accion: {html.escape(str(dec.get('accion', '') or '-'))}</div>", unsafe_allow_html=True)
-        st.markdown(f"<div class='im-mini-card'>Motivo: {html.escape(str(dec.get('motivo', '') or '-'))}</div>", unsafe_allow_html=True)
-        confirmado_key = f"im_confirmado_{visita_id}"
-        if confirmado_key not in st.session_state:
-            st.session_state[confirmado_key] = False
-        if st.button("Confirmar decision", key=f"im_btn_confirmar_{visita_id}"):
-            st.session_state[confirmado_key] = True
-        if st.session_state[confirmado_key]:
-            st.info("Decision confirmada y lista para notificar al equipo.")
-
-    if paso == 10:
-        st.markdown("#### Historia clinica generada")
-        c = estado.get("estado_constantes", {})
-        com = estado.get("estado_comentarios", {})
-        pr = estado.get("estado_pruebas", {})
-        far = estado.get("estado_farmacos_estudio", {})
-        med = estado.get("estado_medicacion_concomitante", {})
-        ae = estado.get("estado_aes", {})
-        dec = estado.get("estado_decision", {})
-        texto_auto = (
-            f"Ensayo {visita_row.get('ensayo', '')}. Ciclo/Dia {visita_row.get('ciclo', '')}. Fecha {formatear_fecha_visita(visita_row.get('fecha'))}.\n"
-            f"Constantes: TA {c.get('tension_arterial', '-')}, FC {c.get('fc', '-')}, FR {c.get('fr', '-')}, Temp {c.get('temperatura', '-')}, SatO2 {c.get('sat_o2', '-')}.\n"
-            f"Antropometria: Peso {c.get('peso', '-')}, Talla {c.get('talla', '-')}, IMC {c.get('imc', '-')}, SC {c.get('superficie_corporal', '-')}.\n"
-            f"Sintomas: {', '.join(com.get('sintomas', [])) if com.get('sintomas') else 'No referidos'}.\n"
-            f"Comentario: {com.get('comentario_libre', '') or 'Sin comentarios'}.\n"
-            f"Pruebas: {', '.join(pr.get('pruebas', [])) if pr.get('pruebas') else 'Sin pruebas'}.\n"
-            f"Farmacos estudio: {', '.join(far.get('farmacos', [])) if far.get('farmacos') else 'No registrados'}.\n"
-            f"Medicacion concomitante: {', '.join(med.get('medicaciones', [])) if med.get('medicaciones') else 'No registrada'}.\n"
-            f"AEs: {', '.join(ae.get('eventos', [])) if ae.get('eventos') else 'Sin AEs'}.\n"
-            f"Decision: {dec.get('decision', 'Pendiente')}. Accion: {dec.get('accion', '-')}. Motivo: {dec.get('motivo', '-')}."
-        )
-        if not str(estado.get("nota_clinica", "") or "").strip():
-            estado["nota_clinica"] = texto_auto
-        estado["nota_clinica"] = st.text_area(
-            "Nota clinica editable",
-            value=str(estado.get("nota_clinica", "")),
-            height=72,
-            key=f"im_nota_clinica_{visita_id}",
-        )
-        st.download_button(
-            "Descargar nota clinica (.txt)",
-            data=str(estado.get("nota_clinica", "")).encode("utf-8"),
-            file_name=f"nota_clinica_visita_{visita_id}.txt",
-            mime="text/plain",
-            key=f"im_descarga_nota_{visita_id}",
-        )
-
-    if paso == 11:
-        st.write("Protocolos, citas y notas en el menu lateral.")
-
-    # Swipe usando window.parent.document para acceder a la página real (no el iframe)
-    swipe_html = """
-    <script>
-    (function() {
-        var doc = window.parent ? window.parent.document : document;
-        var MIN_SWIPE = 52;
-        var startX = 0, startY = 0, dragging = false;
-
-        // Overlay visual de arrastre inyectado en la página real
-        if (!doc.getElementById('swipe-overlay-im')) {
-            var ov = doc.createElement('div');
-            ov.id = 'swipe-overlay-im';
-            ov.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:9998;transition:background 0.12s;';
-            doc.body.appendChild(ov);
-        }
-        var overlay = doc.getElementById('swipe-overlay-im');
-
-        function clickBoton(texto) {
-            var btns = doc.querySelectorAll('button');
-            for (var i = 0; i < btns.length; i++) {
-                if (!btns[i].disabled && btns[i].innerText.trim() === texto) {
-                    btns[i].click();
-                    return;
+            com["comentario_libre"] = st.text_area(
+                "Comentario libre",
+                value=str(com.get("comentario_libre", "")),
+                height=55,
+                key=f"im_comentario_{visita_id}",
+            )
+            com["estado_general"] = st.selectbox(
+                "Estado general",
+                options=["", "ECOG 0 - Asintomatico", "ECOG 1 - Restriccion leve", "ECOG 2 - Restriccion moderada", "ECOG 3 - Limitado"],
+                index=["", "ECOG 0 - Asintomatico", "ECOG 1 - Restriccion leve", "ECOG 2 - Restriccion moderada", "ECOG 3 - Limitado"].index(str(com.get("estado_general", "")) if str(com.get("estado_general", "")) in ["", "ECOG 0 - Asintomatico", "ECOG 1 - Restriccion leve", "ECOG 2 - Restriccion moderada", "ECOG 3 - Limitado"] else ""),
+                key=f"im_estado_general_{visita_id}",
+            )
+    
+        if paso == 4:
+            st.markdown("#### Pruebas a realizar")
+            pruebas = estado["estado_pruebas"]
+            pruebas_base = [
+                "Hemograma completo",
+                "Bioquimica basica",
+                "Perfil renal y hepatica",
+                "LDH",
+                "Beta-2 microglobulina",
+                "Proteinograma",
+                "Inmunofijacion suero",
+                "Cadenas ligeras libres",
+                "Calcio",
+                "Creatinina",
+            ]
+            pruebas_extra = [
+                "Inmunofijacion orina 24h",
+                "Cuantificacion de inmunoglobulinas",
+                "Aspirado/biopsia medula osea",
+                "Citometria de flujo",
+                "FISH/citogenetica",
+                "PET-TC",
+                "RMN columna",
+                "ECOG Performance Status",
+                "Serologias",
+                "Coagulacion",
+            ]
+            pruebas["pruebas"] = _render_checklist_onoff(
+                "Listado de pruebas",
+                pruebas,
+                "pruebas",
+                pruebas_base,
+                pruebas_extra,
+                "pruebas",
+                columnas=3,
+            )
+            for item in pruebas["pruebas"]:
+                st.markdown(f"<div class='im-mini-card im-ok'>{html.escape(item)}</div>", unsafe_allow_html=True)
+    
+        if paso == 5:
+            st.markdown("#### Farmacos de estudio")
+            far = estado["estado_farmacos_estudio"]
+            far_txt = st.text_area(
+                "Farmacos (una linea por farmaco con dosis)",
+                value="\n".join(far.get("farmacos", [])),
+                height=78,
+                key=f"im_farmacos_{visita_id}",
+            )
+            far["farmacos"] = [p.strip() for p in far_txt.split("\n") if p.strip()]
+            for item in far["farmacos"]:
+                st.markdown(f"<div class='im-mini-card im-ok'>{html.escape(item)}</div>", unsafe_allow_html=True)
+    
+        if paso == 6:
+            st.markdown("#### Medicacion concomitante")
+            med = estado["estado_medicacion_concomitante"]
+            med_base = [
+                "Aciclovir profilaxis",
+                "Cotrimoxazol profilaxis",
+                "Omeprazol",
+                "Alopurinol",
+                "Ondansetron",
+                "Paracetamol",
+                "Loperamida",
+                "Calcio + vitamina D",
+                "Bifosfonato (zoledronato)",
+                "Heparina profilactica",
+            ]
+            med_extra = [
+                "Levofloxacino profilaxis",
+                "Fluconazol profilaxis",
+                "G-CSF",
+                "Eritropoyetina",
+                "Morfina rescate",
+                "Gabapentina",
+                "AAS",
+                "DOAC",
+                "IECA/ARA-II",
+                "Insulina",
+            ]
+            med["medicaciones"] = _render_checklist_onoff(
+                "Medicacion concomitante",
+                med,
+                "medicaciones",
+                med_base,
+                med_extra,
+                "concom",
+                columnas=3,
+            )
+            for item in med["medicaciones"]:
+                st.markdown(f"<div class='im-mini-card'>{html.escape(item)}</div>", unsafe_allow_html=True)
+    
+        if paso == 7:
+            st.markdown("#### Efectos adversos (AEs)")
+            ae = estado["estado_aes"]
+            ae_base = [
+                "Neutropenia G1-2",
+                "Neutropenia G3-4",
+                "Anemia G1-2",
+                "Trombocitopenia G1-2",
+                "Neuropatia periferica G1-2",
+                "Nauseas/vomitos G1-2",
+                "Diarrea G1-2",
+                "Infeccion respiratoria",
+                "Mucositis oral",
+                "Fatiga intensa",
+            ]
+            ae_extra = [
+                "Fiebre neutropenica",
+                "Trombosis venosa",
+                "Rash cutaneo",
+                "Toxicidad hepatica",
+                "Toxicidad renal",
+                "Reaccion infusion",
+                "Hipocalcemia",
+                "Hiperglucemia por corticoides",
+            ]
+            ae["eventos"] = _render_checklist_onoff(
+                "AEs detectados",
+                ae,
+                "eventos",
+                ae_base,
+                ae_extra,
+                "aes",
+                columnas=3,
+            )
+            if ae["eventos"]:
+                for item in ae["eventos"]:
+                    st.markdown(f"<div class='im-mini-card im-danger'>{html.escape(item)}</div>", unsafe_allow_html=True)
+                st.error(f"AEs registrados: {len(ae['eventos'])}")
+            else:
+                st.success("Sin AEs registrados")
+    
+        if paso == 8:
+            st.markdown("#### Decision de tratamiento")
+            dec = estado["estado_decision"]
+            opciones_dec = ["Pendiente", "Si administrar", "No administrar"]
+            dec_actual = str(dec.get("decision", "Pendiente") or "Pendiente")
+            if dec_actual not in opciones_dec:
+                dec_actual = "Pendiente"
+            dec["decision"] = st.radio(
+                "Decision",
+                options=opciones_dec,
+                index=opciones_dec.index(dec_actual),
+                horizontal=True,
+                key=f"im_decision_{visita_id}",
+            )
+            dec["accion"] = st.text_input("Accion recomendada", value=str(dec.get("accion", "")), key=f"im_accion_{visita_id}")
+            dec["motivo"] = st.text_area("Motivo", value=str(dec.get("motivo", "")), height=55, key=f"im_motivo_{visita_id}")
+    
+        if paso == 9:
+            st.markdown("#### Confirmacion")
+            dec = estado["estado_decision"]
+            st.markdown(f"<div class='im-mini-card im-ok'>Decision: {html.escape(str(dec.get('decision', 'Pendiente')))}</div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='im-mini-card'>Accion: {html.escape(str(dec.get('accion', '') or '-'))}</div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='im-mini-card'>Motivo: {html.escape(str(dec.get('motivo', '') or '-'))}</div>", unsafe_allow_html=True)
+            confirmado_key = f"im_confirmado_{visita_id}"
+            if confirmado_key not in st.session_state:
+                st.session_state[confirmado_key] = False
+            if st.button("Confirmar decision", key=f"im_btn_confirmar_{visita_id}"):
+                st.session_state[confirmado_key] = True
+            if st.session_state[confirmado_key]:
+                st.info("Decision confirmada y lista para notificar al equipo.")
+    
+        if paso == 10:
+            st.markdown("#### Historia clinica generada")
+            c = estado.get("estado_constantes", {})
+            com = estado.get("estado_comentarios", {})
+            pr = estado.get("estado_pruebas", {})
+            far = estado.get("estado_farmacos_estudio", {})
+            med = estado.get("estado_medicacion_concomitante", {})
+            ae = estado.get("estado_aes", {})
+            dec = estado.get("estado_decision", {})
+            texto_auto = (
+                f"Ensayo {visita_row.get('ensayo', '')}. Ciclo/Dia {visita_row.get('ciclo', '')}. Fecha {formatear_fecha_visita(visita_row.get('fecha'))}.\n"
+                f"Constantes: TA {c.get('tension_arterial', '-')}, FC {c.get('fc', '-')}, FR {c.get('fr', '-')}, Temp {c.get('temperatura', '-')}, SatO2 {c.get('sat_o2', '-')}.\n"
+                f"Antropometria: Peso {c.get('peso', '-')}, Talla {c.get('talla', '-')}, IMC {c.get('imc', '-')}, SC {c.get('superficie_corporal', '-')}.\n"
+                f"Sintomas: {', '.join(com.get('sintomas', [])) if com.get('sintomas') else 'No referidos'}.\n"
+                f"Comentario: {com.get('comentario_libre', '') or 'Sin comentarios'}.\n"
+                f"Pruebas: {', '.join(pr.get('pruebas', [])) if pr.get('pruebas') else 'Sin pruebas'}.\n"
+                f"Farmacos estudio: {', '.join(far.get('farmacos', [])) if far.get('farmacos') else 'No registrados'}.\n"
+                f"Medicacion concomitante: {', '.join(med.get('medicaciones', [])) if med.get('medicaciones') else 'No registrada'}.\n"
+                f"AEs: {', '.join(ae.get('eventos', [])) if ae.get('eventos') else 'Sin AEs'}.\n"
+                f"Decision: {dec.get('decision', 'Pendiente')}. Accion: {dec.get('accion', '-')}. Motivo: {dec.get('motivo', '-')}."
+            )
+            if not str(estado.get("nota_clinica", "") or "").strip():
+                estado["nota_clinica"] = texto_auto
+            estado["nota_clinica"] = st.text_area(
+                "Nota clinica editable",
+                value=str(estado.get("nota_clinica", "")),
+                height=72,
+                key=f"im_nota_clinica_{visita_id}",
+            )
+            st.download_button(
+                "Descargar nota clinica (.txt)",
+                data=str(estado.get("nota_clinica", "")).encode("utf-8"),
+                file_name=f"nota_clinica_visita_{visita_id}.txt",
+                mime="text/plain",
+                key=f"im_descarga_nota_{visita_id}",
+            )
+    
+        if paso == 11:
+            st.write("Protocolos, citas y notas en el menu lateral.")
+    
+        # Swipe usando window.parent.document para acceder a la página real (no el iframe)
+        swipe_html = """
+        <script>
+        (function() {
+            var doc = window.parent ? window.parent.document : document;
+            var MIN_SWIPE = 52;
+            var startX = 0, startY = 0, dragging = false;
+    
+            // Overlay visual de arrastre inyectado en la página real
+            if (!doc.getElementById('swipe-overlay-im')) {
+                var ov = doc.createElement('div');
+                ov.id = 'swipe-overlay-im';
+                ov.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:9998;transition:background 0.12s;';
+                doc.body.appendChild(ov);
+            }
+            var overlay = doc.getElementById('swipe-overlay-im');
+    
+            function clickBoton(texto) {
+                var btns = doc.querySelectorAll('button');
+                for (var i = 0; i < btns.length; i++) {
+                    if (!btns[i].disabled && btns[i].innerText.trim() === texto) {
+                        btns[i].click();
+                        return;
+                    }
                 }
             }
-        }
-
-        function mostrarFeedback(dx) {
-            var op = Math.min(Math.abs(dx) / 160, 0.38);
-            if (dx > 0) {
-                overlay.style.background = 'linear-gradient(to right, rgba(15,74,166,' + op + ') 0%, transparent 45%)';
-            } else {
-                overlay.style.background = 'linear-gradient(to left, rgba(15,74,166,' + op + ') 0%, transparent 45%)';
+    
+            function mostrarFeedback(dx) {
+                var op = Math.min(Math.abs(dx) / 160, 0.38);
+                if (dx > 0) {
+                    overlay.style.background = 'linear-gradient(to right, rgba(15,74,166,' + op + ') 0%, transparent 45%)';
+                } else {
+                    overlay.style.background = 'linear-gradient(to left, rgba(15,74,166,' + op + ') 0%, transparent 45%)';
+                }
             }
-        }
-
-        function limpiarFeedback() {
-            overlay.style.background = 'transparent';
-        }
-
-        // Touch (móvil)
-        doc.addEventListener('touchstart', function(e) {
-            startX = e.touches[0].clientX;
-            startY = e.touches[0].clientY;
-        }, {passive: true});
-
-        doc.addEventListener('touchmove', function(e) {
-            var dx = e.touches[0].clientX - startX;
-            var dy = e.touches[0].clientY - startY;
-            if (Math.abs(dx) > Math.abs(dy)) mostrarFeedback(dx);
-        }, {passive: true});
-
-        doc.addEventListener('touchend', function(e) {
-            limpiarFeedback();
-            var dx = e.changedTouches[0].clientX - startX;
-            var dy = e.changedTouches[0].clientY - startY;
-            if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > MIN_SWIPE) {
-                if (dx > 0) clickBoton('Atras');
-                else clickBoton('Siguiente');
+    
+            function limpiarFeedback() {
+                overlay.style.background = 'transparent';
             }
-        }, {passive: true});
-
-        // Mouse (desktop)
-        doc.addEventListener('mousedown', function(e) {
-            dragging = true;
-            startX = e.clientX;
-        });
-        doc.addEventListener('mousemove', function(e) {
-            if (dragging) mostrarFeedback(e.clientX - startX);
-        });
-        doc.addEventListener('mouseup', function(e) {
-            if (!dragging) return;
-            dragging = false;
-            limpiarFeedback();
-            var dx = e.clientX - startX;
-            if (Math.abs(dx) > MIN_SWIPE) {
-                if (dx > 0) clickBoton('Atras');
-                else clickBoton('Siguiente');
-            }
-        });
-    })();
-    </script>
-    """
-    components.html(swipe_html, height=0)
-
-    # Botones ocultos visualmente pero necesarios para que Streamlit capture el clic
-    nav1, nav2, nav3 = st.columns([1, 1.2, 1])
-    if nav1.button("Atras", disabled=(paso <= 1), key=f"im_prev_{visita_id}"):
-        st.session_state[step_key] = max(1, paso - 1)
-        st.rerun()
-
-    if nav2.button("Guardar", type="primary", key=f"im_guardar_{visita_id}"):
-        guardar_estado_interfaz_medica(visita_id, estado)
-        st.success("Interfaz medica guardada.")
-
-    if nav3.button("Siguiente", disabled=(paso >= len(pasos)), key=f"im_next_{visita_id}"):
-        guardar_estado_interfaz_medica(visita_id, estado)
-        st.session_state[step_key] = min(len(pasos), paso + 1)
-        st.rerun()
-
-
+    
+            // Touch (móvil)
+            doc.addEventListener('touchstart', function(e) {
+                startX = e.touches[0].clientX;
+                startY = e.touches[0].clientY;
+            }, {passive: true});
+    
+            doc.addEventListener('touchmove', function(e) {
+                var dx = e.touches[0].clientX - startX;
+                var dy = e.touches[0].clientY - startY;
+                if (Math.abs(dx) > Math.abs(dy)) mostrarFeedback(dx);
+            }, {passive: true});
+    
+            doc.addEventListener('touchend', function(e) {
+                limpiarFeedback();
+                var dx = e.changedTouches[0].clientX - startX;
+                var dy = e.changedTouches[0].clientY - startY;
+                if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > MIN_SWIPE) {
+                    if (dx > 0) clickBoton('Atras');
+                    else clickBoton('Siguiente');
+                }
+            }, {passive: true});
+    
+            // Mouse (desktop)
+            doc.addEventListener('mousedown', function(e) {
+                dragging = true;
+                startX = e.clientX;
+            });
+            doc.addEventListener('mousemove', function(e) {
+                if (dragging) mostrarFeedback(e.clientX - startX);
+            });
+            doc.addEventListener('mouseup', function(e) {
+                if (!dragging) return;
+                dragging = false;
+                limpiarFeedback();
+                var dx = e.clientX - startX;
+                if (Math.abs(dx) > MIN_SWIPE) {
+                    if (dx > 0) clickBoton('Atras');
+                    else clickBoton('Siguiente');
+                }
+            });
+        })();
+        </script>
+        """
+        components.html(swipe_html, height=0)
+    
+        # Botones ocultos visualmente pero necesarios para que Streamlit capture el clic
+        nav1, nav2, nav3 = st.columns([1, 1.2, 1])
+        if nav1.button("Atras", disabled=(paso <= 1), key=f"im_prev_{visita_id}"):
+            st.session_state[step_key] = max(1, paso - 1)
+            st.rerun()
+    
+        if nav2.button("Guardar", type="primary", key=f"im_guardar_{visita_id}"):
+            guardar_estado_interfaz_medica(visita_id, estado)
+            st.success("Interfaz medica guardada.")
+    
+        if nav3.button("Siguiente", disabled=(paso >= len(pasos)), key=f"im_next_{visita_id}"):
+            guardar_estado_interfaz_medica(visita_id, estado)
+            st.session_state[step_key] = min(len(pasos), paso + 1)
+            st.rerun()
+    
+    
 requerir_login_si_configurado()
 
 # Inicializamos DB una vez por sesion para evitar coste en cada rerun.
