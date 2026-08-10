@@ -2897,6 +2897,83 @@ def render_print_dialog(texto, titulo):
         """
         components.html(plantilla, height=0)
 
+_NOMBRES_FEMENINOS = {
+    "maria","ana","laura","carmen","rosa","elena","lucia","marta","paula","sara",
+    "isabel","patricia","cristina","andrea","raquel","silvia","monica","natalia",
+    "beatriz","pilar","teresa","concepcion","dolores","josefa","manuela","francisca",
+    "mercedes","antonia","fatima","amparo","gloria","encarnacion","trinidad","yolanda",
+    "sonia","diana","irene","eva","alba","nuria","alicia","claudia","sofia","julia",
+    "leticia","lorena","miriam","esther","rocio","inmaculada","angela",
+}
+_NOMBRES_MASCULINOS = {
+    "jose","antonio","manuel","francisco","juan","david","carlos","jesus","miguel",
+    "angel","pedro","pablo","rafael","alejandro","javier","alberto","sergio","jorge",
+    "roberto","fernando","daniel","luis","mario","jorge","ricardo","ivan","gonzalo",
+    "alvaro","marcos","diego","julian","emilio","jaime","hugo","victor","hector",
+    "cesar","ignacio","felix","tomas","ramon","andres","enrique","nicolas","eduardo",
+}
+
+def _inferir_sexo(nombre):
+    """Heurística por primer nombre; devuelve 'F' o 'M'."""
+    if not nombre:
+        return "M"
+    primer = nombre.strip().split()[0].lower().rstrip(".")
+    if primer in _NOMBRES_FEMENINOS:
+        return "F"
+    if primer in _NOMBRES_MASCULINOS:
+        return "M"
+    # Fallback: nombres terminados en 'a' → F, resto → M
+    return "F" if primer.endswith("a") else "M"
+
+
+_SVG_SILUETA_M = (
+    '<svg viewBox="0 0 40 72" xmlns="http://www.w3.org/2000/svg" fill="currentColor">'
+    '<circle cx="20" cy="11" r="9"/>'
+    '<rect x="11" y="22" width="18" height="22" rx="4"/>'
+    '<rect x="11" y="43" width="7" height="20" rx="3.5"/>'
+    '<rect x="22" y="43" width="7" height="20" rx="3.5"/>'
+    '<rect x="2" y="22" width="8" height="18" rx="4"/>'
+    '<rect x="30" y="22" width="8" height="18" rx="4"/>'
+    '</svg>'
+)
+_SVG_SILUETA_F = (
+    '<svg viewBox="0 0 40 72" xmlns="http://www.w3.org/2000/svg" fill="currentColor">'
+    '<circle cx="20" cy="11" r="9"/>'
+    '<path d="M10 22 L5 55 L16 55 L20 38 L24 55 L35 55 L30 22 Z"/>'
+    '<rect x="2" y="22" width="7" height="16" rx="3.5"/>'
+    '<rect x="31" y="22" width="7" height="16" rx="3.5"/>'
+    '</svg>'
+)
+
+
+def _get_estado_visita_anterior(df_visitas_all, visita_row):
+    """Devuelve el estado guardado en interfaz_medica_visita de la visita previa del mismo paciente."""
+    cod = str(visita_row.get("codigo", "") or "").strip()
+    ens = str(visita_row.get("ensayo", "") or "").strip()
+    nom = str(visita_row.get("nombre", "") or "").strip()
+    fecha_actual = pd.to_datetime(str(visita_row.get("fecha", "") or ""), errors="coerce")
+
+    mask = (
+        df_visitas_all["ensayo"].str.strip().str.casefold() == ens.casefold()
+    )
+    if cod:
+        mask = mask & (df_visitas_all["codigo"].str.strip().str.casefold() == cod.casefold())
+    else:
+        mask = mask & (df_visitas_all["nombre"].str.strip().str.casefold() == nom.casefold())
+
+    anteriores = df_visitas_all[mask].copy()
+    anteriores["_fdt"] = pd.to_datetime(anteriores["fecha"], errors="coerce")
+    if pd.notna(fecha_actual):
+        anteriores = anteriores[anteriores["_fdt"] < fecha_actual]
+    anteriores = anteriores.sort_values("_fdt", ascending=False)
+    if anteriores.empty:
+        return None, None
+
+    prev_row = anteriores.iloc[0]
+    from_estado = get_estado_interfaz_medica(prev_row)
+    return prev_row, from_estado
+
+
 def formatear_fecha_visita(fecha_iso):
     if not fecha_iso:
         return ""
@@ -4434,12 +4511,10 @@ def render_interfaz_medica():
         11: "#2f3e63",
     }
 
-    iniciales = "PA"
     nombre_pac = str(visita_row.get("nombre", "") or "").strip()
-    if nombre_pac:
-        trozos = [t for t in nombre_pac.split(" ") if t]
-        if trozos:
-            iniciales = "".join([t[0] for t in trozos[:2]]).upper()
+    sexo_pac = _inferir_sexo(nombre_pac)
+    svgsilhouette = _SVG_SILUETA_F if sexo_pac == "F" else _SVG_SILUETA_M
+    silueta_color = "#b0c8e8" if sexo_pac == "F" else "#93b8dc"
 
     color_actual = color_paso.get(paso, "#0f4aa6")
 
@@ -4507,15 +4582,17 @@ def render_interfaz_medica():
 
     st.markdown(
         f"""
-        <div class=\"im-shell\"> 
-            <div class=\"im-top\">
-                <div class=\"im-avatar\">{html.escape(iniciales)}</div>
-                <div>
-                    <div class=\"im-title\">{html.escape(nombre_pac or 'Paciente')}</div>
-                    <div class=\"im-sub\">{html.escape(str(visita_row.get('codigo', '') or '-'))} · {html.escape(str(visita_row.get('ensayo', '') or '-'))} · Ciclo {html.escape(str(visita_row.get('ciclo', '') or '-'))}</div>
+        <div class=\"im-shell\" style=\"display:flex;align-items:center;justify-content:space-between;gap:6px;\">
+            <div style=\"flex:1;min-width:0;\">
+                <div class=\"im-top\">
+                    <div>
+                        <div class=\"im-title\">{html.escape(nombre_pac or 'Paciente')}</div>
+                        <div class=\"im-sub\">{html.escape(str(visita_row.get('codigo', '') or '-'))} · {html.escape(str(visita_row.get('ensayo', '') or '-'))} · Ciclo {html.escape(str(visita_row.get('ciclo', '') or '-'))}</div>
+                    </div>
                 </div>
+                <div class=\"im-banner\" style=\"background:{color_actual}12; color:{color_actual}; border-color:{color_actual}55;\">{html.escape(iconos[paso-1])} · Paso {paso}/{len(pasos)} · {html.escape(pasos[paso-1])} · Agenda {html.escape(fecha_agenda_txt)}</div>
             </div>
-            <div class=\"im-banner\" style=\"background:{color_actual}12; color:{color_actual}; border-color:{color_actual}55;\">{html.escape(iconos[paso-1])} · Paso {paso}/{len(pasos)} · {html.escape(pasos[paso-1])} · Agenda {html.escape(fecha_agenda_txt)}</div>
+            <div style=\"color:{silueta_color};width:38px;flex-shrink:0;opacity:0.85;\">{svgsilhouette}</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -4538,11 +4615,40 @@ def render_interfaz_medica():
         completadas += 1
 
     if paso == 1:
-        k1, k2, k3 = st.columns(3)
-        k1.metric("Progreso", f"{completadas}/7")
-        k2.metric("Pruebas", str(len(estado.get("estado_pruebas", {}).get("pruebas", []))))
-        k3.metric("AEs", str(len(estado.get("estado_aes", {}).get("eventos", []))))
-        st.write(f"Agenda: {fecha_agenda_txt} · Hoy: {fecha_real_hoy_txt}")
+        prev_row, prev_estado = _get_estado_visita_anterior(df_visitas, visita_row)
+
+        col_izq, col_der = st.columns([1.4, 1])
+        with col_izq:
+            st.markdown("**Visita anterior**")
+            if prev_row is None or prev_estado is None:
+                st.caption("Sin visitas previas registradas.")
+            else:
+                fecha_prev = formatear_fecha_visita(prev_row.get("fecha"))
+                ciclo_prev = str(prev_row.get("ciclo", "") or "-")
+                c_prev = prev_estado.get("estado_constantes", {})
+                com_prev = prev_estado.get("estado_comentarios", {})
+                ae_prev = prev_estado.get("estado_aes", {}).get("eventos", [])
+                dec_prev = prev_estado.get("estado_decision", {}).get("decision", "Pendiente")
+                sint_prev = com_prev.get("sintomas", [])
+
+                st.markdown(
+                    f"<div class='im-mini-card im-ok' style='font-size:0.8rem;padding:5px 7px;'>"
+                    f"<b>{ciclo_prev}</b> · {fecha_prev}<br>"
+                    f"TA {c_prev.get('tension_arterial','-')} · FC {c_prev.get('fc','-')} · "
+                    f"Peso {c_prev.get('peso','-')} kg · SatO2 {c_prev.get('sat_o2','-')}<br>"
+                    f"Síntomas: {', '.join(sint_prev) if sint_prev else 'ninguno'}<br>"
+                    f"AEs: {len(ae_prev)} · Decisión: {html.escape(dec_prev)}"
+                    f"</div>",
+                    unsafe_allow_html=True,
+                )
+
+        with col_der:
+            st.markdown("**Visita actual**")
+            k1, k2, k3 = st.columns(3)
+            k1.metric("Progreso", f"{completadas}/7")
+            k2.metric("Pruebas", str(len(estado.get("estado_pruebas", {}).get("pruebas", []))))
+            k3.metric("AEs", str(len(estado.get("estado_aes", {}).get("eventos", []))))
+            st.caption(f"Hoy: {fecha_real_hoy_txt}")
 
     if paso == 2:
         st.markdown("#### Constantes y parametros")
