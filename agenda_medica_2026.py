@@ -4707,29 +4707,9 @@ def render_interfaz_medica():
     df_visitas["codigo"] = df_visitas["codigo"].fillna("").astype(str)
     df_visitas["nombre"] = df_visitas["nombre"].fillna("").astype(str)
     df_visitas["fecha"] = df_visitas["fecha"].fillna("").astype(str)
-    df_visitas["_fecha_dt"] = pd.to_datetime(df_visitas["fecha"], errors="coerce")
+    # Parseamos usando parse_fecha_iso (igual que la Agenda) para soportar todos los formatos.
+    df_visitas["_fecha_date"] = df_visitas["fecha"].apply(parse_fecha_iso)
 
-    # Usamos la misma fuente que Agenda: eventos del calendario.
-    eventos_agenda = construir_eventos_calendario(df_visitas)
-    ids_por_fecha = {}
-    for ev in eventos_agenda:
-        props = ev.get("extendedProps") or {}
-        visita_id = props.get("id")
-        if visita_id in (None, ""):
-            # Ignoramos eventos teóricos sin visita real.
-            continue
-        fecha_raw = str(ev.get("start") or "").strip()
-        fecha_txt = fecha_raw[:10]
-        fecha_dt = parse_fecha_iso(fecha_txt)
-        if not fecha_dt:
-            continue
-        ids_por_fecha.setdefault(fecha_dt, set()).add(int(visita_id))
-
-    if not ids_por_fecha:
-        st.warning("No hay pacientes en el calendario de Agenda para mostrar en Interfaz medica.")
-        return
-
-    fechas_disponibles = sorted(ids_por_fecha.keys(), reverse=True)
     hoy = st.session_state.get("agenda_hoy_referencia", fecha_hoy_local())
     key_fecha = "im_fecha_sel"
     key_hoy_ref = "im_hoy_ref"
@@ -4757,7 +4737,7 @@ def render_interfaz_medica():
     panel_der = panel_der.container(border=True)
 
     fecha_sel = st.session_state.get(key_fecha, hoy)
-    pacientes_en_fecha = len(ids_por_fecha.get(fecha_sel, set()))
+    pacientes_en_fecha = int((df_visitas["_fecha_date"] == fecha_sel).sum())
     es_hoy = fecha_sel == hoy
 
     caja_seleccion = panel_izq.container(border=True)
@@ -4806,16 +4786,8 @@ def render_interfaz_medica():
         st.session_state[key_fecha] = fecha_picker
         st.rerun()
 
-    ids_dia = ids_por_fecha.get(fecha_sel, set())
-    df_fil_ids = df_visitas[df_visitas["id"].apply(lambda v: int(v) in ids_dia if pd.notna(v) else False)].copy()
-    df_fil_fecha = df_visitas[df_visitas["_fecha_dt"].dt.date == fecha_sel].copy()
-
-    # Priorizamos los IDs reales de Agenda y usamos fecha real como respaldo.
-    if not df_fil_ids.empty:
-        df_fil = df_fil_ids
-    else:
-        df_fil = df_fil_fecha
-
+    # Filtramos directamente por fecha — misma lógica que la Agenda.
+    df_fil = df_visitas[df_visitas["_fecha_date"] == fecha_sel].copy()
     df_fil = df_fil.sort_values(by=["ensayo", "codigo", "nombre", "id"], na_position="last")
 
     pacientes_map = {}
@@ -4879,7 +4851,7 @@ def render_interfaz_medica():
     else:
         mask = mask & (df_fil["nombre"].apply(normalizar_clave_paciente) == nom_norm)
 
-    df_paciente_visitas = df_fil[mask].sort_values(by=["_fecha_dt", "id"], ascending=[False, False]).copy()
+    df_paciente_visitas = df_fil[mask].sort_values(by=["_fecha_date", "id"], ascending=[False, False]).copy()
     if df_paciente_visitas.empty:
         st.warning("No se encontraron visitas para este paciente.")
         return
