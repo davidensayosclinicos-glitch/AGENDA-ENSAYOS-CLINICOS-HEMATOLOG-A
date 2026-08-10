@@ -13,6 +13,7 @@ import os
 import re
 import base64
 import io
+import json
 import shutil
 import zipfile
 import hashlib
@@ -336,8 +337,11 @@ def aplicar_marca_pestana(titulo_objetivo, ruta_logo):
 
                     const iconos = [
                         {{ rel: "icon", href: iconoFavicon, sizes: "32x32", type: "image/png" }},
+                        {{ rel: "icon", href: icono192, sizes: "192x192", type: "image/png" }},
+                        {{ rel: "icon", href: icono512, sizes: "512x512", type: "image/png" }},
                         {{ rel: "shortcut icon", href: iconoFavicon, sizes: "32x32", type: "image/png" }},
                         {{ rel: "apple-touch-icon", href: iconoApple, sizes: "180x180", type: "image/png" }},
+                        {{ rel: "apple-touch-icon-precomposed", href: iconoApple, sizes: "180x180", type: "image/png" }},
                         {{ rel: "manifest", href: manifestHref, type: "application/manifest+json" }},
                     ];
 
@@ -1367,6 +1371,23 @@ def init_db():
             )
             '''
         )
+        c.execute(
+            '''
+            CREATE TABLE IF NOT EXISTS interfaz_medica_visita (
+                id BIGSERIAL PRIMARY KEY,
+                visita_id BIGINT UNIQUE,
+                estado_constantes TEXT,
+                estado_comentarios TEXT,
+                estado_pruebas TEXT,
+                estado_farmacos_estudio TEXT,
+                estado_medicacion_concomitante TEXT,
+                estado_aes TEXT,
+                estado_decision TEXT,
+                nota_clinica TEXT,
+                ultima_actualizacion TEXT
+            )
+            '''
+        )
     else:
         c.execute('''
             CREATE TABLE IF NOT EXISTS visitas (
@@ -1468,6 +1489,22 @@ def init_db():
                 actualizado_en TEXT
             )
         ''')
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS interfaz_medica_visita (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                visita_id INTEGER UNIQUE,
+                estado_constantes TEXT,
+                estado_comentarios TEXT,
+                estado_pruebas TEXT,
+                estado_farmacos_estudio TEXT,
+                estado_medicacion_concomitante TEXT,
+                estado_aes TEXT,
+                estado_decision TEXT,
+                nota_clinica TEXT,
+                ultima_actualizacion TEXT,
+                FOREIGN KEY(visita_id) REFERENCES visitas(id)
+            )
+        ''')
 
     # Migracion incremental de revision ocular para instalaciones existentes.
     if DB_BACKEND == "postgres":
@@ -1484,6 +1521,15 @@ def init_db():
         c.execute("ALTER TABLE revision_ocular ADD COLUMN IF NOT EXISTS fecha_evaluacion TEXT")
         c.execute("ALTER TABLE revision_ocular ADD COLUMN IF NOT EXISTS fechas_previas TEXT")
         c.execute("ALTER TABLE revision_ocular ADD COLUMN IF NOT EXISTS resultado TEXT")
+        c.execute("ALTER TABLE interfaz_medica_visita ADD COLUMN IF NOT EXISTS estado_constantes TEXT")
+        c.execute("ALTER TABLE interfaz_medica_visita ADD COLUMN IF NOT EXISTS estado_comentarios TEXT")
+        c.execute("ALTER TABLE interfaz_medica_visita ADD COLUMN IF NOT EXISTS estado_pruebas TEXT")
+        c.execute("ALTER TABLE interfaz_medica_visita ADD COLUMN IF NOT EXISTS estado_farmacos_estudio TEXT")
+        c.execute("ALTER TABLE interfaz_medica_visita ADD COLUMN IF NOT EXISTS estado_medicacion_concomitante TEXT")
+        c.execute("ALTER TABLE interfaz_medica_visita ADD COLUMN IF NOT EXISTS estado_aes TEXT")
+        c.execute("ALTER TABLE interfaz_medica_visita ADD COLUMN IF NOT EXISTS estado_decision TEXT")
+        c.execute("ALTER TABLE interfaz_medica_visita ADD COLUMN IF NOT EXISTS nota_clinica TEXT")
+        c.execute("ALTER TABLE interfaz_medica_visita ADD COLUMN IF NOT EXISTS ultima_actualizacion TEXT")
     else:
         for col_sql in (
             "ALTER TABLE revision_ocular ADD COLUMN sede TEXT",
@@ -1659,6 +1705,7 @@ def get_ensayos_existentes():
 def borrar_visita(id_visita):
     conn = connect_db()
     c = conn.cursor()
+    c.execute("DELETE FROM interfaz_medica_visita WHERE visita_id=?", (id_visita,))
     c.execute("DELETE FROM visitas WHERE id=?", (id_visita,))
     sincronizar_pacientes_desde_visitas(c)
     eliminar_ensayos_sin_pacientes(c)
@@ -1701,6 +1748,7 @@ def borrar_paciente_citas_ojos(codigo, nombre):
         return 0
 
     placeholders = ",".join(["?"] * len(ids_borrar))
+    c.execute(f"DELETE FROM interfaz_medica_visita WHERE visita_id IN ({placeholders})", tuple(ids_borrar))
     c.execute(f"DELETE FROM revision_ocular WHERE visita_id IN ({placeholders})", tuple(ids_borrar))
     c.execute(f"DELETE FROM visitas WHERE id IN ({placeholders})", tuple(ids_borrar))
 
@@ -1735,6 +1783,7 @@ def borrar_visitas_sin_paciente_citas_ojos():
         return 0
 
     placeholders = ",".join(["?"] * len(ids_borrar))
+    c.execute(f"DELETE FROM interfaz_medica_visita WHERE visita_id IN ({placeholders})", tuple(ids_borrar))
     c.execute(f"DELETE FROM revision_ocular WHERE visita_id IN ({placeholders})", tuple(ids_borrar))
     c.execute(f"DELETE FROM visitas WHERE id IN ({placeholders})", tuple(ids_borrar))
 
@@ -1746,6 +1795,180 @@ def borrar_visitas_sin_paciente_citas_ojos():
     invalidar_cache_lecturas()
     snapshot_db("pacientes")
     return len(ids_borrar)
+
+
+def _json_a_dict_seguro(raw_valor):
+    if not raw_valor:
+        return {}
+    try:
+        valor = json.loads(raw_valor)
+        return valor if isinstance(valor, dict) else {}
+    except Exception:
+        return {}
+
+
+def _normalizar_lista_texto(raw_valor):
+    texto = str(raw_valor or "")
+    partes = re.split(r"[\n,;|]+", texto)
+    return [p.strip() for p in partes if p and p.strip()]
+
+
+def _estado_base_interfaz_medica(visita_row):
+    otras = _normalizar_lista_texto(visita_row.get("otras_pruebas", ""))
+    if bool(visita_row.get("medula")):
+        otras = ["Aspirado de medula"] + otras
+
+    return {
+        "estado_constantes": {
+            "tension_arterial": "",
+            "fc": "",
+            "fr": "",
+            "temperatura": "",
+            "sat_o2": "",
+            "peso": "",
+            "talla": "",
+            "imc": "",
+            "superficie_corporal": "",
+        },
+        "estado_comentarios": {
+            "sintomas": [],
+            "comentario_libre": str(visita_row.get("comentarios", "") or ""),
+            "estado_general": "",
+        },
+        "estado_pruebas": {
+            "pruebas": otras,
+            "realizadas": [],
+        },
+        "estado_farmacos_estudio": {
+            "farmacos": [],
+        },
+        "estado_medicacion_concomitante": {
+            "medicaciones": [],
+        },
+        "estado_aes": {
+            "eventos": [],
+        },
+        "estado_decision": {
+            "decision": "Pendiente",
+            "accion": "",
+            "motivo": "",
+        },
+        "nota_clinica": "",
+    }
+
+
+def get_estado_interfaz_medica(visita_row):
+    visita_id = int(visita_row.get("id"))
+    estado = _estado_base_interfaz_medica(visita_row)
+    conn = connect_db()
+    c = conn.cursor()
+    fila = c.execute(
+        '''
+        SELECT estado_constantes, estado_comentarios, estado_pruebas,
+               estado_farmacos_estudio, estado_medicacion_concomitante,
+               estado_aes, estado_decision, nota_clinica
+        FROM interfaz_medica_visita
+        WHERE visita_id = ?
+        ''',
+        (visita_id,)
+    ).fetchone()
+    conn.close()
+
+    if not fila:
+        return estado
+
+    columnas = [
+        "estado_constantes",
+        "estado_comentarios",
+        "estado_pruebas",
+        "estado_farmacos_estudio",
+        "estado_medicacion_concomitante",
+        "estado_aes",
+        "estado_decision",
+    ]
+    for idx, col in enumerate(columnas):
+        base_dict = estado.get(col, {})
+        guardado = _json_a_dict_seguro(fila[idx])
+        if isinstance(base_dict, dict):
+            base_dict.update(guardado)
+            estado[col] = base_dict
+        else:
+            estado[col] = guardado
+
+    estado["nota_clinica"] = str(fila[7] or "")
+    return estado
+
+
+def guardar_estado_interfaz_medica(visita_id, estado):
+    visita_id = int(visita_id)
+    conn = connect_db()
+    c = conn.cursor()
+    existe = c.execute(
+        "SELECT id FROM interfaz_medica_visita WHERE visita_id = ?",
+        (visita_id,),
+    ).fetchone()
+
+    payload = {
+        "estado_constantes": json.dumps(estado.get("estado_constantes", {}), ensure_ascii=False),
+        "estado_comentarios": json.dumps(estado.get("estado_comentarios", {}), ensure_ascii=False),
+        "estado_pruebas": json.dumps(estado.get("estado_pruebas", {}), ensure_ascii=False),
+        "estado_farmacos_estudio": json.dumps(estado.get("estado_farmacos_estudio", {}), ensure_ascii=False),
+        "estado_medicacion_concomitante": json.dumps(estado.get("estado_medicacion_concomitante", {}), ensure_ascii=False),
+        "estado_aes": json.dumps(estado.get("estado_aes", {}), ensure_ascii=False),
+        "estado_decision": json.dumps(estado.get("estado_decision", {}), ensure_ascii=False),
+        "nota_clinica": str(estado.get("nota_clinica", "") or ""),
+        "ultima_actualizacion": datetime.now().strftime("%Y-%m-%d %H:%M"),
+    }
+
+    if existe:
+        c.execute(
+            '''
+            UPDATE interfaz_medica_visita
+            SET estado_constantes = ?, estado_comentarios = ?, estado_pruebas = ?,
+                estado_farmacos_estudio = ?, estado_medicacion_concomitante = ?,
+                estado_aes = ?, estado_decision = ?, nota_clinica = ?,
+                ultima_actualizacion = ?
+            WHERE visita_id = ?
+            ''',
+            (
+                payload["estado_constantes"],
+                payload["estado_comentarios"],
+                payload["estado_pruebas"],
+                payload["estado_farmacos_estudio"],
+                payload["estado_medicacion_concomitante"],
+                payload["estado_aes"],
+                payload["estado_decision"],
+                payload["nota_clinica"],
+                payload["ultima_actualizacion"],
+                visita_id,
+            ),
+        )
+    else:
+        c.execute(
+            '''
+            INSERT INTO interfaz_medica_visita (
+                visita_id, estado_constantes, estado_comentarios, estado_pruebas,
+                estado_farmacos_estudio, estado_medicacion_concomitante, estado_aes,
+                estado_decision, nota_clinica, ultima_actualizacion
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''',
+            (
+                visita_id,
+                payload["estado_constantes"],
+                payload["estado_comentarios"],
+                payload["estado_pruebas"],
+                payload["estado_farmacos_estudio"],
+                payload["estado_medicacion_concomitante"],
+                payload["estado_aes"],
+                payload["estado_decision"],
+                payload["nota_clinica"],
+                payload["ultima_actualizacion"],
+            ),
+        )
+
+    conn.commit()
+    conn.close()
 
 
 def _listar_bases_backup_locales():
@@ -3894,6 +4117,405 @@ def renderizar_registro_kits_integrado():
         st.set_page_config = set_page_config_original
 
 
+def render_interfaz_medica():
+    st.subheader("Interfaz medica")
+    st.caption("Pantalla unica por pasos: avanza entre modulos y refleja visualmente toda la informacion clinica de la visita.")
+
+    st.markdown(
+        """
+        <style>
+            .im-shell {background: linear-gradient(160deg, #ffffff 0%, #f5f9ff 58%, #f2fbf5 100%); border: 1px solid #d7e2f3; border-radius: 22px; box-shadow: 0 18px 35px rgba(18,50,94,0.08); padding: 16px 18px; margin-bottom: 10px;}
+            .im-top {display: flex; align-items: center; gap: 10px; margin-bottom: 8px;}
+            .im-avatar {width: 36px; height: 36px; border-radius: 50%; display:flex; align-items:center; justify-content:center; background: linear-gradient(135deg, #dbe9ff, #c8f3e1); border: 1px solid #c4d9ff; color: #1f3b66; font-size: 0.95rem; font-weight: 700;}
+            .im-title {font-size: 1.1rem; font-weight: 800; color: #22314a; margin-bottom: 2px;}
+            .im-sub {font-size: 0.82rem; color: #55729a; margin-bottom: 1px;}
+            .im-banner {border-radius: 12px; padding: 8px 11px; font-size: 0.84rem; font-weight: 700; margin-top: 8px; border: 1px solid #d6e3f8;}
+            .im-stepbar {display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; margin-bottom: 6px;}
+            .im-chip {padding: 4px 8px; border-radius: 999px; border: 1px solid #d5def0; font-size: 0.73rem; color: #4b5d7f; background: #ffffff;}
+            .im-chip-active {padding: 4px 8px; border-radius: 999px; border: 1px solid #0f4aa6; font-size: 0.73rem; color: #ffffff; background: linear-gradient(90deg, #0f4aa6, #0a68c7);}
+            .im-mini-card {border: 1px solid #d9e4f4; background: #ffffff; border-radius: 12px; padding: 8px 10px; margin-bottom: 7px; font-size: 0.86rem; color: #2b3a54;}
+            .im-ok {border-left: 4px solid #1b9f66;}
+            .im-warn {border-left: 4px solid #db6a1a;}
+            .im-danger {border-left: 4px solid #c0392b;}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    df_visitas = get_visitas()
+    if df_visitas.empty:
+        st.info("No hay visitas registradas para mostrar la interfaz medica.")
+        return
+
+    df_visitas = df_visitas.copy()
+    df_visitas["ensayo"] = df_visitas["ensayo"].fillna("").astype(str)
+    df_visitas["codigo"] = df_visitas["codigo"].fillna("").astype(str)
+    df_visitas["nombre"] = df_visitas["nombre"].fillna("").astype(str)
+    df_visitas["fecha"] = df_visitas["fecha"].fillna("").astype(str)
+    df_visitas["_fecha_dt"] = pd.to_datetime(df_visitas["fecha"], errors="coerce")
+
+    col_f1, col_f2 = st.columns([1, 1])
+    ensayos = sorted([e for e in df_visitas["ensayo"].unique() if e.strip()])
+    filtro_ensayo = col_f1.selectbox("Ensayo", options=["Todos"] + ensayos, key="im_filtro_ensayo")
+
+    df_fil = df_visitas.copy()
+    if filtro_ensayo != "Todos":
+        df_fil = df_fil[df_fil["ensayo"] == filtro_ensayo]
+
+    pacientes_map = {}
+    opciones_paciente = []
+    for _, row in df_fil[["codigo", "nombre", "ensayo"]].drop_duplicates().iterrows():
+        cod = str(row.get("codigo", "") or "").strip()
+        nom = str(row.get("nombre", "") or "").strip()
+        ens = str(row.get("ensayo", "") or "").strip()
+        etiqueta = f"{cod} | {nom} | {ens}".strip(" |")
+        if etiqueta and etiqueta not in pacientes_map:
+            pacientes_map[etiqueta] = (cod, nom, ens)
+            opciones_paciente.append(etiqueta)
+
+    if not opciones_paciente:
+        st.warning("No hay pacientes para el filtro seleccionado.")
+        return
+
+    paciente_sel = col_f2.selectbox("Paciente", options=opciones_paciente, key="im_paciente")
+    cod_sel, nom_sel, ens_sel = pacientes_map[paciente_sel]
+
+    cod_norm = normalizar_clave_paciente(cod_sel)
+    nom_norm = normalizar_clave_paciente(nom_sel)
+    ens_norm = normalizar_clave_paciente(ens_sel)
+
+    mask = df_fil["ensayo"].apply(normalizar_clave_paciente) == ens_norm
+    if cod_norm:
+        mask = mask & (df_fil["codigo"].apply(normalizar_clave_paciente) == cod_norm)
+    else:
+        mask = mask & (df_fil["nombre"].apply(normalizar_clave_paciente) == nom_norm)
+
+    df_paciente_visitas = df_fil[mask].sort_values(by="_fecha_dt", ascending=False).copy()
+    if df_paciente_visitas.empty:
+        st.warning("No se encontraron visitas para este paciente.")
+        return
+
+    opciones_visita = []
+    mapa_visitas = {}
+    for _, row in df_paciente_visitas.iterrows():
+        visita_id = int(row["id"])
+        fecha_txt = formatear_fecha_visita(row.get("fecha"))
+        ciclo_txt = str(row.get("ciclo", "") or "").strip() or "Sin ciclo"
+        etiqueta = f"Visita #{visita_id} | {fecha_txt} | {ciclo_txt}"
+        opciones_visita.append(etiqueta)
+        mapa_visitas[etiqueta] = row.to_dict()
+
+    visita_sel = st.selectbox("Visita", options=opciones_visita, key="im_visita")
+    visita_row = mapa_visitas[visita_sel]
+    visita_id = int(visita_row["id"])
+
+    estado = get_estado_interfaz_medica(visita_row)
+
+    pasos = [
+        "Resumen hoy",
+        "Constantes y parametros",
+        "Comentarios del paciente",
+        "Pruebas a realizar",
+        "Farmacos de estudio",
+        "Medicacion concomitante",
+        "Efectos adversos",
+        "Decision de tratamiento",
+        "Confirmacion",
+        "Historia clinica generada",
+        "Mas informacion",
+    ]
+    step_key = f"im_step_{visita_id}"
+    if step_key not in st.session_state:
+        st.session_state[step_key] = 1
+    paso = int(st.session_state[step_key])
+    paso = max(1, min(len(pasos), paso))
+    st.session_state[step_key] = paso
+
+    iconos = ["R", "V", "C", "P", "F", "M", "AE", "D", "OK", "HC", "I"]
+    color_paso = {
+        1: "#0f4aa6",
+        2: "#0f8b5f",
+        3: "#5f3dc4",
+        4: "#4f46e5",
+        5: "#0f8b5f",
+        6: "#265ea8",
+        7: "#c0392b",
+        8: "#db6a1a",
+        9: "#1f8f62",
+        10: "#db6a1a",
+        11: "#2f3e63",
+    }
+
+    iniciales = "PA"
+    nombre_pac = str(visita_row.get("nombre", "") or "").strip()
+    if nombre_pac:
+        trozos = [t for t in nombre_pac.split(" ") if t]
+        if trozos:
+            iniciales = "".join([t[0] for t in trozos[:2]]).upper()
+
+    color_actual = color_paso.get(paso, "#0f4aa6")
+    marco_l, marco_c, marco_r = st.columns([1, 1.75, 1])
+    with marco_c:
+        st.markdown(
+            f"""
+            <div class=\"im-shell\"> 
+                <div class=\"im-top\">
+                    <div class=\"im-avatar\">{html.escape(iniciales)}</div>
+                    <div>
+                        <div class=\"im-title\">{html.escape(nombre_pac or 'Paciente')}</div>
+                        <div class=\"im-sub\">{html.escape(str(visita_row.get('codigo', '') or '-'))} · {html.escape(str(visita_row.get('ensayo', '') or '-'))}</div>
+                        <div class=\"im-sub\">Ciclo {html.escape(str(visita_row.get('ciclo', '') or '-'))} · {html.escape(formatear_fecha_visita(visita_row.get('fecha')))}</div>
+                    </div>
+                </div>
+                <div class=\"im-banner\" style=\"background:{color_actual}12; color:{color_actual}; border-color:{color_actual}55;\">{html.escape(iconos[paso-1])} · Paso {paso}/{len(pasos)} · {html.escape(pasos[paso-1])}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        barra = []
+        for i, nombre in enumerate(pasos, start=1):
+            clase = "im-chip-active" if i == paso else "im-chip"
+            barra.append(f"<span class=\"{clase}\">{iconos[i-1]} {i}</span>")
+        st.markdown(f"<div class='im-stepbar'>{''.join(barra)}</div>", unsafe_allow_html=True)
+        st.progress(paso / len(pasos))
+        salto = st.select_slider(
+            "Ir rapidamente a un paso",
+            options=list(range(1, len(pasos) + 1)),
+            value=paso,
+            format_func=lambda x: f"{x}. {pasos[x - 1]}",
+            key=f"im_salto_{visita_id}",
+        )
+        if int(salto) != paso:
+            st.session_state[step_key] = int(salto)
+            st.rerun()
+
+    completadas = 0
+    if estado.get("estado_constantes", {}).get("tension_arterial"):
+        completadas += 1
+    if estado.get("estado_comentarios", {}).get("comentario_libre"):
+        completadas += 1
+    if estado.get("estado_pruebas", {}).get("pruebas"):
+        completadas += 1
+    if estado.get("estado_farmacos_estudio", {}).get("farmacos"):
+        completadas += 1
+    if estado.get("estado_medicacion_concomitante", {}).get("medicaciones"):
+        completadas += 1
+    if estado.get("estado_aes", {}).get("eventos"):
+        completadas += 1
+    if estado.get("estado_decision", {}).get("decision", "") != "Pendiente":
+        completadas += 1
+
+    if paso == 1:
+        k1, k2, k3 = st.columns(3)
+        k1.metric("Progreso medico", f"{completadas}/7")
+        k2.metric("Pruebas", str(len(estado.get("estado_pruebas", {}).get("pruebas", []))))
+        k3.metric("AEs", str(len(estado.get("estado_aes", {}).get("eventos", []))))
+        st.info("Esta vista resume el estado global antes de pasar a cada modulo clinico.")
+        st.write(f"Visita: {formatear_fecha_visita(visita_row.get('fecha'))} | Ciclo: {visita_row.get('ciclo', '')}")
+        st.write(f"Comentarios base de agenda: {str(visita_row.get('comentarios', '') or 'Sin comentarios')}")
+
+    if paso == 2:
+        st.markdown("#### Constantes y parametros")
+        c = estado["estado_constantes"]
+        a1, a2, a3 = st.columns(3)
+        c["tension_arterial"] = a1.text_input("Tension arterial", value=str(c.get("tension_arterial", "")), key=f"im_ta_{visita_id}")
+        c["fc"] = a2.text_input("Frecuencia cardiaca", value=str(c.get("fc", "")), key=f"im_fc_{visita_id}")
+        c["fr"] = a3.text_input("Frecuencia respiratoria", value=str(c.get("fr", "")), key=f"im_fr_{visita_id}")
+        b1, b2, b3 = st.columns(3)
+        c["temperatura"] = b1.text_input("Temperatura", value=str(c.get("temperatura", "")), key=f"im_temp_{visita_id}")
+        c["sat_o2"] = b2.text_input("Saturacion O2", value=str(c.get("sat_o2", "")), key=f"im_sato2_{visita_id}")
+        c["peso"] = b3.text_input("Peso (kg)", value=str(c.get("peso", "")), key=f"im_peso_{visita_id}")
+        d1, d2, d3 = st.columns(3)
+        c["talla"] = d1.text_input("Talla (cm)", value=str(c.get("talla", "")), key=f"im_talla_{visita_id}")
+        c["imc"] = d2.text_input("IMC", value=str(c.get("imc", "")), key=f"im_imc_{visita_id}")
+        c["superficie_corporal"] = d3.text_input("Superficie corporal", value=str(c.get("superficie_corporal", "")), key=f"im_sc_{visita_id}")
+
+    if paso == 3:
+        st.markdown("#### Comentarios del paciente")
+        sintomas_catalogo = ["Cansancio", "Dolor de cabeza", "Tos", "Nauseas", "Fiebre", "Disnea", "Diarrea", "Estreñimiento", "Dolor", "Perdida de apetito", "Insomnio", "Otros"]
+        com = estado["estado_comentarios"]
+        com["sintomas"] = st.multiselect(
+            "Sintomas referidos",
+            options=sintomas_catalogo,
+            default=[s for s in com.get("sintomas", []) if s in sintomas_catalogo],
+            key=f"im_sintomas_{visita_id}",
+        )
+        com["comentario_libre"] = st.text_area(
+            "Comentario libre",
+            value=str(com.get("comentario_libre", "")),
+            height=140,
+            key=f"im_comentario_{visita_id}",
+        )
+        com["estado_general"] = st.selectbox(
+            "Estado general",
+            options=["", "ECOG 0 - Asintomatico", "ECOG 1 - Restriccion leve", "ECOG 2 - Restriccion moderada", "ECOG 3 - Limitado"],
+            index=["", "ECOG 0 - Asintomatico", "ECOG 1 - Restriccion leve", "ECOG 2 - Restriccion moderada", "ECOG 3 - Limitado"].index(str(com.get("estado_general", "")) if str(com.get("estado_general", "")) in ["", "ECOG 0 - Asintomatico", "ECOG 1 - Restriccion leve", "ECOG 2 - Restriccion moderada", "ECOG 3 - Limitado"] else ""),
+            key=f"im_estado_general_{visita_id}",
+        )
+
+    if paso == 4:
+        st.markdown("#### Pruebas a realizar")
+        pruebas = estado["estado_pruebas"]
+        pruebas_txt = "\n".join(pruebas.get("pruebas", []))
+        pruebas_txt = st.text_area(
+            "Listado de pruebas (una por linea)",
+            value=pruebas_txt,
+            height=170,
+            key=f"im_pruebas_txt_{visita_id}",
+        )
+        pruebas["pruebas"] = [p.strip() for p in pruebas_txt.split("\n") if p.strip()]
+        pruebas["realizadas"] = st.multiselect(
+            "Pruebas realizadas hoy",
+            options=pruebas["pruebas"],
+            default=[p for p in pruebas.get("realizadas", []) if p in pruebas["pruebas"]],
+            key=f"im_pruebas_ok_{visita_id}",
+        )
+        for item in pruebas["pruebas"]:
+            clase = "im-ok" if item in pruebas["realizadas"] else "im-warn"
+            est = "Completada" if item in pruebas["realizadas"] else "Pendiente"
+            st.markdown(f"<div class='im-mini-card {clase}'>{html.escape(item)} · {est}</div>", unsafe_allow_html=True)
+        st.caption(f"{len(pruebas['realizadas'])}/{len(pruebas['pruebas'])} pruebas completadas")
+
+    if paso == 5:
+        st.markdown("#### Farmacos de estudio")
+        far = estado["estado_farmacos_estudio"]
+        far_txt = st.text_area(
+            "Farmacos (una linea por farmaco con dosis)",
+            value="\n".join(far.get("farmacos", [])),
+            height=180,
+            key=f"im_farmacos_{visita_id}",
+        )
+        far["farmacos"] = [p.strip() for p in far_txt.split("\n") if p.strip()]
+        for item in far["farmacos"]:
+            st.markdown(f"<div class='im-mini-card im-ok'>{html.escape(item)}</div>", unsafe_allow_html=True)
+
+    if paso == 6:
+        st.markdown("#### Medicacion concomitante")
+        med = estado["estado_medicacion_concomitante"]
+        med_txt = st.text_area(
+            "Medicacion concomitante (una linea por item)",
+            value="\n".join(med.get("medicaciones", [])),
+            height=180,
+            key=f"im_concom_{visita_id}",
+        )
+        med["medicaciones"] = [p.strip() for p in med_txt.split("\n") if p.strip()]
+        for item in med["medicaciones"]:
+            st.markdown(f"<div class='im-mini-card'>{html.escape(item)}</div>", unsafe_allow_html=True)
+
+    if paso == 7:
+        st.markdown("#### Efectos adversos (AEs)")
+        ae = estado["estado_aes"]
+        ae_txt = st.text_area(
+            "AEs (formato sugerido: Evento | Grado)",
+            value="\n".join(ae.get("eventos", [])),
+            height=180,
+            key=f"im_aes_{visita_id}",
+        )
+        ae["eventos"] = [p.strip() for p in ae_txt.split("\n") if p.strip()]
+        if ae["eventos"]:
+            for item in ae["eventos"]:
+                st.markdown(f"<div class='im-mini-card im-danger'>{html.escape(item)}</div>", unsafe_allow_html=True)
+            st.error(f"AEs registrados: {len(ae['eventos'])}")
+        else:
+            st.success("Sin AEs registrados")
+
+    if paso == 8:
+        st.markdown("#### Decision de tratamiento")
+        dec = estado["estado_decision"]
+        opciones_dec = ["Pendiente", "Si administrar", "No administrar"]
+        dec_actual = str(dec.get("decision", "Pendiente") or "Pendiente")
+        if dec_actual not in opciones_dec:
+            dec_actual = "Pendiente"
+        dec["decision"] = st.radio(
+            "Decision",
+            options=opciones_dec,
+            index=opciones_dec.index(dec_actual),
+            horizontal=True,
+            key=f"im_decision_{visita_id}",
+        )
+        dec["accion"] = st.text_input("Accion recomendada", value=str(dec.get("accion", "")), key=f"im_accion_{visita_id}")
+        dec["motivo"] = st.text_area("Motivo", value=str(dec.get("motivo", "")), height=110, key=f"im_motivo_{visita_id}")
+
+    if paso == 9:
+        st.markdown("#### Confirmacion")
+        dec = estado["estado_decision"]
+        st.markdown(f"<div class='im-mini-card im-ok'>Decision: {html.escape(str(dec.get('decision', 'Pendiente')))}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='im-mini-card'>Accion: {html.escape(str(dec.get('accion', '') or '-'))}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='im-mini-card'>Motivo: {html.escape(str(dec.get('motivo', '') or '-'))}</div>", unsafe_allow_html=True)
+        confirmado_key = f"im_confirmado_{visita_id}"
+        if confirmado_key not in st.session_state:
+            st.session_state[confirmado_key] = False
+        if st.button("Confirmar decision", key=f"im_btn_confirmar_{visita_id}"):
+            st.session_state[confirmado_key] = True
+        if st.session_state[confirmado_key]:
+            st.info("Decision confirmada y lista para notificar al equipo.")
+
+    if paso == 10:
+        st.markdown("#### Historia clinica generada")
+        c = estado.get("estado_constantes", {})
+        com = estado.get("estado_comentarios", {})
+        pr = estado.get("estado_pruebas", {})
+        far = estado.get("estado_farmacos_estudio", {})
+        med = estado.get("estado_medicacion_concomitante", {})
+        ae = estado.get("estado_aes", {})
+        dec = estado.get("estado_decision", {})
+        texto_auto = (
+            f"Ensayo {visita_row.get('ensayo', '')}. Ciclo/Dia {visita_row.get('ciclo', '')}. Fecha {formatear_fecha_visita(visita_row.get('fecha'))}.\n"
+            f"Constantes: TA {c.get('tension_arterial', '-')}, FC {c.get('fc', '-')}, FR {c.get('fr', '-')}, Temp {c.get('temperatura', '-')}, SatO2 {c.get('sat_o2', '-')}.\n"
+            f"Antropometria: Peso {c.get('peso', '-')}, Talla {c.get('talla', '-')}, IMC {c.get('imc', '-')}, SC {c.get('superficie_corporal', '-')}.\n"
+            f"Sintomas: {', '.join(com.get('sintomas', [])) if com.get('sintomas') else 'No referidos'}.\n"
+            f"Comentario: {com.get('comentario_libre', '') or 'Sin comentarios'}.\n"
+            f"Pruebas: {', '.join(pr.get('pruebas', [])) if pr.get('pruebas') else 'Sin pruebas'}.\n"
+            f"Farmacos estudio: {', '.join(far.get('farmacos', [])) if far.get('farmacos') else 'No registrados'}.\n"
+            f"Medicacion concomitante: {', '.join(med.get('medicaciones', [])) if med.get('medicaciones') else 'No registrada'}.\n"
+            f"AEs: {', '.join(ae.get('eventos', [])) if ae.get('eventos') else 'Sin AEs'}.\n"
+            f"Decision: {dec.get('decision', 'Pendiente')}. Accion: {dec.get('accion', '-')}. Motivo: {dec.get('motivo', '-')}."
+        )
+        if not str(estado.get("nota_clinica", "") or "").strip():
+            estado["nota_clinica"] = texto_auto
+        estado["nota_clinica"] = st.text_area(
+            "Nota clinica editable",
+            value=str(estado.get("nota_clinica", "")),
+            height=260,
+            key=f"im_nota_clinica_{visita_id}",
+        )
+        st.download_button(
+            "Descargar nota clinica (.txt)",
+            data=str(estado.get("nota_clinica", "")).encode("utf-8"),
+            file_name=f"nota_clinica_visita_{visita_id}.txt",
+            mime="text/plain",
+            key=f"im_descarga_nota_{visita_id}",
+        )
+
+    if paso == 11:
+        st.markdown("#### Mas informacion")
+        st.write("Documentacion y fuentes en la app:")
+        st.write("• Protocolos del ensayo (seccion Prot. ensayo)")
+        st.write("• Citas y revisiones oculares (seccion Citas ojos)")
+        st.write("• Esquemas de tratamiento (seccion Esquemas)")
+        st.write("• Notas de enfermeria y coordinacion")
+        st.info("Puedes volver a cualquier paso, actualizar y guardar sin perder el resto de datos de la visita.")
+
+    nav1, nav2, nav3, nav4 = st.columns([1, 1, 1, 1])
+    if nav1.button("◀ Paso anterior", disabled=(paso <= 1), key=f"im_prev_{visita_id}"):
+        st.session_state[step_key] = max(1, paso - 1)
+        st.rerun()
+
+    if nav2.button("Guardar", type="primary", key=f"im_guardar_{visita_id}"):
+        guardar_estado_interfaz_medica(visita_id, estado)
+        st.success("Interfaz medica guardada.")
+
+    if nav3.button("Guardar y siguiente ▶", disabled=(paso >= len(pasos)), key=f"im_next_{visita_id}"):
+        guardar_estado_interfaz_medica(visita_id, estado)
+        st.session_state[step_key] = min(len(pasos), paso + 1)
+        st.rerun()
+
+    if nav4.button("Ir al resumen", key=f"im_home_{visita_id}"):
+        st.session_state[step_key] = 1
+        st.rerun()
+
+
 requerir_login_si_configurado()
 
 # Inicializamos DB una vez por sesion para evitar coste en cada rerun.
@@ -3933,6 +4555,7 @@ secciones_principales = [
     "Calendario DREAMM10",
     "Prot. ensayo",
     "Ficha paciente",
+    "Interfaz medica",
     "Check list",
     "Notas enfermeria",
     "Notas coordinacion",
@@ -4485,6 +5108,9 @@ if seccion_activa == "Ficha paciente":
 
                 st.caption("Verde: visitas realizadas. Amarillo: hoy. Rojo: pendientes.")
                 st.dataframe(df_ficha.style.apply(colorear_filas, axis=1), use_container_width=True)
+
+if seccion_activa == "Interfaz medica":
+    render_interfaz_medica()
 
 if seccion_activa == "Citas ojos":
     st.subheader("👁️ Citas de ojos")
