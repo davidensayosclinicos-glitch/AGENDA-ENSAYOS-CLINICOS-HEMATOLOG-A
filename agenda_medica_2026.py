@@ -4346,16 +4346,6 @@ def render_interfaz_medica():
                 font-size: 0.9rem !important;
             }
             .stCaption {font-size: 0.75rem !important; margin: 1px 0 !important;}
-            /* botones de selección de paciente: invisibles pero ocupan el espacio del icono */
-            [data-testid="stButton"] button[kind="secondary"] {
-                opacity: 0;
-                height: 4px;
-                min-height: 4px;
-                padding: 0;
-                margin: 0;
-                border: none;
-                background: transparent;
-            }
         </style>
         """,
         unsafe_allow_html=True,
@@ -4471,18 +4461,22 @@ def render_interfaz_medica():
         iniciales_i = "".join([t[0] for t in nom_i.split()[:2]]).upper() if nom_i else cod_i[:2].upper()
         is_sel = (etiqueta == paciente_sel)
         color_sil = "#0f4aa6" if is_sel else "#7a9cc4"
-        bg = "#dbeafe" if is_sel else "transparent"
+        bg = "#dbeafe" if is_sel else "#f0f4fa"
         border = "2px solid #0f4aa6" if is_sel else "1px solid #d6deea"
         with pac_cols[i]:
+            # Silueta SVG encima, no interactiva
             st.markdown(
-                f'<div style="text-align:center;background:{bg};border:{border};border-radius:10px;padding:3px 2px;margin-bottom:2px">'
-                f'<div style="color:{color_sil};width:26px;margin:0 auto">{svg_i}</div>'
-                f'<div style="font-size:0.7rem;font-weight:800;color:#22314a;margin-top:1px;line-height:1.1">{html.escape(iniciales_i)}</div>'
-                f'<div style="font-size:0.65rem;color:#55729a;line-height:1.1">{html.escape(ciclo_i)}</div>'
-                f'</div>',
+                f'<div style="text-align:center;color:{color_sil};width:26px;margin:0 auto 2px auto">{svg_i}</div>',
                 unsafe_allow_html=True,
             )
-            if st.button("·", key=f"im_pac_{i}", use_container_width=True, help=etiqueta):
+            # Botón real con iniciales + ciclo, estilizado como tarjeta
+            btn_label = f"{iniciales_i}\n{ciclo_i}"
+            if st.button(
+                btn_label,
+                key=f"im_pac_{i}",
+                use_container_width=True,
+                type="primary" if is_sel else "secondary",
+            ):
                 st.session_state[pac_sel_key] = etiqueta
                 st.rerun()
 
