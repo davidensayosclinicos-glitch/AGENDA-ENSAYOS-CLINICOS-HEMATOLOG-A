@@ -4936,12 +4936,12 @@ def render_interfaz_medica():
             <div style=\"flex:1;min-width:0;\">
                 <div class=\"im-top\">
                     <div>
-                        <div class=\"im-title\" style=\"font-size:0.98rem;\">{html.escape(nombre_pac or 'Paciente')}</div>
-                        <div class=\"im-sub\" style=\"font-size:0.9rem;\">Ciclo {html.escape(str(visita_row.get('ciclo', '') or '-'))}</div>
+                        <div class=\"im-title\" style=\"font-size:1.55rem;line-height:1.05;font-weight:900;\">{html.escape(nombre_pac or 'Paciente')}</div>
+                        <div class=\"im-sub\" style=\"font-size:1.12rem;line-height:1.1;font-weight:800;color:#2f4f79;\">{html.escape(str(visita_row.get('ensayo', '') or '-'))} · Ciclo {html.escape(str(visita_row.get('ciclo', '') or '-'))}</div>
                     </div>
                 </div>
             </div>
-            <div style=\"color:{silueta_color};width:28px;flex-shrink:0;opacity:0.85;\">{svgsilhouette}</div>
+            <div style=\"color:{silueta_color};width:34px;flex-shrink:0;opacity:0.9;\">{svgsilhouette}</div>
         </div>
         """,
         unsafe_allow_html=True,
