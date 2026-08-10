@@ -4641,6 +4641,22 @@ def render_interfaz_medica():
         unsafe_allow_html=True,
     )
 
+    # Barra de navegación rápida entre pasos
+    step_cols = st.columns(len(pasos))
+    for si, (ico, nombre_paso) in enumerate(zip(iconos, pasos)):
+        num = si + 1
+        with step_cols[si]:
+            if st.button(
+                ico,
+                key=f"im_quickstep_{visita_id}_{num}",
+                use_container_width=True,
+                type="primary" if paso == num else "secondary",
+                help=nombre_paso,
+            ):
+                guardar_estado_interfaz_medica(visita_id, estado)
+                st.session_state[step_key] = num
+                st.rerun()
+
     completadas = 0
     if estado.get("estado_constantes", {}).get("tension_arterial"):
         completadas += 1
