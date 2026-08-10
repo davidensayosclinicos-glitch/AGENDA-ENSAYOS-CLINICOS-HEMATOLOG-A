@@ -4540,6 +4540,19 @@ def render_interfaz_medica():
     st.session_state[step_key] = paso
 
     iconos = ["R", "V", "C", "P", "F", "M", "AE", "D", "OK", "N", "I"]
+    iconos_barra = [
+        "📋 Resumen",
+        "🩺 Constantes",
+        "💬 Síntomas",
+        "🔬 Pruebas",
+        "💊 Fármacos",
+        "🏥 Medicación",
+        "⚠️ AEs",
+        "✅ Decisión",
+        "🔒 Confirmar",
+        "📝 Historia",
+        "ℹ️ Info",
+    ]
     color_paso = {
         1: "#0f4aa6",
         2: "#0f8b5f",
@@ -4643,11 +4656,11 @@ def render_interfaz_medica():
 
     # Barra de navegación rápida entre pasos
     step_cols = st.columns(len(pasos))
-    for si, (ico, nombre_paso) in enumerate(zip(iconos, pasos)):
+    for si, (ico_barra, nombre_paso) in enumerate(zip(iconos_barra, pasos)):
         num = si + 1
         with step_cols[si]:
             if st.button(
-                ico,
+                ico_barra,
                 key=f"im_quickstep_{visita_id}_{num}",
                 use_container_width=True,
                 type="primary" if paso == num else "secondary",
