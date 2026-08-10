@@ -4470,7 +4470,7 @@ def render_interfaz_medica():
                 unsafe_allow_html=True,
             )
             # Botón real con iniciales + ciclo, estilizado como tarjeta
-            btn_label = f"{iniciales_i}\n{ciclo_i}"
+            btn_label = f"{nom_i or cod_i}\n{ens_i}"
             if st.button(
                 btn_label,
                 key=f"im_pac_{i}",
