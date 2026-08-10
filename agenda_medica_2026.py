@@ -4346,6 +4346,16 @@ def render_interfaz_medica():
                 font-size: 0.9rem !important;
             }
             .stCaption {font-size: 0.75rem !important; margin: 1px 0 !important;}
+            /* botones de selección de paciente: invisibles pero ocupan el espacio del icono */
+            [data-testid="stButton"] button[kind="secondary"] {
+                opacity: 0;
+                height: 4px;
+                min-height: 4px;
+                padding: 0;
+                margin: 0;
+                border: none;
+                background: transparent;
+            }
         </style>
         """,
         unsafe_allow_html=True,
@@ -4391,34 +4401,24 @@ def render_interfaz_medica():
         st.session_state[key_idx] = idx_hoy
     st.session_state[key_idx] = max(0, min(int(st.session_state[key_idx]), len(fechas_disponibles) - 1))
 
-    fecha_base = fechas_disponibles[st.session_state[key_idx]]
-    cab_izq, cab_der = st.columns([1.2, 2.2])
-    with cab_izq:
-        f_izq, f_der = st.columns([3.2, 1.1])
-        fecha_picker = f_izq.date_input(
-            "Dia",
-            value=fecha_base,
-            min_value=min(fechas_disponibles),
-            max_value=max(fechas_disponibles),
-            key="im_fecha_picker",
-        )
-        if f_der.button("Hoy", key="im_fecha_hoy"):
-            st.session_state[key_idx] = idx_hoy
-            st.rerun()
+    fecha_sel = fechas_disponibles[st.session_state[key_idx]]
 
-    fecha_sel = fecha_base
-    if fecha_picker != fecha_base:
-        fecha_sel = fecha_picker
-    if fecha_sel in fechas_disponibles:
-        st.session_state[key_idx] = fechas_disponibles.index(fecha_sel)
+    # Barra compacta de navegación de día
+    dc1, dc2, dc3, dc4 = st.columns([0.38, 1.4, 0.65, 0.38])
+    if dc1.button("◀", key="im_dia_ant"):
+        st.session_state[key_idx] = min(len(fechas_disponibles) - 1, st.session_state[key_idx] + 1)
+        st.rerun()
+    dc2.markdown(f"<p style='text-align:center;font-weight:700;font-size:0.88rem;margin:5px 0'>{fecha_sel.strftime('%d/%m/%Y')}</p>", unsafe_allow_html=True)
+    if dc3.button("Hoy", key="im_fecha_hoy"):
+        st.session_state[key_idx] = idx_hoy
+        st.rerun()
+    if dc4.button("▶", key="im_dia_sig"):
+        st.session_state[key_idx] = max(0, st.session_state[key_idx] - 1)
+        st.rerun()
 
     ids_dia = ids_por_fecha.get(fecha_sel, set())
     df_fil = df_visitas[df_visitas["id"].apply(lambda v: int(v) in ids_dia if pd.notna(v) else False)].copy()
     df_fil = df_fil.sort_values(by=["ensayo", "codigo", "nombre", "id"], na_position="last")
-    with cab_izq:
-        st.caption(f"{len(df_fil)} paciente(s)")
-    if fecha_sel not in fechas_disponibles:
-        st.info("Ese dia no tiene pacientes en la agenda. Selecciona otro dia con actividad.")
 
     pacientes_map = {}
     opciones_paciente = []
@@ -4435,8 +4435,39 @@ def render_interfaz_medica():
         st.warning("No hay pacientes para la fecha seleccionada.")
         return
 
-    with cab_der:
-        paciente_sel = st.selectbox("Paciente", options=opciones_paciente, key="im_paciente")
+    # Fila de iconos de paciente: silueta + ciclo, clic para seleccionar
+    pac_sel_key = "im_pac_sel"
+    if pac_sel_key not in st.session_state or st.session_state[pac_sel_key] not in opciones_paciente:
+        st.session_state[pac_sel_key] = opciones_paciente[0]
+    paciente_sel = st.session_state[pac_sel_key]
+
+    pac_cols = st.columns(len(opciones_paciente))
+    for i, etiqueta in enumerate(opciones_paciente):
+        cod_i, nom_i, ens_i = pacientes_map[etiqueta]
+        sexo_i = _inferir_sexo(nom_i)
+        svg_i = _SVG_SILUETA_F if sexo_i == "F" else _SVG_SILUETA_M
+        df_pac_i = df_fil[
+            df_fil["codigo"].str.strip().str.casefold() == cod_i.casefold()
+        ] if cod_i else df_fil[df_fil["nombre"].str.strip().str.casefold() == nom_i.casefold()]
+        ciclo_i = str(df_pac_i.iloc[0].get("ciclo", "") if not df_pac_i.empty else "") or "-"
+        iniciales_i = "".join([t[0] for t in nom_i.split()[:2]]).upper() if nom_i else cod_i[:2].upper()
+        is_sel = (etiqueta == paciente_sel)
+        color_sil = "#0f4aa6" if is_sel else "#7a9cc4"
+        bg = "#dbeafe" if is_sel else "transparent"
+        border = "2px solid #0f4aa6" if is_sel else "1px solid #d6deea"
+        with pac_cols[i]:
+            st.markdown(
+                f'<div style="text-align:center;background:{bg};border:{border};border-radius:10px;padding:3px 2px;margin-bottom:2px">'
+                f'<div style="color:{color_sil};width:26px;margin:0 auto">{svg_i}</div>'
+                f'<div style="font-size:0.7rem;font-weight:800;color:#22314a;margin-top:1px;line-height:1.1">{html.escape(iniciales_i)}</div>'
+                f'<div style="font-size:0.65rem;color:#55729a;line-height:1.1">{html.escape(ciclo_i)}</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+            if st.button("·", key=f"im_pac_{i}", use_container_width=True, help=etiqueta):
+                st.session_state[pac_sel_key] = etiqueta
+                st.rerun()
+
     cod_sel, nom_sel, ens_sel = pacientes_map[paciente_sel]
 
     cod_norm = normalizar_clave_paciente(cod_sel)
