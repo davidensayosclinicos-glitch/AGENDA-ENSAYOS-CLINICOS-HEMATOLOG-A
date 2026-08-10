@@ -4218,6 +4218,25 @@ def render_interfaz_medica():
             .block-container {padding-top: 0.75rem !important; padding-bottom: 0.7rem !important; max-width: 1200px !important;}
             [data-testid="stVerticalBlock"] > [style*="flex-direction: column"] > [data-testid="stVerticalBlock"] {gap: 0.38rem !important;}
             h3, h4 {margin-top: 0.25rem !important; margin-bottom: 0.3rem !important;}
+            div[data-testid="stCheckbox"] {
+                background: #edf1f6;
+                border: 1px solid #d6deea;
+                border-radius: 10px;
+                padding: 4px 8px;
+                margin-bottom: 6px;
+            }
+            div[data-testid="stCheckbox"] label p {
+                color: #415271 !important;
+                font-weight: 700 !important;
+            }
+            div[data-testid="stCheckbox"]:has(input:checked) {
+                background: linear-gradient(135deg, #0f4aa6, #0a68c7);
+                border-color: #0f4aa6;
+                box-shadow: 0 6px 14px rgba(15, 74, 166, 0.22);
+            }
+            div[data-testid="stCheckbox"]:has(input:checked) label p {
+                color: #ffffff !important;
+            }
             .im-shell {background: linear-gradient(160deg, #ffffff 0%, #f5f9ff 58%, #f2fbf5 100%); border: 1px solid #d7e2f3; border-radius: 16px; box-shadow: 0 10px 22px rgba(18,50,94,0.07); padding: 10px 12px; margin-bottom: 6px;}
             .im-top {display: flex; align-items: center; gap: 8px; margin-bottom: 4px;}
             .im-avatar {width: 32px; height: 32px; border-radius: 50%; display:flex; align-items:center; justify-content:center; background: linear-gradient(135deg, #dbe9ff, #c8f3e1); border: 1px solid #c4d9ff; color: #1f3b66; font-size: 0.95rem; font-weight: 700;}
@@ -4419,6 +4438,69 @@ def render_interfaz_medica():
             iniciales = "".join([t[0] for t in trozos[:2]]).upper()
 
     color_actual = color_paso.get(paso, "#0f4aa6")
+
+    def _lista_unica_texto(items):
+        vistos = set()
+        salida = []
+        for item in items or []:
+            txt = str(item or "").strip()
+            if not txt:
+                continue
+            clave = txt.casefold()
+            if clave in vistos:
+                continue
+            vistos.add(clave)
+            salida.append(txt)
+        return salida
+
+    def _render_checklist_onoff(titulo, estado_dict, campo, base_ops, extra_ops, clave_ui, columnas=3):
+        st.markdown(f"**{titulo}**")
+        ext_key = f"{campo}_expandido"
+        custom_key = f"{campo}_custom"
+
+        estado_dict[campo] = _lista_unica_texto(estado_dict.get(campo, []))
+        estado_dict[custom_key] = _lista_unica_texto(estado_dict.get(custom_key, []))
+
+        if ext_key not in estado_dict:
+            estado_dict[ext_key] = False
+
+        acciones = st.columns([1.15, 1.25, 2.6])
+        if acciones[0].button("Generar mas", key=f"im_gen_{clave_ui}_{visita_id}"):
+            estado_dict[ext_key] = True
+        if acciones[1].button("Quitar todo", key=f"im_clear_{clave_ui}_{visita_id}"):
+            estado_dict[campo] = []
+
+        nuevas_op = acciones[2].text_input("", placeholder="Nueva opcion", key=f"im_new_{clave_ui}_{visita_id}", label_visibility="collapsed")
+        if acciones[2].button("Anadir", key=f"im_add_{clave_ui}_{visita_id}"):
+            nueva = str(nuevas_op or "").strip()
+            if nueva:
+                if nueva.casefold() not in {x.casefold() for x in estado_dict[custom_key]}:
+                    estado_dict[custom_key].append(nueva)
+                if nueva.casefold() not in {x.casefold() for x in estado_dict[campo]}:
+                    estado_dict[campo].append(nueva)
+
+        opciones = _lista_unica_texto(base_ops)
+        if estado_dict.get(ext_key):
+            opciones = _lista_unica_texto(opciones + list(extra_ops or []))
+        opciones = _lista_unica_texto(opciones + estado_dict.get(custom_key, []))
+
+        seleccion = list(estado_dict.get(campo, []))
+        seleccion_set = {x.casefold() for x in seleccion}
+        cols = st.columns(columnas)
+        for idx, item in enumerate(opciones):
+            marcado = item.casefold() in seleccion_set
+            nuevo_estado = cols[idx % columnas].checkbox(item, value=marcado, key=f"im_onoff_{clave_ui}_{visita_id}_{idx}")
+            if nuevo_estado and item.casefold() not in seleccion_set:
+                seleccion.append(item)
+                seleccion_set.add(item.casefold())
+            if not nuevo_estado and item.casefold() in seleccion_set:
+                seleccion = [x for x in seleccion if x.casefold() != item.casefold()]
+                seleccion_set = {x.casefold() for x in seleccion}
+
+        estado_dict[campo] = _lista_unica_texto(seleccion)
+        st.caption(f"{len(estado_dict[campo])} seleccionada(s)")
+        return estado_dict[campo]
+
     st.markdown(
         f"""
         <div class=\"im-shell\"> 
@@ -4476,13 +4558,39 @@ def render_interfaz_medica():
 
     if paso == 3:
         st.markdown("#### Comentarios del paciente")
-        sintomas_catalogo = ["Cansancio", "Dolor de cabeza", "Tos", "Nauseas", "Fiebre", "Disnea", "Diarrea", "Estreñimiento", "Dolor", "Perdida de apetito", "Insomnio", "Otros"]
+        sintomas_base = [
+            "Astenia/fatiga",
+            "Dolor oseo",
+            "Dolor neuropatico",
+            "Fiebre",
+            "Disnea",
+            "Tos",
+            "Nauseas",
+            "Diarrea",
+            "Estrenimiento",
+            "Perdida de apetito",
+            "Edema",
+            "Sangrado/moretones",
+        ]
+        sintomas_extra = [
+            "Prurito",
+            "Mucositis",
+            "Infecciones respiratorias",
+            "Mareo",
+            "Perdida de peso",
+            "Dolor abdominal",
+            "Cefalea",
+            "Insomnio",
+        ]
         com = estado["estado_comentarios"]
-        com["sintomas"] = st.multiselect(
+        com["sintomas"] = _render_checklist_onoff(
             "Sintomas referidos",
-            options=sintomas_catalogo,
-            default=[s for s in com.get("sintomas", []) if s in sintomas_catalogo],
-            key=f"im_sintomas_{visita_id}",
+            com,
+            "sintomas",
+            sintomas_base,
+            sintomas_extra,
+            "sintomas",
+            columnas=3,
         )
         com["comentario_libre"] = st.text_area(
             "Comentario libre",
@@ -4500,25 +4608,41 @@ def render_interfaz_medica():
     if paso == 4:
         st.markdown("#### Pruebas a realizar")
         pruebas = estado["estado_pruebas"]
-        pruebas_txt = "\n".join(pruebas.get("pruebas", []))
-        pruebas_txt = st.text_area(
-            "Listado de pruebas (una por linea)",
-            value=pruebas_txt,
-            height=78,
-            key=f"im_pruebas_txt_{visita_id}",
-        )
-        pruebas["pruebas"] = [p.strip() for p in pruebas_txt.split("\n") if p.strip()]
-        pruebas["realizadas"] = st.multiselect(
-            "Pruebas realizadas hoy",
-            options=pruebas["pruebas"],
-            default=[p for p in pruebas.get("realizadas", []) if p in pruebas["pruebas"]],
-            key=f"im_pruebas_ok_{visita_id}",
+        pruebas_base = [
+            "Hemograma completo",
+            "Bioquimica basica",
+            "Perfil renal y hepatica",
+            "LDH",
+            "Beta-2 microglobulina",
+            "Proteinograma",
+            "Inmunofijacion suero",
+            "Cadenas ligeras libres",
+            "Calcio",
+            "Creatinina",
+        ]
+        pruebas_extra = [
+            "Inmunofijacion orina 24h",
+            "Cuantificacion de inmunoglobulinas",
+            "Aspirado/biopsia medula osea",
+            "Citometria de flujo",
+            "FISH/citogenetica",
+            "PET-TC",
+            "RMN columna",
+            "ECOG Performance Status",
+            "Serologias",
+            "Coagulacion",
+        ]
+        pruebas["pruebas"] = _render_checklist_onoff(
+            "Listado de pruebas",
+            pruebas,
+            "pruebas",
+            pruebas_base,
+            pruebas_extra,
+            "pruebas",
+            columnas=2,
         )
         for item in pruebas["pruebas"]:
-            clase = "im-ok" if item in pruebas["realizadas"] else "im-warn"
-            est = "Completada" if item in pruebas["realizadas"] else "Pendiente"
-            st.markdown(f"<div class='im-mini-card {clase}'>{html.escape(item)} · {est}</div>", unsafe_allow_html=True)
-        st.caption(f"{len(pruebas['realizadas'])}/{len(pruebas['pruebas'])} pruebas completadas")
+            st.markdown(f"<div class='im-mini-card im-ok'>{html.escape(item)}</div>", unsafe_allow_html=True)
 
     if paso == 5:
         st.markdown("#### Farmacos de estudio")
@@ -4536,26 +4660,76 @@ def render_interfaz_medica():
     if paso == 6:
         st.markdown("#### Medicacion concomitante")
         med = estado["estado_medicacion_concomitante"]
-        med_txt = st.text_area(
-            "Medicacion concomitante (una linea por item)",
-            value="\n".join(med.get("medicaciones", [])),
-            height=78,
-            key=f"im_concom_{visita_id}",
+        med_base = [
+            "Aciclovir profilaxis",
+            "Cotrimoxazol profilaxis",
+            "Omeprazol",
+            "Alopurinol",
+            "Ondansetron",
+            "Paracetamol",
+            "Loperamida",
+            "Calcio + vitamina D",
+            "Bifosfonato (zoledronato)",
+            "Heparina profilactica",
+        ]
+        med_extra = [
+            "Levofloxacino profilaxis",
+            "Fluconazol profilaxis",
+            "G-CSF",
+            "Eritropoyetina",
+            "Morfina rescate",
+            "Gabapentina",
+            "AAS",
+            "DOAC",
+            "IECA/ARA-II",
+            "Insulina",
+        ]
+        med["medicaciones"] = _render_checklist_onoff(
+            "Medicacion concomitante",
+            med,
+            "medicaciones",
+            med_base,
+            med_extra,
+            "concom",
+            columnas=2,
         )
-        med["medicaciones"] = [p.strip() for p in med_txt.split("\n") if p.strip()]
         for item in med["medicaciones"]:
             st.markdown(f"<div class='im-mini-card'>{html.escape(item)}</div>", unsafe_allow_html=True)
 
     if paso == 7:
         st.markdown("#### Efectos adversos (AEs)")
         ae = estado["estado_aes"]
-        ae_txt = st.text_area(
-            "AEs (formato sugerido: Evento | Grado)",
-            value="\n".join(ae.get("eventos", [])),
-            height=78,
-            key=f"im_aes_{visita_id}",
+        ae_base = [
+            "Neutropenia G1-2",
+            "Neutropenia G3-4",
+            "Anemia G1-2",
+            "Trombocitopenia G1-2",
+            "Neuropatia periferica G1-2",
+            "Nauseas/vomitos G1-2",
+            "Diarrea G1-2",
+            "Infeccion respiratoria",
+            "Mucositis oral",
+            "Fatiga intensa",
+        ]
+        ae_extra = [
+            "Fiebre neutropenica",
+            "Trombosis venosa",
+            "Rash cutaneo",
+            "Toxicidad hepatica",
+            "Toxicidad renal",
+            "Reaccion infusion",
+            "Hipocalcemia",
+            "Hiperglucemia por corticoides",
+        ]
+        ae["eventos"] = _render_checklist_onoff(
+            "AEs detectados",
+            ae,
+            "eventos",
+            ae_base,
+            ae_extra,
+            "aes",
+            columnas=2,
         )
-        ae["eventos"] = [p.strip() for p in ae_txt.split("\n") if p.strip()]
         if ae["eventos"]:
             for item in ae["eventos"]:
                 st.markdown(f"<div class='im-mini-card im-danger'>{html.escape(item)}</div>", unsafe_allow_html=True)
