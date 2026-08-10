@@ -4274,7 +4274,7 @@ def render_interfaz_medica():
         st.session_state[key_idx] = idx_hoy
     st.session_state[key_idx] = max(0, min(int(st.session_state[key_idx]), len(fechas_disponibles) - 1))
 
-    nav1, nav2, nav3, nav4, nav5 = st.columns([1, 1, 1.3, 1.5, 1.9])
+    nav1, nav2, nav3, nav4 = st.columns([1, 1, 1.3, 2.4])
     if nav1.button("Dia anterior", key="im_fecha_prev", disabled=(st.session_state[key_idx] >= len(fechas_disponibles) - 1)):
         st.session_state[key_idx] += 1
         st.rerun()
@@ -4285,28 +4285,20 @@ def render_interfaz_medica():
         st.session_state[key_idx] = idx_hoy
         st.rerun()
 
-    fecha_sel_lista = nav4.selectbox(
-        "Dia",
-        options=fechas_disponibles,
-        index=st.session_state[key_idx],
-        format_func=lambda d: d.strftime("%d/%m/%Y"),
-        key="im_fecha_select",
-    )
-    st.session_state[key_idx] = fechas_disponibles.index(fecha_sel_lista)
-
-    fecha_picker = nav5.date_input(
+    fecha_base = fechas_disponibles[st.session_state[key_idx]]
+    fecha_picker = nav4.date_input(
         "Elegir dia (calendario)",
-        value=fecha_sel_lista,
+        value=fecha_base,
         min_value=min(fechas_disponibles),
         max_value=max(fechas_disponibles),
         key="im_fecha_picker",
     )
 
-    fecha_sel = fecha_sel_lista
-    if fecha_picker != fecha_sel_lista:
+    fecha_sel = fecha_base
+    if fecha_picker != fecha_base:
         fecha_sel = fecha_picker
-        if fecha_sel in fechas_disponibles:
-            st.session_state[key_idx] = fechas_disponibles.index(fecha_sel)
+    if fecha_sel in fechas_disponibles:
+        st.session_state[key_idx] = fechas_disponibles.index(fecha_sel)
 
     ids_dia = ids_por_fecha.get(fecha_sel, set())
     df_fil = df_visitas[df_visitas["id"].apply(lambda v: int(v) in ids_dia if pd.notna(v) else False)].copy()
