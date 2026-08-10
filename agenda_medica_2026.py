@@ -4246,13 +4246,43 @@ def render_interfaz_medica():
     df_visitas["fecha"] = df_visitas["fecha"].fillna("").astype(str)
     df_visitas["_fecha_dt"] = pd.to_datetime(df_visitas["fecha"], errors="coerce")
 
-    col_f1, col_f2 = st.columns([1, 1])
-    ensayos = sorted([e for e in df_visitas["ensayo"].unique() if e.strip()])
-    filtro_ensayo = col_f1.selectbox("Ensayo", options=["Todos"] + ensayos, key="im_filtro_ensayo")
+    df_visitas["_fecha_dia"] = df_visitas["_fecha_dt"].dt.date
+    df_visitas = df_visitas[df_visitas["_fecha_dia"].notna()].copy()
+    if df_visitas.empty:
+        st.warning("No hay visitas con fecha valida para mostrar en la interfaz medica.")
+        return
 
-    df_fil = df_visitas.copy()
-    if filtro_ensayo != "Todos":
-        df_fil = df_fil[df_fil["ensayo"] == filtro_ensayo]
+    fechas_disponibles = sorted(df_visitas["_fecha_dia"].unique().tolist(), reverse=True)
+    hoy = fecha_hoy_local()
+    idx_hoy = fechas_disponibles.index(hoy) if hoy in fechas_disponibles else 0
+    key_idx = "im_fecha_idx"
+    if key_idx not in st.session_state:
+        st.session_state[key_idx] = idx_hoy
+    st.session_state[key_idx] = max(0, min(int(st.session_state[key_idx]), len(fechas_disponibles) - 1))
+
+    nav1, nav2, nav3, nav4 = st.columns([1, 1, 1.4, 1.7])
+    if nav1.button("Dia anterior", key="im_fecha_prev", disabled=(st.session_state[key_idx] >= len(fechas_disponibles) - 1)):
+        st.session_state[key_idx] += 1
+        st.rerun()
+    if nav2.button("Dia siguiente", key="im_fecha_next", disabled=(st.session_state[key_idx] <= 0)):
+        st.session_state[key_idx] -= 1
+        st.rerun()
+    if nav3.button("Ir a hoy", key="im_fecha_hoy"):
+        st.session_state[key_idx] = idx_hoy
+        st.rerun()
+
+    fecha_sel = nav4.selectbox(
+        "Fecha",
+        options=fechas_disponibles,
+        index=st.session_state[key_idx],
+        format_func=lambda d: d.strftime("%d/%m/%Y"),
+        key="im_fecha_select",
+    )
+    st.session_state[key_idx] = fechas_disponibles.index(fecha_sel)
+
+    df_fil = df_visitas[df_visitas["_fecha_dia"] == fecha_sel].copy()
+    df_fil = df_fil.sort_values(by=["ensayo", "codigo", "nombre", "id"], na_position="last")
+    st.caption(f"Pacientes del dia seleccionado: {len(df_fil)} ({fecha_sel.strftime('%d/%m/%Y')})")
 
     pacientes_map = {}
     opciones_paciente = []
@@ -4266,10 +4296,10 @@ def render_interfaz_medica():
             opciones_paciente.append(etiqueta)
 
     if not opciones_paciente:
-        st.warning("No hay pacientes para el filtro seleccionado.")
+        st.warning("No hay pacientes para la fecha seleccionada.")
         return
 
-    paciente_sel = col_f2.selectbox("Paciente", options=opciones_paciente, key="im_paciente")
+    paciente_sel = st.selectbox("Paciente", options=opciones_paciente, key="im_paciente")
     cod_sel, nom_sel, ens_sel = pacientes_map[paciente_sel]
 
     cod_norm = normalizar_clave_paciente(cod_sel)
@@ -4282,7 +4312,7 @@ def render_interfaz_medica():
     else:
         mask = mask & (df_fil["nombre"].apply(normalizar_clave_paciente) == nom_norm)
 
-    df_paciente_visitas = df_fil[mask].sort_values(by="_fecha_dt", ascending=False).copy()
+    df_paciente_visitas = df_fil[mask].sort_values(by=["_fecha_dt", "id"], ascending=[False, False]).copy()
     if df_paciente_visitas.empty:
         st.warning("No se encontraron visitas para este paciente.")
         return
@@ -4297,7 +4327,11 @@ def render_interfaz_medica():
         opciones_visita.append(etiqueta)
         mapa_visitas[etiqueta] = row.to_dict()
 
-    visita_sel = st.selectbox("Visita", options=opciones_visita, key="im_visita")
+    if len(opciones_visita) == 1:
+        visita_sel = opciones_visita[0]
+        st.caption(f"Visita seleccionada automaticamente: {visita_sel}")
+    else:
+        visita_sel = st.selectbox("Visita", options=opciones_visita, key="im_visita")
     visita_row = mapa_visitas[visita_sel]
     visita_id = int(visita_row["id"])
 
