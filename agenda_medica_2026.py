@@ -4286,7 +4286,7 @@ def render_interfaz_medica():
         st.rerun()
 
     fecha_sel_lista = nav4.selectbox(
-        "Fecha",
+        "Dia",
         options=fechas_disponibles,
         index=st.session_state[key_idx],
         format_func=lambda d: d.strftime("%d/%m/%Y"),
@@ -4472,9 +4472,9 @@ def render_interfaz_medica():
         k2.metric("Pruebas", str(len(estado.get("estado_pruebas", {}).get("pruebas", []))))
         k3.metric("AEs", str(len(estado.get("estado_aes", {}).get("eventos", []))))
         st.info("Esta vista resume el estado global antes de pasar a cada modulo clinico.")
-        st.write(f"Fecha agenda seleccionada: {fecha_agenda_txt} | Fecha visita registrada: {fecha_visita_txt} | Hoy real: {fecha_real_hoy_txt}")
+        st.write(f"Dia agenda seleccionado: {fecha_agenda_txt} | Dia de visita registrado: {fecha_visita_txt} | Hoy real: {fecha_real_hoy_txt}")
         if fecha_agenda_txt != fecha_real_hoy_txt:
-            st.warning("Estas viendo una fecha de agenda distinta de hoy.")
+            st.warning("Estas viendo un dia de agenda distinto de hoy.")
         st.write(f"Comentarios base de agenda: {str(visita_row.get('comentarios', '') or 'Sin comentarios')}")
 
     if paso == 2:
