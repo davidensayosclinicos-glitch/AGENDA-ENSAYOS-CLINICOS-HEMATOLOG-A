@@ -4246,13 +4246,27 @@ def render_interfaz_medica():
     df_visitas["fecha"] = df_visitas["fecha"].fillna("").astype(str)
     df_visitas["_fecha_dt"] = pd.to_datetime(df_visitas["fecha"], errors="coerce")
 
-    df_visitas["_fecha_dia"] = df_visitas["_fecha_dt"].dt.date
-    df_visitas = df_visitas[df_visitas["_fecha_dia"].notna()].copy()
-    if df_visitas.empty:
-        st.warning("No hay visitas con fecha valida para mostrar en la interfaz medica.")
+    # Usamos la misma fuente que Agenda: eventos del calendario.
+    eventos_agenda = construir_eventos_calendario(df_visitas)
+    ids_por_fecha = {}
+    for ev in eventos_agenda:
+        props = ev.get("extendedProps") or {}
+        visita_id = props.get("id")
+        if visita_id in (None, ""):
+            # Ignoramos eventos teóricos sin visita real.
+            continue
+        fecha_raw = str(ev.get("start") or "").strip()
+        fecha_txt = fecha_raw[:10]
+        fecha_dt = parse_fecha_iso(fecha_txt)
+        if not fecha_dt:
+            continue
+        ids_por_fecha.setdefault(fecha_dt, set()).add(int(visita_id))
+
+    if not ids_por_fecha:
+        st.warning("No hay pacientes en el calendario de Agenda para mostrar en Interfaz medica.")
         return
 
-    fechas_disponibles = sorted(df_visitas["_fecha_dia"].unique().tolist(), reverse=True)
+    fechas_disponibles = sorted(ids_por_fecha.keys(), reverse=True)
     hoy = fecha_hoy_local()
     idx_hoy = fechas_disponibles.index(hoy) if hoy in fechas_disponibles else 0
     key_idx = "im_fecha_idx"
@@ -4280,7 +4294,8 @@ def render_interfaz_medica():
     )
     st.session_state[key_idx] = fechas_disponibles.index(fecha_sel)
 
-    df_fil = df_visitas[df_visitas["_fecha_dia"] == fecha_sel].copy()
+    ids_dia = ids_por_fecha.get(fecha_sel, set())
+    df_fil = df_visitas[df_visitas["id"].apply(lambda v: int(v) in ids_dia if pd.notna(v) else False)].copy()
     df_fil = df_fil.sort_values(by=["ensayo", "codigo", "nombre", "id"], na_position="last")
     st.caption(f"Pacientes del dia seleccionado: {len(df_fil)} ({fecha_sel.strftime('%d/%m/%Y')})")
 
