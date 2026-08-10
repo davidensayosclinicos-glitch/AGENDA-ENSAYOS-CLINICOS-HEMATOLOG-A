@@ -4733,13 +4733,25 @@ def render_interfaz_medica():
     hoy = st.session_state.get("agenda_hoy_referencia", fecha_hoy_local())
     key_fecha = "im_fecha_sel"
     key_hoy_ref = "im_hoy_ref"
+    key_agenda_seed = "im_agenda_seed"
+
+    fecha_desde_agenda = None
+    agenda_sel = st.session_state.get("datos_seleccionados")
+    if isinstance(agenda_sel, str):
+        fecha_desde_agenda = parse_fecha_iso(agenda_sel[:10])
+
     if key_fecha not in st.session_state:
-        st.session_state[key_fecha] = hoy
+        st.session_state[key_fecha] = fecha_desde_agenda or hoy
         st.session_state[key_hoy_ref] = hoy
     elif st.session_state.get(key_hoy_ref) != hoy:
         # Si cambia el "hoy" de referencia (p.ej. nuevo día), resincronizamos.
         st.session_state[key_hoy_ref] = hoy
         st.session_state[key_fecha] = hoy
+
+    # Si el usuario llega desde Agenda con una fecha concreta, sincronizamos una vez.
+    if fecha_desde_agenda and st.session_state.get(key_agenda_seed) != agenda_sel:
+        st.session_state[key_fecha] = fecha_desde_agenda
+        st.session_state[key_agenda_seed] = agenda_sel
 
     panel_izq, panel_der = st.columns([1, 1], gap="large")
     panel_der = panel_der.container(border=True)
@@ -4795,7 +4807,15 @@ def render_interfaz_medica():
         st.rerun()
 
     ids_dia = ids_por_fecha.get(fecha_sel, set())
-    df_fil = df_visitas[df_visitas["id"].apply(lambda v: int(v) in ids_dia if pd.notna(v) else False)].copy()
+    df_fil_ids = df_visitas[df_visitas["id"].apply(lambda v: int(v) in ids_dia if pd.notna(v) else False)].copy()
+    df_fil_fecha = df_visitas[df_visitas["_fecha_dt"].dt.date == fecha_sel].copy()
+
+    # Priorizamos los IDs reales de Agenda y usamos fecha real como respaldo.
+    if not df_fil_ids.empty:
+        df_fil = df_fil_ids
+    else:
+        df_fil = df_fil_fecha
+
     df_fil = df_fil.sort_values(by=["ensayo", "codigo", "nombre", "id"], na_position="last")
 
     pacientes_map = {}
