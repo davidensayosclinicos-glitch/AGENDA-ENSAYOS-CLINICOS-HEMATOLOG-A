@@ -4211,17 +4211,19 @@ def renderizar_registro_kits_integrado():
 
 def render_interfaz_medica():
     st.subheader("Interfaz medica")
-    st.caption("Vista simple")
 
     st.markdown(
         """
         <style>
-            .im-shell {background: linear-gradient(160deg, #ffffff 0%, #f5f9ff 58%, #f2fbf5 100%); border: 1px solid #d7e2f3; border-radius: 22px; box-shadow: 0 18px 35px rgba(18,50,94,0.08); padding: 16px 18px; margin-bottom: 10px;}
-            .im-top {display: flex; align-items: center; gap: 10px; margin-bottom: 8px;}
-            .im-avatar {width: 40px; height: 40px; border-radius: 50%; display:flex; align-items:center; justify-content:center; background: linear-gradient(135deg, #dbe9ff, #c8f3e1); border: 1px solid #c4d9ff; color: #1f3b66; font-size: 1.1rem; font-weight: 700;}
-            .im-title {font-size: 1.35rem; font-weight: 800; color: #22314a; margin-bottom: 2px;}
-            .im-sub {font-size: 1.02rem; color: #55729a; margin-bottom: 1px;}
-            .im-banner {border-radius: 12px; padding: 10px 12px; font-size: 1.03rem; font-weight: 700; margin-top: 8px; border: 1px solid #d6e3f8;}
+            .block-container {padding-top: 0.75rem !important; padding-bottom: 0.7rem !important; max-width: 1200px !important;}
+            [data-testid="stVerticalBlock"] > [style*="flex-direction: column"] > [data-testid="stVerticalBlock"] {gap: 0.38rem !important;}
+            h3, h4 {margin-top: 0.25rem !important; margin-bottom: 0.3rem !important;}
+            .im-shell {background: linear-gradient(160deg, #ffffff 0%, #f5f9ff 58%, #f2fbf5 100%); border: 1px solid #d7e2f3; border-radius: 16px; box-shadow: 0 10px 22px rgba(18,50,94,0.07); padding: 10px 12px; margin-bottom: 6px;}
+            .im-top {display: flex; align-items: center; gap: 8px; margin-bottom: 4px;}
+            .im-avatar {width: 32px; height: 32px; border-radius: 50%; display:flex; align-items:center; justify-content:center; background: linear-gradient(135deg, #dbe9ff, #c8f3e1); border: 1px solid #c4d9ff; color: #1f3b66; font-size: 0.95rem; font-weight: 700;}
+            .im-title {font-size: 1.1rem; font-weight: 800; color: #22314a; margin-bottom: 1px; line-height: 1.1;}
+            .im-sub {font-size: 0.93rem; color: #55729a; margin-bottom: 0; line-height: 1.15;}
+            .im-banner {border-radius: 10px; padding: 7px 9px; font-size: 0.95rem; font-weight: 700; margin-top: 5px; border: 1px solid #d6e3f8;}
             .im-chip {padding: 4px 8px; border-radius: 999px; border: 1px solid #d5def0; font-size: 0.73rem; color: #4b5d7f; background: #ffffff;}
             .im-chip-active {padding: 4px 8px; border-radius: 999px; border: 1px solid #0f4aa6; font-size: 0.73rem; color: #ffffff; background: linear-gradient(90deg, #0f4aa6, #0a68c7);}
             .im-mini-card {border: 1px solid #d9e4f4; background: #ffffff; border-radius: 12px; padding: 8px 10px; margin-bottom: 7px; font-size: 0.86rem; color: #2b3a54;}
@@ -4235,14 +4237,14 @@ def render_interfaz_medica():
             .stDateInput label,
             .stMultiSelect label,
             .stRadio label {
-                font-size: 1rem !important;
+                font-size: 1.03rem !important;
                 font-weight: 700 !important;
             }
             .stTextInput input,
             .stTextArea textarea,
             .stDateInput input,
             .stSelectbox div[data-baseweb="select"] input {
-                font-size: 1.08rem !important;
+                font-size: 1.04rem !important;
             }
         </style>
         """,
@@ -4289,19 +4291,20 @@ def render_interfaz_medica():
         st.session_state[key_idx] = idx_hoy
     st.session_state[key_idx] = max(0, min(int(st.session_state[key_idx]), len(fechas_disponibles) - 1))
 
-    nav1, nav2 = st.columns([2.4, 1])
-    if nav2.button("Hoy", key="im_fecha_hoy"):
-        st.session_state[key_idx] = idx_hoy
-        st.rerun()
-
     fecha_base = fechas_disponibles[st.session_state[key_idx]]
-    fecha_picker = nav1.date_input(
-        "Dia",
-        value=fecha_base,
-        min_value=min(fechas_disponibles),
-        max_value=max(fechas_disponibles),
-        key="im_fecha_picker",
-    )
+    cab_izq, cab_der = st.columns([1.2, 2.2])
+    with cab_izq:
+        f_izq, f_der = st.columns([3.2, 1.1])
+        fecha_picker = f_izq.date_input(
+            "Dia",
+            value=fecha_base,
+            min_value=min(fechas_disponibles),
+            max_value=max(fechas_disponibles),
+            key="im_fecha_picker",
+        )
+        if f_der.button("Hoy", key="im_fecha_hoy"):
+            st.session_state[key_idx] = idx_hoy
+            st.rerun()
 
     fecha_sel = fecha_base
     if fecha_picker != fecha_base:
@@ -4312,7 +4315,8 @@ def render_interfaz_medica():
     ids_dia = ids_por_fecha.get(fecha_sel, set())
     df_fil = df_visitas[df_visitas["id"].apply(lambda v: int(v) in ids_dia if pd.notna(v) else False)].copy()
     df_fil = df_fil.sort_values(by=["ensayo", "codigo", "nombre", "id"], na_position="last")
-    st.caption(f"{len(df_fil)} paciente(s)")
+    with cab_izq:
+        st.caption(f"{len(df_fil)} paciente(s)")
     if fecha_sel not in fechas_disponibles:
         st.info("Ese dia no tiene pacientes en la agenda. Selecciona otro dia con actividad.")
 
@@ -4331,7 +4335,8 @@ def render_interfaz_medica():
         st.warning("No hay pacientes para la fecha seleccionada.")
         return
 
-    paciente_sel = st.selectbox("Paciente", options=opciones_paciente, key="im_paciente")
+    with cab_der:
+        paciente_sel = st.selectbox("Paciente", options=opciones_paciente, key="im_paciente")
     cod_sel, nom_sel, ens_sel = pacientes_map[paciente_sel]
 
     cod_norm = normalizar_clave_paciente(cod_sel)
@@ -4414,24 +4419,21 @@ def render_interfaz_medica():
             iniciales = "".join([t[0] for t in trozos[:2]]).upper()
 
     color_actual = color_paso.get(paso, "#0f4aa6")
-    marco_l, marco_c, marco_r = st.columns([1, 1.75, 1])
-    with marco_c:
-        st.markdown(
-            f"""
-            <div class=\"im-shell\"> 
-                <div class=\"im-top\">
-                    <div class=\"im-avatar\">{html.escape(iniciales)}</div>
-                    <div>
-                        <div class=\"im-title\">{html.escape(nombre_pac or 'Paciente')}</div>
-                        <div class=\"im-sub\">{html.escape(str(visita_row.get('codigo', '') or '-'))} · {html.escape(str(visita_row.get('ensayo', '') or '-'))}</div>
-                        <div class="im-sub">Ciclo {html.escape(str(visita_row.get('ciclo', '') or '-'))} · Agenda {html.escape(fecha_agenda_txt)}</div>
-                    </div>
+    st.markdown(
+        f"""
+        <div class=\"im-shell\"> 
+            <div class=\"im-top\">
+                <div class=\"im-avatar\">{html.escape(iniciales)}</div>
+                <div>
+                    <div class=\"im-title\">{html.escape(nombre_pac or 'Paciente')}</div>
+                    <div class=\"im-sub\">{html.escape(str(visita_row.get('codigo', '') or '-'))} · {html.escape(str(visita_row.get('ensayo', '') or '-'))} · Ciclo {html.escape(str(visita_row.get('ciclo', '') or '-'))}</div>
                 </div>
-                <div class=\"im-banner\" style=\"background:{color_actual}12; color:{color_actual}; border-color:{color_actual}55;\">{html.escape(iconos[paso-1])} · Paso {paso}/{len(pasos)} · {html.escape(pasos[paso-1])}</div>
             </div>
-            """,
-            unsafe_allow_html=True,
-        )
+            <div class=\"im-banner\" style=\"background:{color_actual}12; color:{color_actual}; border-color:{color_actual}55;\">{html.escape(iconos[paso-1])} · Paso {paso}/{len(pasos)} · {html.escape(pasos[paso-1])} · Agenda {html.escape(fecha_agenda_txt)}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
     completadas = 0
     if estado.get("estado_constantes", {}).get("tension_arterial"):
@@ -4485,7 +4487,7 @@ def render_interfaz_medica():
         com["comentario_libre"] = st.text_area(
             "Comentario libre",
             value=str(com.get("comentario_libre", "")),
-            height=100,
+            height=78,
             key=f"im_comentario_{visita_id}",
         )
         com["estado_general"] = st.selectbox(
@@ -4502,7 +4504,7 @@ def render_interfaz_medica():
         pruebas_txt = st.text_area(
             "Listado de pruebas (una por linea)",
             value=pruebas_txt,
-            height=120,
+            height=78,
             key=f"im_pruebas_txt_{visita_id}",
         )
         pruebas["pruebas"] = [p.strip() for p in pruebas_txt.split("\n") if p.strip()]
@@ -4524,7 +4526,7 @@ def render_interfaz_medica():
         far_txt = st.text_area(
             "Farmacos (una linea por farmaco con dosis)",
             value="\n".join(far.get("farmacos", [])),
-            height=120,
+            height=78,
             key=f"im_farmacos_{visita_id}",
         )
         far["farmacos"] = [p.strip() for p in far_txt.split("\n") if p.strip()]
@@ -4537,7 +4539,7 @@ def render_interfaz_medica():
         med_txt = st.text_area(
             "Medicacion concomitante (una linea por item)",
             value="\n".join(med.get("medicaciones", [])),
-            height=120,
+            height=78,
             key=f"im_concom_{visita_id}",
         )
         med["medicaciones"] = [p.strip() for p in med_txt.split("\n") if p.strip()]
@@ -4550,7 +4552,7 @@ def render_interfaz_medica():
         ae_txt = st.text_area(
             "AEs (formato sugerido: Evento | Grado)",
             value="\n".join(ae.get("eventos", [])),
-            height=120,
+            height=78,
             key=f"im_aes_{visita_id}",
         )
         ae["eventos"] = [p.strip() for p in ae_txt.split("\n") if p.strip()]
@@ -4576,7 +4578,7 @@ def render_interfaz_medica():
             key=f"im_decision_{visita_id}",
         )
         dec["accion"] = st.text_input("Accion recomendada", value=str(dec.get("accion", "")), key=f"im_accion_{visita_id}")
-        dec["motivo"] = st.text_area("Motivo", value=str(dec.get("motivo", "")), height=90, key=f"im_motivo_{visita_id}")
+        dec["motivo"] = st.text_area("Motivo", value=str(dec.get("motivo", "")), height=74, key=f"im_motivo_{visita_id}")
 
     if paso == 9:
         st.markdown("#### Confirmacion")
@@ -4618,7 +4620,7 @@ def render_interfaz_medica():
         estado["nota_clinica"] = st.text_area(
             "Nota clinica editable",
             value=str(estado.get("nota_clinica", "")),
-            height=140,
+            height=96,
             key=f"im_nota_clinica_{visita_id}",
         )
         st.download_button(
