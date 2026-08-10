@@ -4932,17 +4932,16 @@ def render_interfaz_medica():
 
     panel_izq.markdown(
         f"""
-        <div class=\"im-shell\" style=\"display:flex;align-items:center;justify-content:space-between;gap:6px;\">
+        <div class=\"im-shell\" style=\"display:flex;align-items:center;justify-content:space-between;gap:6px;padding:4px 6px;\">
             <div style=\"flex:1;min-width:0;\">
                 <div class=\"im-top\">
                     <div>
-                        <div class=\"im-title\">{html.escape(nombre_pac or 'Paciente')}</div>
-                        <div class=\"im-sub\">{html.escape(str(visita_row.get('codigo', '') or '-'))} · {html.escape(str(visita_row.get('ensayo', '') or '-'))} · Ciclo {html.escape(str(visita_row.get('ciclo', '') or '-'))}</div>
+                        <div class=\"im-title\" style=\"font-size:0.98rem;\">{html.escape(nombre_pac or 'Paciente')}</div>
+                        <div class=\"im-sub\" style=\"font-size:0.9rem;\">Ciclo {html.escape(str(visita_row.get('ciclo', '') or '-'))}</div>
                     </div>
                 </div>
-                <div class=\"im-banner\" style=\"background:{color_actual}12; color:{color_actual}; border-color:{color_actual}55;\">{html.escape(iconos[paso-1])} · Paso {paso}/{len(pasos)} · {html.escape(pasos[paso-1])} · Agenda {html.escape(fecha_agenda_txt)}</div>
             </div>
-            <div style=\"color:{silueta_color};width:38px;flex-shrink:0;opacity:0.85;\">{svgsilhouette}</div>
+            <div style=\"color:{silueta_color};width:28px;flex-shrink:0;opacity:0.85;\">{svgsilhouette}</div>
         </div>
         """,
         unsafe_allow_html=True,
