@@ -4692,45 +4692,33 @@ def render_interfaz_medica():
 
     fechas_disponibles = sorted(ids_por_fecha.keys(), reverse=True)
     hoy = fecha_hoy_local()
-    idx_hoy = fechas_disponibles.index(hoy) if hoy in fechas_disponibles else 0
-    key_idx = "im_fecha_idx"
-    if key_idx not in st.session_state:
-        st.session_state[key_idx] = idx_hoy
-    st.session_state[key_idx] = max(0, min(int(st.session_state[key_idx]), len(fechas_disponibles) - 1))
+    key_fecha = "im_fecha_sel"
+    if key_fecha not in st.session_state:
+        st.session_state[key_fecha] = hoy
 
     panel_izq, panel_der = st.columns([1, 1], gap="large")
 
-    fecha_sel = fechas_disponibles[st.session_state[key_idx]]
+    fecha_sel = st.session_state.get(key_fecha, hoy)
 
     # Barra de navegación de día con date_input + botones
     dc1, dc2, dc3, dc4 = panel_izq.columns([0.28, 1.8, 0.55, 0.28])
     if dc1.button("◀", key="im_dia_ant"):
-        st.session_state[key_idx] = min(len(fechas_disponibles) - 1, st.session_state[key_idx] + 1)
+        st.session_state[key_fecha] = fecha_sel - timedelta(days=1)
         st.rerun()
     fecha_picker = dc2.date_input(
         "Dia",
         value=fecha_sel,
-        min_value=min(fechas_disponibles),
-        max_value=max(fechas_disponibles),
         key="im_fecha_picker",
         label_visibility="collapsed",
     )
     if fecha_picker != fecha_sel:
-        if fecha_picker in fechas_disponibles:
-            st.session_state[key_idx] = fechas_disponibles.index(fecha_picker)
-        else:
-            # Encuentra el día disponible más cercano
-            import bisect
-            fechas_asc = sorted(fechas_disponibles)
-            pos = bisect.bisect_left(fechas_asc, fecha_picker)
-            pos = min(pos, len(fechas_asc) - 1)
-            st.session_state[key_idx] = fechas_disponibles.index(fechas_asc[pos])
+        st.session_state[key_fecha] = fecha_picker
         st.rerun()
     if dc3.button("Hoy", key="im_fecha_hoy"):
-        st.session_state[key_idx] = idx_hoy
+        st.session_state[key_fecha] = hoy
         st.rerun()
     if dc4.button("▶", key="im_dia_sig"):
-        st.session_state[key_idx] = max(0, st.session_state[key_idx] - 1)
+        st.session_state[key_fecha] = fecha_sel + timedelta(days=1)
         st.rerun()
 
     ids_dia = ids_por_fecha.get(fecha_sel, set())
