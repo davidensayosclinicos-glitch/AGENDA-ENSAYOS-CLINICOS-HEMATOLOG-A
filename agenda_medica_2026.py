@@ -4215,34 +4215,36 @@ def render_interfaz_medica():
     st.markdown(
         """
         <style>
-            .block-container {padding-top: 0.75rem !important; padding-bottom: 0.7rem !important; max-width: 1200px !important;}
-            [data-testid="stVerticalBlock"] > [style*="flex-direction: column"] > [data-testid="stVerticalBlock"] {gap: 0.38rem !important;}
-            h3, h4 {margin-top: 0.25rem !important; margin-bottom: 0.3rem !important;}
+            .block-container {padding-top: 0.4rem !important; padding-bottom: 0.35rem !important; max-width: 1200px !important;}
+            [data-testid="stVerticalBlock"] > [style*="flex-direction: column"] > [data-testid="stVerticalBlock"] {gap: 0.15rem !important;}
+            h3, h4 {margin-top: 0.08rem !important; margin-bottom: 0.12rem !important; font-size: 0.95rem !important;}
             div[data-testid="stCheckbox"] {
                 background: #edf1f6;
                 border: 1px solid #d6deea;
-                border-radius: 10px;
-                padding: 4px 8px;
-                margin-bottom: 6px;
+                border-radius: 8px;
+                padding: 2px 5px;
+                margin-bottom: 2px;
             }
             div[data-testid="stCheckbox"] label p {
                 color: #415271 !important;
                 font-weight: 700 !important;
+                font-size: 0.88rem !important;
+                margin: 0 !important;
             }
             div[data-testid="stCheckbox"]:has(input:checked) {
                 background: linear-gradient(135deg, #0f4aa6, #0a68c7);
                 border-color: #0f4aa6;
-                box-shadow: 0 6px 14px rgba(15, 74, 166, 0.22);
+                box-shadow: 0 3px 8px rgba(15, 74, 166, 0.18);
             }
             div[data-testid="stCheckbox"]:has(input:checked) label p {
                 color: #ffffff !important;
             }
-            .im-shell {background: linear-gradient(160deg, #ffffff 0%, #f5f9ff 58%, #f2fbf5 100%); border: 1px solid #d7e2f3; border-radius: 16px; box-shadow: 0 10px 22px rgba(18,50,94,0.07); padding: 10px 12px; margin-bottom: 6px;}
-            .im-top {display: flex; align-items: center; gap: 8px; margin-bottom: 4px;}
-            .im-avatar {width: 32px; height: 32px; border-radius: 50%; display:flex; align-items:center; justify-content:center; background: linear-gradient(135deg, #dbe9ff, #c8f3e1); border: 1px solid #c4d9ff; color: #1f3b66; font-size: 0.95rem; font-weight: 700;}
-            .im-title {font-size: 1.1rem; font-weight: 800; color: #22314a; margin-bottom: 1px; line-height: 1.1;}
-            .im-sub {font-size: 0.93rem; color: #55729a; margin-bottom: 0; line-height: 1.15;}
-            .im-banner {border-radius: 10px; padding: 7px 9px; font-size: 0.95rem; font-weight: 700; margin-top: 5px; border: 1px solid #d6e3f8;}
+            .im-shell {background: linear-gradient(160deg, #ffffff 0%, #f5f9ff 58%, #f2fbf5 100%); border: 1px solid #d7e2f3; border-radius: 12px; box-shadow: 0 6px 14px rgba(18,50,94,0.05); padding: 6px 8px; margin-bottom: 3px;}
+            .im-top {display: flex; align-items: center; gap: 5px; margin-bottom: 2px;}
+            .im-avatar {width: 26px; height: 26px; border-radius: 50%; display:flex; align-items:center; justify-content:center; background: linear-gradient(135deg, #dbe9ff, #c8f3e1); border: 1px solid #c4d9ff; color: #1f3b66; font-size: 0.8rem; font-weight: 700;}
+            .im-title {font-size: 0.95rem; font-weight: 800; color: #22314a; margin-bottom: 0; line-height: 1.05;}
+            .im-sub {font-size: 0.8rem; color: #55729a; margin-bottom: 0; line-height: 1.08;}
+            .im-banner {border-radius: 8px; padding: 4px 6px; font-size: 0.8rem; font-weight: 700; margin-top: 2px; border: 1px solid #d6e3f8;}
             .im-chip {padding: 4px 8px; border-radius: 999px; border: 1px solid #d5def0; font-size: 0.73rem; color: #4b5d7f; background: #ffffff;}
             .im-chip-active {padding: 4px 8px; border-radius: 999px; border: 1px solid #0f4aa6; font-size: 0.73rem; color: #ffffff; background: linear-gradient(90deg, #0f4aa6, #0a68c7);}
             .im-mini-card {border: 1px solid #d9e4f4; background: #ffffff; border-radius: 12px; padding: 8px 10px; margin-bottom: 7px; font-size: 0.86rem; color: #2b3a54;}
@@ -4256,15 +4258,17 @@ def render_interfaz_medica():
             .stDateInput label,
             .stMultiSelect label,
             .stRadio label {
-                font-size: 1.03rem !important;
+                font-size: 0.92rem !important;
                 font-weight: 700 !important;
+                margin: 0 !important;
             }
             .stTextInput input,
             .stTextArea textarea,
             .stDateInput input,
             .stSelectbox div[data-baseweb="select"] input {
-                font-size: 1.04rem !important;
+                font-size: 0.9rem !important;
             }
+            .stCaption {font-size: 0.75rem !important; margin: 1px 0 !important;}
         </style>
         """,
         unsafe_allow_html=True,
@@ -4590,12 +4594,12 @@ def render_interfaz_medica():
             sintomas_base,
             sintomas_extra,
             "sintomas",
-            columnas=3,
+            columnas=4,
         )
         com["comentario_libre"] = st.text_area(
             "Comentario libre",
             value=str(com.get("comentario_libre", "")),
-            height=78,
+            height=55,
             key=f"im_comentario_{visita_id}",
         )
         com["estado_general"] = st.selectbox(
@@ -4639,7 +4643,7 @@ def render_interfaz_medica():
             pruebas_base,
             pruebas_extra,
             "pruebas",
-            columnas=2,
+            columnas=3,
         )
         for item in pruebas["pruebas"]:
             st.markdown(f"<div class='im-mini-card im-ok'>{html.escape(item)}</div>", unsafe_allow_html=True)
@@ -4691,7 +4695,7 @@ def render_interfaz_medica():
             med_base,
             med_extra,
             "concom",
-            columnas=2,
+            columnas=3,
         )
         for item in med["medicaciones"]:
             st.markdown(f"<div class='im-mini-card'>{html.escape(item)}</div>", unsafe_allow_html=True)
@@ -4728,7 +4732,7 @@ def render_interfaz_medica():
             ae_base,
             ae_extra,
             "aes",
-            columnas=2,
+            columnas=3,
         )
         if ae["eventos"]:
             for item in ae["eventos"]:
@@ -4752,7 +4756,7 @@ def render_interfaz_medica():
             key=f"im_decision_{visita_id}",
         )
         dec["accion"] = st.text_input("Accion recomendada", value=str(dec.get("accion", "")), key=f"im_accion_{visita_id}")
-        dec["motivo"] = st.text_area("Motivo", value=str(dec.get("motivo", "")), height=74, key=f"im_motivo_{visita_id}")
+        dec["motivo"] = st.text_area("Motivo", value=str(dec.get("motivo", "")), height=55, key=f"im_motivo_{visita_id}")
 
     if paso == 9:
         st.markdown("#### Confirmacion")
@@ -4794,7 +4798,7 @@ def render_interfaz_medica():
         estado["nota_clinica"] = st.text_area(
             "Nota clinica editable",
             value=str(estado.get("nota_clinica", "")),
-            height=96,
+            height=72,
             key=f"im_nota_clinica_{visita_id}",
         )
         st.download_button(
