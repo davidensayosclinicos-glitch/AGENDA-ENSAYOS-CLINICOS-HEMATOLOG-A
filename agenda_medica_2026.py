@@ -4812,86 +4812,92 @@ def render_interfaz_medica():
     if paso == 11:
         st.write("Protocolos, citas y notas en el menu lateral.")
 
-    # Componente de detección de swipe horizontal
-    swipe_html = f"""
-    <div id="swipe-detector" style="width:100%; height:100vh; position:fixed; top:0; left:0; z-index:0; pointer-events:none;"></div>
+    # Swipe usando window.parent.document para acceder a la página real (no el iframe)
+    swipe_html = """
     <script>
-    (function() {{
-        let touchStartX = 0;
-        let touchStartY = 0;
-        const minSwipeDistance = 50;
-        
-        document.addEventListener('touchstart', function(e) {{
-            if (e.touches.length > 0) {{
-                touchStartX = e.touches[0].clientX;
-                touchStartY = e.touches[0].clientY;
-            }}
-        }}, false);
-        
-        document.addEventListener('touchend', function(e) {{
-            if (e.changedTouches.length > 0) {{
-                const touchEndX = e.changedTouches[0].clientX;
-                const touchEndY = e.changedTouches[0].clientY;
-                const deltaX = touchEndX - touchStartX;
-                const deltaY = touchEndY - touchStartY;
-                
-                if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > minSwipeDistance) {{
-                    if (deltaX > 0) {{
-                        // Swipe derecha = Anterior
-                        const botones = document.querySelectorAll('button');
-                        for (let btn of botones) {{
-                            if (btn.textContent.includes('Atras') && !btn.disabled) {{
-                                btn.click();
-                                break;
-                            }}
-                        }}
-                    }} else {{
-                        // Swipe izquierda = Siguiente
-                        const botones = document.querySelectorAll('button');
-                        for (let btn of botones) {{
-                            if (btn.textContent.includes('Siguiente') && !btn.disabled) {{
-                                btn.click();
-                                break;
-                            }}
-                        }}
-                    }}
-                }}
-            }}
-        }}, false);
-        
-        // También permite mouse drag en desktop
-        let mouseDownX = 0;
-        document.addEventListener('mousedown', function(e) {{
-            mouseDownX = e.clientX;
-        }}, false);
-        
-        document.addEventListener('mouseup', function(e) {{
-            const deltaX = e.clientX - mouseDownX;
-            if (Math.abs(deltaX) > minSwipeDistance) {{
-                if (deltaX > 0) {{
-                    const botones = document.querySelectorAll('button');
-                    for (let btn of botones) {{
-                        if (btn.textContent.includes('Atras') && !btn.disabled) {{
-                            btn.click();
-                            break;
-                        }}
-                    }}
-                }} else {{
-                    const botones = document.querySelectorAll('button');
-                    for (let btn of botones) {{
-                        if (btn.textContent.includes('Siguiente') && !btn.disabled) {{
-                            btn.click();
-                            break;
-                        }}
-                    }}
-                }}
-            }}
-        }}, false);
-    }})();
+    (function() {
+        var doc = window.parent ? window.parent.document : document;
+        var MIN_SWIPE = 52;
+        var startX = 0, startY = 0, dragging = false;
+
+        // Overlay visual de arrastre inyectado en la página real
+        if (!doc.getElementById('swipe-overlay-im')) {
+            var ov = doc.createElement('div');
+            ov.id = 'swipe-overlay-im';
+            ov.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:9998;transition:background 0.12s;';
+            doc.body.appendChild(ov);
+        }
+        var overlay = doc.getElementById('swipe-overlay-im');
+
+        function clickBoton(texto) {
+            var btns = doc.querySelectorAll('button');
+            for (var i = 0; i < btns.length; i++) {
+                if (!btns[i].disabled && btns[i].innerText.trim() === texto) {
+                    btns[i].click();
+                    return;
+                }
+            }
+        }
+
+        function mostrarFeedback(dx) {
+            var op = Math.min(Math.abs(dx) / 160, 0.38);
+            if (dx > 0) {
+                overlay.style.background = 'linear-gradient(to right, rgba(15,74,166,' + op + ') 0%, transparent 45%)';
+            } else {
+                overlay.style.background = 'linear-gradient(to left, rgba(15,74,166,' + op + ') 0%, transparent 45%)';
+            }
+        }
+
+        function limpiarFeedback() {
+            overlay.style.background = 'transparent';
+        }
+
+        // Touch (móvil)
+        doc.addEventListener('touchstart', function(e) {
+            startX = e.touches[0].clientX;
+            startY = e.touches[0].clientY;
+        }, {passive: true});
+
+        doc.addEventListener('touchmove', function(e) {
+            var dx = e.touches[0].clientX - startX;
+            var dy = e.touches[0].clientY - startY;
+            if (Math.abs(dx) > Math.abs(dy)) mostrarFeedback(dx);
+        }, {passive: true});
+
+        doc.addEventListener('touchend', function(e) {
+            limpiarFeedback();
+            var dx = e.changedTouches[0].clientX - startX;
+            var dy = e.changedTouches[0].clientY - startY;
+            if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > MIN_SWIPE) {
+                if (dx > 0) clickBoton('Atras');
+                else clickBoton('Siguiente');
+            }
+        }, {passive: true});
+
+        // Mouse (desktop)
+        doc.addEventListener('mousedown', function(e) {
+            dragging = true;
+            startX = e.clientX;
+        });
+        doc.addEventListener('mousemove', function(e) {
+            if (dragging) mostrarFeedback(e.clientX - startX);
+        });
+        doc.addEventListener('mouseup', function(e) {
+            if (!dragging) return;
+            dragging = false;
+            limpiarFeedback();
+            var dx = e.clientX - startX;
+            if (Math.abs(dx) > MIN_SWIPE) {
+                if (dx > 0) clickBoton('Atras');
+                else clickBoton('Siguiente');
+            }
+        });
+    })();
     </script>
     """
     components.html(swipe_html, height=0)
 
+    # Botones ocultos visualmente pero necesarios para que Streamlit capture el clic
     nav1, nav2, nav3 = st.columns([1, 1.2, 1])
     if nav1.button("Atras", disabled=(paso <= 1), key=f"im_prev_{visita_id}"):
         st.session_state[step_key] = max(1, paso - 1)
