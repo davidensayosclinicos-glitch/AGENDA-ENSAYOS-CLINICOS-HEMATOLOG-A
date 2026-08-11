@@ -4,7 +4,7 @@ try:
 except ImportError:
     calendar = None
 import sqlite3
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 import pandas as pd
 import numpy as np
 import html
@@ -13,7 +13,6 @@ import os
 import re
 import base64
 import io
-import json
 import shutil
 import zipfile
 import hashlib
@@ -22,13 +21,7 @@ import webbrowser
 import tempfile
 import importlib
 import glob
-import runpy
 from urllib.parse import quote_plus
-
-try:
-    from PIL import Image
-except ImportError:
-    Image = None
 
 try:
     psycopg2 = importlib.import_module("psycopg2")
@@ -50,7 +43,6 @@ except ImportError:
 # Icono para la pestaña del navegador (disponible antes de set_page_config).
 BOOT_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 BOOT_LOGO_CANDIDATOS = [
-    os.path.join(BOOT_SCRIPT_DIR, "favicon.ico"),
     os.path.join(BOOT_SCRIPT_DIR, "cabuenes_corregido.png"),
     os.path.join(BOOT_SCRIPT_DIR, "ChatGPT Image 10 mar 2026, 09_32_03.png"),
     os.path.join(BOOT_SCRIPT_DIR, "ChatGPT Image 10 mar 2026, 09_22_55.png"),
@@ -58,13 +50,7 @@ BOOT_LOGO_CANDIDATOS = [
 BOOT_PAGE_ICON = ""
 for _ruta_logo in BOOT_LOGO_CANDIDATOS:
     if os.path.isfile(_ruta_logo):
-        if Image is not None:
-            try:
-                BOOT_PAGE_ICON = Image.open(_ruta_logo)
-            except Exception:
-                BOOT_PAGE_ICON = _ruta_logo
-        else:
-            BOOT_PAGE_ICON = _ruta_logo
+        BOOT_PAGE_ICON = _ruta_logo
         break
 
 # --- CONFIGURACIÓN DE PÁGINA ---
@@ -242,7 +228,7 @@ IMG_DIR_ESQUEMAS = resolver_directorio(
 )
 DREAMM10_XLSX_DIR = os.path.join(SCRIPT_DIR, "DREAMM10 calendario pacientes")
 CHECKLIST_GLOBAL_XLSX = os.path.join(SCRIPT_DIR, "checklist_todos_los_ensayos.xlsx")
-APP_TIMEZONE = str(os.getenv("APP_TIMEZONE", "")).strip()
+APP_TIMEZONE = "Europe/Madrid"
 DB_PATH = os.path.join(SCRIPT_DIR, "agenda_ensayos.db")
 DB_BACKUP_DIR = os.path.join(SCRIPT_DIR, "backups_db")
 BACKUP_ENSAYOS_DIR = r"H:\ENSAYOS\ENSAYOS\BASE DE DATOS APP ENSAYOS"
@@ -258,55 +244,17 @@ def aplicar_marca_pestana(titulo_objetivo, ruta_logo):
     if not ruta_logo or not os.path.isfile(ruta_logo):
         return
     try:
-        if Image is not None:
-            imagen_base = Image.open(ruta_logo).convert("RGBA")
-
-            def _a_data_url(tamano: tuple[int, int]) -> str:
-                imagen = imagen_base.copy()
-                imagen.thumbnail(tamano, Image.Resampling.LANCZOS)
-                lienzo = Image.new("RGBA", tamano, (0, 0, 0, 0))
-                offset = ((tamano[0] - imagen.width) // 2, (tamano[1] - imagen.height) // 2)
-                lienzo.paste(imagen, offset, imagen)
-                buffer = io.BytesIO()
-                lienzo.save(buffer, format="PNG")
-                return "data:image/png;base64," + base64.b64encode(buffer.getvalue()).decode("utf-8")
-
-            icono_32 = _a_data_url((32, 32))
-            icono_180 = _a_data_url((180, 180))
-            icono_192 = _a_data_url((192, 192))
-            icono_512 = _a_data_url((512, 512))
-        else:
-            with open(ruta_logo, "rb") as f_logo:
-                icono_b64 = base64.b64encode(f_logo.read()).decode("utf-8")
-            icono_32 = f"data:image/png;base64,{icono_b64}"
-            icono_180 = icono_32
-            icono_192 = icono_32
-            icono_512 = icono_32
+        with open(ruta_logo, "rb") as f_logo:
+            icono_b64 = base64.b64encode(f_logo.read()).decode("utf-8")
     except Exception:
         return
 
+    icono_data_url = f"data:image/png;base64,{icono_b64}"
     components.html(
         f"""
         <script>
             const tituloObjetivo = {titulo_objetivo!r};
-            const iconoFavicon = {icono_32!r};
-            const iconoApple = {icono_180!r};
-            const icono192 = {icono_192!r};
-            const icono512 = {icono_512!r};
-            const manifestData = {{
-                name: tituloObjetivo,
-                short_name: tituloObjetivo,
-                start_url: ".",
-                scope: ".",
-                display: "standalone",
-                background_color: "#dbeafe",
-                theme_color: "#dbeafe",
-                icons: [
-                    {{ src: icono192, sizes: "192x192", type: "image/png" }},
-                    {{ src: icono512, sizes: "512x512", type: "image/png" }},
-                ],
-            }};
-            const manifestHref = "data:application/manifest+json;charset=utf-8," + encodeURIComponent(JSON.stringify(manifestData));
+            const iconoObjetivo = {icono_data_url!r};
 
             function aplicarMarca() {{
                 try {{
@@ -315,51 +263,16 @@ def aplicar_marca_pestana(titulo_objetivo, ruta_logo):
                         doc.title = tituloObjetivo;
                     }}
 
-                    const metaMobile = [
-                        {{ name: "apple-mobile-web-app-capable", content: "yes" }},
-                        {{ name: "apple-mobile-web-app-title", content: tituloObjetivo }},
-                        {{ name: "mobile-web-app-capable", content: "yes" }},
-                        {{ name: "theme-color", content: "#dbeafe" }},
-                    ];
-                    metaMobile.forEach((item) => {{
-                        const name = item.name;
-                        const content = item.content;
-                        let meta = doc.querySelector(`meta[name='${{name}}']`);
-                        if (!meta) {{
-                            meta = doc.createElement("meta");
-                            meta.setAttribute("name", name);
-                            doc.head.appendChild(meta);
-                        }}
-                        if (meta.getAttribute("content") !== content) {{
-                            meta.setAttribute("content", content);
-                        }}
-                    }});
-
-                    const iconos = [
-                        {{ rel: "icon", href: iconoFavicon, sizes: "32x32", type: "image/png" }},
-                        {{ rel: "icon", href: icono192, sizes: "192x192", type: "image/png" }},
-                        {{ rel: "icon", href: icono512, sizes: "512x512", type: "image/png" }},
-                        {{ rel: "shortcut icon", href: iconoFavicon, sizes: "32x32", type: "image/png" }},
-                        {{ rel: "apple-touch-icon", href: iconoApple, sizes: "180x180", type: "image/png" }},
-                        {{ rel: "apple-touch-icon-precomposed", href: iconoApple, sizes: "180x180", type: "image/png" }},
-                        {{ rel: "manifest", href: manifestHref, type: "application/manifest+json" }},
-                    ];
-
-                    iconos.forEach(({{ rel, href, sizes, type }}) => {{
+                    const rels = ["icon", "shortcut icon", "apple-touch-icon"];
+                    rels.forEach((rel) => {{
                         let icono = doc.querySelector(`link[rel='${{rel}}']`);
                         if (!icono) {{
                             icono = doc.createElement("link");
                             icono.setAttribute("rel", rel);
                             doc.head.appendChild(icono);
                         }}
-                        if (sizes) {{
-                            icono.setAttribute("sizes", sizes);
-                        }}
-                        if (type) {{
-                            icono.setAttribute("type", type);
-                        }}
-                        if (icono.getAttribute("href") !== href) {{
-                            icono.setAttribute("href", href);
+                        if (icono.getAttribute("href") !== iconoObjetivo) {{
+                            icono.setAttribute("href", iconoObjetivo);
                         }}
                     }});
                 }} catch (e) {{}}
@@ -883,7 +796,7 @@ def restore_db_from_bytes(db_bytes):
 
 
 def fecha_hoy_local():
-    if APP_TIMEZONE and ZoneInfo is not None:
+    if ZoneInfo is not None:
         try:
             return datetime.now(ZoneInfo(APP_TIMEZONE)).date()
         except Exception:
@@ -892,7 +805,7 @@ def fecha_hoy_local():
 
 
 def ahora_local():
-    if APP_TIMEZONE and ZoneInfo is not None:
+    if ZoneInfo is not None:
         try:
             return datetime.now(ZoneInfo(APP_TIMEZONE))
         except Exception:
@@ -1115,112 +1028,51 @@ def _es_deadlock_error(exc):
     return deadlock_cls is not None and isinstance(exc, deadlock_cls)
 
 
-def _obtener_columnas_tabla(cursor, tabla: str) -> set[str]:
-    tabla_limpia = str(tabla or "").strip()
-    if not tabla_limpia:
-        return set()
-
-    try:
-        if DB_BACKEND == "postgres":
-            filas = cursor.execute(
-                """
-                SELECT column_name
-                FROM information_schema.columns
-                WHERE table_schema = 'public'
-                  AND table_name = ?
-                """,
-                (tabla_limpia,),
-            ).fetchall()
-            return {str(f[0]).strip().lower() for f in filas if f and f[0] is not None}
-
-        filas = cursor.execute(f"PRAGMA table_info({tabla_limpia})").fetchall()
-        return {str(f[1]).strip().lower() for f in filas if len(f) > 1 and f[1] is not None}
-    except Exception:
-        return set()
-
-
-def _resolver_columna_nombre(cursor, tabla: str) -> str | None:
-    columnas = _obtener_columnas_tabla(cursor, tabla)
-    candidatos = ["nombre", "nombre_paciente", "paciente", "iniciales"]
-    for cand in candidatos:
-        if cand in columnas:
-            return cand
-    return None
-
-
-def _resolver_columna_ensayo(cursor, tabla: str) -> str | None:
-    columnas = _obtener_columnas_tabla(cursor, tabla)
-    candidatos = ["ensayo", "estudio", "protocolo", "trial"]
-    for cand in candidatos:
-        if cand in columnas:
-            return cand
-    return None
-
-
 def normalizar_ensayos_existentes(cursor):
-    col_ensayo_visitas = _resolver_columna_ensayo(cursor, "visitas")
-    if col_ensayo_visitas:
-        visitas = cursor.execute(
-            f"SELECT id, {col_ensayo_visitas} FROM visitas"
-        ).fetchall()
-        for visita_id, ensayo in visitas:
-            ensayo_norm = normalizar_ensayo(ensayo)
-            if ensayo_norm != ("" if ensayo is None else str(ensayo)):
-                cursor.execute(
-                    f"UPDATE visitas SET {col_ensayo_visitas} = ? WHERE id = ?",
-                    (ensayo_norm, visita_id)
-                )
+    visitas = cursor.execute("SELECT id, ensayo FROM visitas").fetchall()
+    for visita_id, ensayo in visitas:
+        ensayo_norm = normalizar_ensayo(ensayo)
+        if ensayo_norm != ("" if ensayo is None else str(ensayo)):
+            cursor.execute(
+                "UPDATE visitas SET ensayo = ? WHERE id = ?",
+                (ensayo_norm, visita_id)
+            )
 
-    col_ensayo_checklist = _resolver_columna_ensayo(cursor, "checklist_items")
-    if col_ensayo_checklist:
-        checklist = cursor.execute(
-            f"SELECT id, {col_ensayo_checklist} FROM checklist_items"
-        ).fetchall()
-        for item_id, ensayo in checklist:
-            ensayo_norm = normalizar_ensayo(ensayo)
-            if ensayo_norm != ("" if ensayo is None else str(ensayo)):
-                cursor.execute(
-                    f"UPDATE checklist_items SET {col_ensayo_checklist} = ? WHERE id = ?",
-                    (ensayo_norm, item_id)
-                )
+    checklist = cursor.execute("SELECT id, ensayo FROM checklist_items").fetchall()
+    for item_id, ensayo in checklist:
+        ensayo_norm = normalizar_ensayo(ensayo)
+        if ensayo_norm != ("" if ensayo is None else str(ensayo)):
+            cursor.execute(
+                "UPDATE checklist_items SET ensayo = ? WHERE id = ?",
+                (ensayo_norm, item_id)
+            )
 
 
 def anonimizar_nombres_existentes(cursor):
-    col_nombre_visitas = _resolver_columna_nombre(cursor, "visitas")
-    if col_nombre_visitas:
-        visitas = cursor.execute(
-            f"SELECT id, {col_nombre_visitas} FROM visitas"
-        ).fetchall()
-        for visita_id, nombre in visitas:
-            nombre_norm = nombre_a_iniciales(nombre)
-            nombre_actual = "" if nombre is None else str(nombre)
-            if nombre_norm != nombre_actual:
-                cursor.execute(
-                    f"UPDATE visitas SET {col_nombre_visitas} = ? WHERE id = ?",
-                    (nombre_norm, visita_id)
-                )
+    visitas = cursor.execute("SELECT id, nombre FROM visitas").fetchall()
+    for visita_id, nombre in visitas:
+        nombre_norm = nombre_a_iniciales(nombre)
+        nombre_actual = "" if nombre is None else str(nombre)
+        if nombre_norm != nombre_actual:
+            cursor.execute(
+                "UPDATE visitas SET nombre = ? WHERE id = ?",
+                (nombre_norm, visita_id)
+            )
 
-    col_nombre_pacientes = _resolver_columna_nombre(cursor, "pacientes")
-    if col_nombre_pacientes:
-        pacientes = cursor.execute(
-            f"SELECT id, {col_nombre_pacientes} FROM pacientes"
-        ).fetchall()
-        for paciente_id, nombre in pacientes:
-            nombre_norm = nombre_a_iniciales(nombre)
-            nombre_actual = "" if nombre is None else str(nombre)
-            if nombre_norm != nombre_actual:
-                cursor.execute(
-                    f"UPDATE pacientes SET {col_nombre_pacientes} = ? WHERE id = ?",
-                    (nombre_norm, paciente_id)
-                )
+    pacientes = cursor.execute("SELECT id, nombre FROM pacientes").fetchall()
+    for paciente_id, nombre in pacientes:
+        nombre_norm = nombre_a_iniciales(nombre)
+        nombre_actual = "" if nombre is None else str(nombre)
+        if nombre_norm != nombre_actual:
+            cursor.execute(
+                "UPDATE pacientes SET nombre = ? WHERE id = ?",
+                (nombre_norm, paciente_id)
+            )
 
 
 def eliminar_ensayos_sin_pacientes(cursor):
-    col_nombre_pac = _resolver_columna_nombre(cursor, "pacientes") or "nombre"
-    col_ensayo_pac = _resolver_columna_ensayo(cursor, "pacientes") or "ensayo"
-
     filas_pacientes = cursor.execute(
-        f"SELECT codigo, {col_nombre_pac}, {col_ensayo_pac} FROM pacientes"
+        "SELECT codigo, nombre, ensayo FROM pacientes"
     ).fetchall()
     ensayos_validos = set()
     for codigo, nombre, ensayo in filas_pacientes:
@@ -1230,13 +1082,7 @@ def eliminar_ensayos_sin_pacientes(cursor):
         if ensayo_norm and (codigo_norm or nombre_norm):
             ensayos_validos.add(ensayo_norm)
 
-    col_ensayo_checklist = _resolver_columna_ensayo(cursor, "checklist_items")
-    if not col_ensayo_checklist:
-        return
-
-    filas_checklist = cursor.execute(
-        f"SELECT id, {col_ensayo_checklist} FROM checklist_items"
-    ).fetchall()
+    filas_checklist = cursor.execute("SELECT id, ensayo FROM checklist_items").fetchall()
     ids_borrar = []
     for item_id, ensayo in filas_checklist:
         if normalizar_clave_paciente(ensayo) not in ensayos_validos:
@@ -1371,23 +1217,6 @@ def init_db():
             )
             '''
         )
-        c.execute(
-            '''
-            CREATE TABLE IF NOT EXISTS interfaz_medica_visita (
-                id BIGSERIAL PRIMARY KEY,
-                visita_id BIGINT UNIQUE,
-                estado_constantes TEXT,
-                estado_comentarios TEXT,
-                estado_pruebas TEXT,
-                estado_farmacos_estudio TEXT,
-                estado_medicacion_concomitante TEXT,
-                estado_aes TEXT,
-                estado_decision TEXT,
-                nota_clinica TEXT,
-                ultima_actualizacion TEXT
-            )
-            '''
-        )
     else:
         c.execute('''
             CREATE TABLE IF NOT EXISTS visitas (
@@ -1489,47 +1318,15 @@ def init_db():
                 actualizado_en TEXT
             )
         ''')
-        c.execute('''
-            CREATE TABLE IF NOT EXISTS interfaz_medica_visita (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                visita_id INTEGER UNIQUE,
-                estado_constantes TEXT,
-                estado_comentarios TEXT,
-                estado_pruebas TEXT,
-                estado_farmacos_estudio TEXT,
-                estado_medicacion_concomitante TEXT,
-                estado_aes TEXT,
-                estado_decision TEXT,
-                nota_clinica TEXT,
-                ultima_actualizacion TEXT,
-                FOREIGN KEY(visita_id) REFERENCES visitas(id)
-            )
-        ''')
 
     # Migracion incremental de revision ocular para instalaciones existentes.
     if DB_BACKEND == "postgres":
-        c.execute("ALTER TABLE visitas ADD COLUMN IF NOT EXISTS nombre TEXT")
-        c.execute("ALTER TABLE visitas ADD COLUMN IF NOT EXISTS codigo TEXT")
-        c.execute("ALTER TABLE visitas ADD COLUMN IF NOT EXISTS ensayo TEXT")
-        c.execute("ALTER TABLE pacientes ADD COLUMN IF NOT EXISTS nombre TEXT")
-        c.execute("ALTER TABLE pacientes ADD COLUMN IF NOT EXISTS codigo TEXT")
-        c.execute("ALTER TABLE pacientes ADD COLUMN IF NOT EXISTS ensayo TEXT")
-        c.execute("ALTER TABLE checklist_items ADD COLUMN IF NOT EXISTS ensayo TEXT")
         c.execute("ALTER TABLE revision_ocular ADD COLUMN IF NOT EXISTS sede TEXT")
         c.execute("ALTER TABLE revision_ocular ADD COLUMN IF NOT EXISTS medico TEXT")
         c.execute("ALTER TABLE revision_ocular ADD COLUMN IF NOT EXISTS agenda_hospitalaria TEXT")
         c.execute("ALTER TABLE revision_ocular ADD COLUMN IF NOT EXISTS fecha_evaluacion TEXT")
         c.execute("ALTER TABLE revision_ocular ADD COLUMN IF NOT EXISTS fechas_previas TEXT")
         c.execute("ALTER TABLE revision_ocular ADD COLUMN IF NOT EXISTS resultado TEXT")
-        c.execute("ALTER TABLE interfaz_medica_visita ADD COLUMN IF NOT EXISTS estado_constantes TEXT")
-        c.execute("ALTER TABLE interfaz_medica_visita ADD COLUMN IF NOT EXISTS estado_comentarios TEXT")
-        c.execute("ALTER TABLE interfaz_medica_visita ADD COLUMN IF NOT EXISTS estado_pruebas TEXT")
-        c.execute("ALTER TABLE interfaz_medica_visita ADD COLUMN IF NOT EXISTS estado_farmacos_estudio TEXT")
-        c.execute("ALTER TABLE interfaz_medica_visita ADD COLUMN IF NOT EXISTS estado_medicacion_concomitante TEXT")
-        c.execute("ALTER TABLE interfaz_medica_visita ADD COLUMN IF NOT EXISTS estado_aes TEXT")
-        c.execute("ALTER TABLE interfaz_medica_visita ADD COLUMN IF NOT EXISTS estado_decision TEXT")
-        c.execute("ALTER TABLE interfaz_medica_visita ADD COLUMN IF NOT EXISTS nota_clinica TEXT")
-        c.execute("ALTER TABLE interfaz_medica_visita ADD COLUMN IF NOT EXISTS ultima_actualizacion TEXT")
     else:
         for col_sql in (
             "ALTER TABLE revision_ocular ADD COLUMN sede TEXT",
@@ -1705,10 +1502,6 @@ def get_ensayos_existentes():
 def borrar_visita(id_visita):
     conn = connect_db()
     c = conn.cursor()
-    try:
-        c.execute("DELETE FROM interfaz_medica_visita WHERE visita_id=?", (id_visita,))
-    except Exception:
-        pass
     c.execute("DELETE FROM visitas WHERE id=?", (id_visita,))
     sincronizar_pacientes_desde_visitas(c)
     eliminar_ensayos_sin_pacientes(c)
@@ -1751,10 +1544,6 @@ def borrar_paciente_citas_ojos(codigo, nombre):
         return 0
 
     placeholders = ",".join(["?"] * len(ids_borrar))
-    try:
-        c.execute(f"DELETE FROM interfaz_medica_visita WHERE visita_id IN ({placeholders})", tuple(ids_borrar))
-    except Exception:
-        pass
     c.execute(f"DELETE FROM revision_ocular WHERE visita_id IN ({placeholders})", tuple(ids_borrar))
     c.execute(f"DELETE FROM visitas WHERE id IN ({placeholders})", tuple(ids_borrar))
 
@@ -1789,10 +1578,6 @@ def borrar_visitas_sin_paciente_citas_ojos():
         return 0
 
     placeholders = ",".join(["?"] * len(ids_borrar))
-    try:
-        c.execute(f"DELETE FROM interfaz_medica_visita WHERE visita_id IN ({placeholders})", tuple(ids_borrar))
-    except Exception:
-        pass
     c.execute(f"DELETE FROM revision_ocular WHERE visita_id IN ({placeholders})", tuple(ids_borrar))
     c.execute(f"DELETE FROM visitas WHERE id IN ({placeholders})", tuple(ids_borrar))
 
@@ -1804,551 +1589,6 @@ def borrar_visitas_sin_paciente_citas_ojos():
     invalidar_cache_lecturas()
     snapshot_db("pacientes")
     return len(ids_borrar)
-
-
-def _json_a_dict_seguro(raw_valor):
-    if not raw_valor:
-        return {}
-    try:
-        valor = json.loads(raw_valor)
-        return valor if isinstance(valor, dict) else {}
-    except Exception:
-        return {}
-
-
-def _normalizar_lista_texto(raw_valor):
-    texto = str(raw_valor or "")
-    partes = re.split(r"[\n,;|]+", texto)
-    return [p.strip() for p in partes if p and p.strip()]
-
-
-def _lista_unica(items):
-    vistos = set()
-    salida = []
-    for item in items or []:
-        txt = str(item or "").strip()
-        if not txt:
-            continue
-        clave = txt.casefold()
-        if clave in vistos:
-            continue
-        vistos.add(clave)
-        salida.append(txt)
-    return salida
-
-
-def _estado_base_interfaz_medica(visita_row):
-    otras = _normalizar_lista_texto(visita_row.get("otras_pruebas", ""))
-    if bool(visita_row.get("medula")):
-        otras = ["Aspirado de medula"] + otras
-
-    return {
-        "estado_constantes": {
-            "tension_arterial": "",
-            "fc": "",
-            "fr": "",
-            "temperatura": "",
-            "sat_o2": "",
-            "peso": "",
-            "talla": "",
-            "imc": "",
-            "superficie_corporal": "",
-        },
-        "estado_comentarios": {
-            "sintomas": [],
-            "comentario_libre": str(visita_row.get("comentarios", "") or ""),
-            "estado_general": "",
-        },
-        "estado_pruebas": {
-            "pruebas": otras,
-            "realizadas": [],
-        },
-        "estado_farmacos_estudio": {
-            "farmacos": [],
-        },
-        "estado_medicacion_concomitante": {
-            "medicaciones": [],
-        },
-        "estado_aes": {
-            "eventos": [],
-        },
-        "estado_decision": {
-            "decision": "Pendiente",
-            "accion": "",
-            "motivo": "",
-        },
-        "nota_clinica": "",
-    }
-
-
-def _es_error_tabla_interfaz_no_existe(exc):
-    txt = str(exc or "").lower()
-    return (
-        "interfaz_medica_visita" in txt
-        and (
-            "does not exist" in txt
-            or "undefinedtable" in txt
-            or "no such table" in txt
-        )
-    )
-
-
-def _crear_tabla_interfaz_medica_si_falta(cursor):
-    if DB_BACKEND == "postgres":
-        cursor.execute(
-            '''
-            CREATE TABLE IF NOT EXISTS interfaz_medica_visita (
-                id BIGSERIAL PRIMARY KEY,
-                visita_id BIGINT UNIQUE,
-                estado_constantes TEXT,
-                estado_comentarios TEXT,
-                estado_pruebas TEXT,
-                estado_farmacos_estudio TEXT,
-                estado_medicacion_concomitante TEXT,
-                estado_aes TEXT,
-                estado_decision TEXT,
-                nota_clinica TEXT,
-                ultima_actualizacion TEXT
-            )
-            '''
-        )
-    else:
-        cursor.execute(
-            '''
-            CREATE TABLE IF NOT EXISTS interfaz_medica_visita (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                visita_id INTEGER UNIQUE,
-                estado_constantes TEXT,
-                estado_comentarios TEXT,
-                estado_pruebas TEXT,
-                estado_farmacos_estudio TEXT,
-                estado_medicacion_concomitante TEXT,
-                estado_aes TEXT,
-                estado_decision TEXT,
-                nota_clinica TEXT,
-                ultima_actualizacion TEXT,
-                FOREIGN KEY(visita_id) REFERENCES visitas(id)
-            )
-            '''
-        )
-
-
-def _fila_a_estado_interfaz_guardado(fila):
-    if not fila:
-        return None
-    return {
-        "estado_constantes": _json_a_dict_seguro(fila[0]),
-        "estado_comentarios": _json_a_dict_seguro(fila[1]),
-        "estado_pruebas": _json_a_dict_seguro(fila[2]),
-        "estado_farmacos_estudio": _json_a_dict_seguro(fila[3]),
-        "estado_medicacion_concomitante": _json_a_dict_seguro(fila[4]),
-        "estado_aes": _json_a_dict_seguro(fila[5]),
-        "estado_decision": _json_a_dict_seguro(fila[6]),
-        "nota_clinica": str(fila[7] or ""),
-    }
-
-
-def _get_estado_interfaz_guardado_por_visita(visita_id):
-    conn = connect_db()
-    c = conn.cursor()
-    try:
-        fila = c.execute(
-            '''
-            SELECT estado_constantes, estado_comentarios, estado_pruebas,
-                   estado_farmacos_estudio, estado_medicacion_concomitante,
-                   estado_aes, estado_decision, nota_clinica
-            FROM interfaz_medica_visita
-            WHERE visita_id = ?
-            ''',
-            (int(visita_id),),
-        ).fetchone()
-    except Exception:
-        fila = None
-    conn.close()
-    return _fila_a_estado_interfaz_guardado(fila)
-
-
-def _estado_arrastrable_desde_visitas_previas(df_visitas_all, visita_row):
-    cod = normalizar_clave_paciente(str(visita_row.get("codigo", "") or ""))
-    nom = normalizar_clave_paciente(str(visita_row.get("nombre", "") or ""))
-    ens = normalizar_clave_paciente(str(visita_row.get("ensayo", "") or ""))
-    visita_id_actual = int(visita_row.get("id"))
-
-    base = df_visitas_all.copy()
-    base["_ens_norm"] = base["ensayo"].fillna("").astype(str).apply(normalizar_clave_paciente)
-    base["_cod_norm"] = base["codigo"].fillna("").astype(str).apply(normalizar_clave_paciente)
-    base["_nom_norm"] = base["nombre"].fillna("").astype(str).apply(normalizar_clave_paciente)
-    base["_fecha_dt"] = pd.to_datetime(base["fecha"], errors="coerce")
-    base["_id_int"] = pd.to_numeric(base["id"], errors="coerce")
-
-    mask = base["_ens_norm"] == ens
-    if cod:
-        mask = mask & (base["_cod_norm"] == cod)
-    else:
-        mask = mask & (base["_nom_norm"] == nom)
-
-    base = base[mask].copy()
-    if base.empty:
-        return None
-
-    fila_actual = base[base["_id_int"] == visita_id_actual]
-    fecha_actual = fila_actual["_fecha_dt"].iloc[0] if not fila_actual.empty else pd.NaT
-
-    if pd.notna(fecha_actual):
-        prev_mask = (base["_fecha_dt"] < fecha_actual) | (
-            (base["_fecha_dt"] == fecha_actual) & (base["_id_int"] < visita_id_actual)
-        )
-    else:
-        prev_mask = base["_id_int"] < visita_id_actual
-
-    previas = base[prev_mask].sort_values(by=["_fecha_dt", "_id_int"], ascending=[False, False])
-    if previas.empty:
-        return None
-
-    for _, row in previas.iterrows():
-        estado_prev = _get_estado_interfaz_guardado_por_visita(int(row["_id_int"]))
-        if estado_prev:
-            return estado_prev
-    return None
-
-
-def _aplicar_arrastre_checklists(estado_destino, estado_origen):
-    if not isinstance(estado_origen, dict):
-        return estado_destino
-
-    mapeo_listas = [
-        ("estado_comentarios", "sintomas"),
-        ("estado_pruebas", "pruebas"),
-        ("estado_medicacion_concomitante", "medicaciones"),
-        ("estado_aes", "eventos"),
-    ]
-    mapeo_aux = {
-        "estado_comentarios": ["sintomas_custom", "sintomas_expandido"],
-        "estado_pruebas": ["pruebas_custom", "pruebas_expandido"],
-        "estado_medicacion_concomitante": ["medicaciones_custom", "medicaciones_expandido"],
-        "estado_aes": ["eventos_custom", "eventos_expandido"],
-    }
-
-    for seccion, campo in mapeo_listas:
-        sec_dest = estado_destino.get(seccion, {})
-        sec_orig = estado_origen.get(seccion, {})
-        if not isinstance(sec_dest, dict) or not isinstance(sec_orig, dict):
-            continue
-        lista = sec_orig.get(campo, [])
-        if isinstance(lista, list):
-            sec_dest[campo] = _lista_unica(lista)
-        for extra_key in mapeo_aux.get(seccion, []):
-            if extra_key in sec_orig:
-                sec_dest[extra_key] = sec_orig.get(extra_key)
-        estado_destino[seccion] = sec_dest
-
-    return estado_destino
-
-
-def _resumen_cambios_interfaz_para_ficha(estado_anterior, estado_actual):
-    cambios = []
-    estado_anterior = estado_anterior or _estado_base_interfaz_medica({})
-
-    def _diff_lista(seccion, campo, titulo):
-        ant = _lista_unica((estado_anterior.get(seccion, {}) or {}).get(campo, []))
-        act = _lista_unica((estado_actual.get(seccion, {}) or {}).get(campo, []))
-        set_ant = {x.casefold() for x in ant}
-        set_act = {x.casefold() for x in act}
-        anadidos = [x for x in act if x.casefold() not in set_ant]
-        quitados = [x for x in ant if x.casefold() not in set_act]
-        if anadidos or quitados:
-            partes = []
-            if anadidos:
-                partes.append("+ " + ", ".join(anadidos[:5]))
-            if quitados:
-                partes.append("- " + ", ".join(quitados[:5]))
-            cambios.append(f"{titulo}: {' | '.join(partes)}")
-
-    _diff_lista("estado_comentarios", "sintomas", "Sintomas")
-    _diff_lista("estado_pruebas", "pruebas", "Pruebas")
-    _diff_lista("estado_medicacion_concomitante", "medicaciones", "Medicacion")
-    _diff_lista("estado_aes", "eventos", "AEs")
-
-    dec_ant = str((estado_anterior.get("estado_decision", {}) or {}).get("decision", "Pendiente") or "Pendiente")
-    dec_act = str((estado_actual.get("estado_decision", {}) or {}).get("decision", "Pendiente") or "Pendiente")
-    if dec_ant != dec_act:
-        cambios.append(f"Decision: {dec_ant} -> {dec_act}")
-
-    com_ant = str((estado_anterior.get("estado_comentarios", {}) or {}).get("comentario_libre", "") or "").strip()
-    com_act = str((estado_actual.get("estado_comentarios", {}) or {}).get("comentario_libre", "") or "").strip()
-    if com_ant != com_act:
-        cambios.append("Comentario libre actualizado")
-
-    return cambios
-
-
-def _registrar_cambios_interfaz_en_ficha(visita_id, estado_anterior, estado_actual):
-    cambios = _resumen_cambios_interfaz_para_ficha(estado_anterior, estado_actual)
-    if not cambios:
-        return
-
-    df_visitas = get_visitas()
-    if df_visitas.empty:
-        return
-    fila = df_visitas[pd.to_numeric(df_visitas["id"], errors="coerce") == int(visita_id)]
-    if fila.empty:
-        return
-    visita = fila.iloc[0]
-    codigo = str(visita.get("codigo", "") or "")
-    nombre = str(visita.get("nombre", "") or "")
-    ensayo = str(visita.get("ensayo", "") or "")
-    fecha_txt = formatear_fecha_visita(visita.get("fecha"))
-
-    adenda = get_adenda_paciente(codigo, nombre, ensayo)
-    texto_actual = str((adenda or {}).get("texto", "") or "").rstrip()
-    ts = ahora_local().strftime("%Y-%m-%d %H:%M")
-    entrada = f"[{ts}] Interfaz medica visita #{int(visita_id)} ({fecha_txt}): " + "; ".join(cambios)
-    nuevo_texto = (texto_actual + "\n" + entrada).strip() if texto_actual else entrada
-    guardar_adenda_paciente(codigo, nombre, ensayo, nuevo_texto)
-
-
-def _resumen_lista_interfaz(items, limite=4):
-    vals = _lista_unica(items)
-    if not vals:
-        return ""
-    if len(vals) <= limite:
-        return ", ".join(vals)
-    return ", ".join(vals[:limite]) + f" (+{len(vals) - limite})"
-
-
-@st.cache_data(show_spinner=False, ttl=3)
-def get_interfaz_medica_visitas_df():
-    conn = connect_db()
-    try:
-        df = pd.read_sql(
-            '''
-            SELECT visita_id, estado_comentarios, estado_pruebas,
-                   estado_medicacion_concomitante, estado_aes,
-                   estado_decision, nota_clinica, ultima_actualizacion
-            FROM interfaz_medica_visita
-            ''',
-            conn,
-        )
-    except Exception:
-        df = pd.DataFrame(
-            columns=[
-                "visita_id",
-                "IM_SINTOMAS",
-                "IM_PRUEBAS",
-                "IM_MEDICACION",
-                "IM_AES",
-                "IM_DECISION",
-                "IM_COMENTARIO_LIBRE",
-                "IM_NOTA_CLINICA",
-                "IM_ULT_ACT",
-            ]
-        )
-    conn.close()
-
-    if df.empty:
-        return df
-
-    def _safe_dict(raw):
-        return _json_a_dict_seguro(raw)
-
-    comentarios = df["estado_comentarios"].apply(_safe_dict)
-    pruebas = df["estado_pruebas"].apply(_safe_dict)
-    medicaciones = df["estado_medicacion_concomitante"].apply(_safe_dict)
-    aes = df["estado_aes"].apply(_safe_dict)
-    decision = df["estado_decision"].apply(_safe_dict)
-
-    out = pd.DataFrame()
-    out["visita_id"] = pd.to_numeric(df["visita_id"], errors="coerce")
-    out["IM_SINTOMAS"] = comentarios.apply(lambda d: _resumen_lista_interfaz((d or {}).get("sintomas", [])))
-    out["IM_PRUEBAS"] = pruebas.apply(lambda d: _resumen_lista_interfaz((d or {}).get("pruebas", [])))
-    out["IM_MEDICACION"] = medicaciones.apply(lambda d: _resumen_lista_interfaz((d or {}).get("medicaciones", [])))
-    out["IM_AES"] = aes.apply(lambda d: _resumen_lista_interfaz((d or {}).get("eventos", [])))
-    out["IM_DECISION"] = decision.apply(lambda d: str((d or {}).get("decision", "") or ""))
-    out["IM_COMENTARIO_LIBRE"] = comentarios.apply(lambda d: str((d or {}).get("comentario_libre", "") or "").strip())
-    out["IM_NOTA_CLINICA"] = df["nota_clinica"].fillna("").astype(str)
-    out["IM_ULT_ACT"] = df["ultima_actualizacion"].fillna("").astype(str)
-    return out
-
-
-def get_estado_interfaz_medica(visita_row):
-    visita_id = int(visita_row.get("id"))
-    estado = _estado_base_interfaz_medica(visita_row)
-    conn = connect_db()
-    c = conn.cursor()
-    try:
-        fila = c.execute(
-            '''
-            SELECT estado_constantes, estado_comentarios, estado_pruebas,
-                   estado_farmacos_estudio, estado_medicacion_concomitante,
-                   estado_aes, estado_decision, nota_clinica
-            FROM interfaz_medica_visita
-            WHERE visita_id = ?
-            ''',
-            (visita_id,)
-        ).fetchone()
-    except Exception as exc:
-        if _es_error_tabla_interfaz_no_existe(exc):
-            try:
-                _crear_tabla_interfaz_medica_si_falta(c)
-                conn.commit()
-                fila = None
-            except Exception:
-                fila = None
-        else:
-            fila = None
-    conn.close()
-
-    if not fila:
-        try:
-            df_visitas = get_visitas()
-            estado_prev = _estado_arrastrable_desde_visitas_previas(df_visitas, visita_row)
-            if estado_prev:
-                estado = _aplicar_arrastre_checklists(estado, estado_prev)
-        except Exception:
-            pass
-        return estado
-
-    columnas = [
-        "estado_constantes",
-        "estado_comentarios",
-        "estado_pruebas",
-        "estado_farmacos_estudio",
-        "estado_medicacion_concomitante",
-        "estado_aes",
-        "estado_decision",
-    ]
-    for idx, col in enumerate(columnas):
-        base_dict = estado.get(col, {})
-        guardado = _json_a_dict_seguro(fila[idx])
-        if isinstance(base_dict, dict):
-            base_dict.update(guardado)
-            estado[col] = base_dict
-        else:
-            estado[col] = guardado
-
-    estado["nota_clinica"] = str(fila[7] or "")
-    return estado
-
-
-def guardar_estado_interfaz_medica(visita_id, estado):
-    visita_id = int(visita_id)
-    conn = connect_db()
-    c = conn.cursor()
-    estado_previo = None
-    try:
-        fila_existente = c.execute(
-            '''
-            SELECT estado_constantes, estado_comentarios, estado_pruebas,
-                   estado_farmacos_estudio, estado_medicacion_concomitante,
-                   estado_aes, estado_decision, nota_clinica
-            FROM interfaz_medica_visita
-            WHERE visita_id = ?
-            ''',
-            (visita_id,),
-        ).fetchone()
-        existe = bool(fila_existente)
-        estado_previo = _fila_a_estado_interfaz_guardado(fila_existente)
-    except Exception as exc:
-        if _es_error_tabla_interfaz_no_existe(exc):
-            try:
-                _crear_tabla_interfaz_medica_si_falta(c)
-                conn.commit()
-                fila_existente = c.execute(
-                    '''
-                    SELECT estado_constantes, estado_comentarios, estado_pruebas,
-                           estado_farmacos_estudio, estado_medicacion_concomitante,
-                           estado_aes, estado_decision, nota_clinica
-                    FROM interfaz_medica_visita
-                    WHERE visita_id = ?
-                    ''',
-                    (visita_id,),
-                ).fetchone()
-                existe = bool(fila_existente)
-                estado_previo = _fila_a_estado_interfaz_guardado(fila_existente)
-            except Exception:
-                conn.rollback()
-                conn.close()
-                return
-        else:
-            conn.rollback()
-            conn.close()
-            return
-
-    payload = {
-        "estado_constantes": json.dumps(estado.get("estado_constantes", {}), ensure_ascii=False),
-        "estado_comentarios": json.dumps(estado.get("estado_comentarios", {}), ensure_ascii=False),
-        "estado_pruebas": json.dumps(estado.get("estado_pruebas", {}), ensure_ascii=False),
-        "estado_farmacos_estudio": json.dumps(estado.get("estado_farmacos_estudio", {}), ensure_ascii=False),
-        "estado_medicacion_concomitante": json.dumps(estado.get("estado_medicacion_concomitante", {}), ensure_ascii=False),
-        "estado_aes": json.dumps(estado.get("estado_aes", {}), ensure_ascii=False),
-        "estado_decision": json.dumps(estado.get("estado_decision", {}), ensure_ascii=False),
-        "nota_clinica": str(estado.get("nota_clinica", "") or ""),
-        "ultima_actualizacion": datetime.now().strftime("%Y-%m-%d %H:%M"),
-    }
-
-    guardado_ok = False
-    try:
-        if existe:
-            c.execute(
-                '''
-                UPDATE interfaz_medica_visita
-                SET estado_constantes = ?, estado_comentarios = ?, estado_pruebas = ?,
-                    estado_farmacos_estudio = ?, estado_medicacion_concomitante = ?,
-                    estado_aes = ?, estado_decision = ?, nota_clinica = ?,
-                    ultima_actualizacion = ?
-                WHERE visita_id = ?
-                ''',
-                (
-                    payload["estado_constantes"],
-                    payload["estado_comentarios"],
-                    payload["estado_pruebas"],
-                    payload["estado_farmacos_estudio"],
-                    payload["estado_medicacion_concomitante"],
-                    payload["estado_aes"],
-                    payload["estado_decision"],
-                    payload["nota_clinica"],
-                    payload["ultima_actualizacion"],
-                    visita_id,
-                ),
-            )
-        else:
-            c.execute(
-                '''
-                INSERT INTO interfaz_medica_visita (
-                    visita_id, estado_constantes, estado_comentarios, estado_pruebas,
-                    estado_farmacos_estudio, estado_medicacion_concomitante, estado_aes,
-                    estado_decision, nota_clinica, ultima_actualizacion
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''',
-                (
-                    visita_id,
-                    payload["estado_constantes"],
-                    payload["estado_comentarios"],
-                    payload["estado_pruebas"],
-                    payload["estado_farmacos_estudio"],
-                    payload["estado_medicacion_concomitante"],
-                    payload["estado_aes"],
-                    payload["estado_decision"],
-                    payload["nota_clinica"],
-                    payload["ultima_actualizacion"],
-                ),
-            )
-        guardado_ok = True
-        conn.commit()
-    except Exception:
-        conn.rollback()
-    conn.close()
-
-    if guardado_ok:
-        try:
-            _registrar_cambios_interfaz_en_ficha(visita_id, estado_previo, estado)
-        except Exception:
-            pass
-        try:
-            get_interfaz_medica_visitas_df.clear()
-        except Exception:
-            pass
 
 
 def _listar_bases_backup_locales():
@@ -3185,83 +2425,6 @@ def render_print_dialog(texto, titulo):
         """
         components.html(plantilla, height=0)
 
-_NOMBRES_FEMENINOS = {
-    "maria","ana","laura","carmen","rosa","elena","lucia","marta","paula","sara",
-    "isabel","patricia","cristina","andrea","raquel","silvia","monica","natalia",
-    "beatriz","pilar","teresa","concepcion","dolores","josefa","manuela","francisca",
-    "mercedes","antonia","fatima","amparo","gloria","encarnacion","trinidad","yolanda",
-    "sonia","diana","irene","eva","alba","nuria","alicia","claudia","sofia","julia",
-    "leticia","lorena","miriam","esther","rocio","inmaculada","angela",
-}
-_NOMBRES_MASCULINOS = {
-    "jose","antonio","manuel","francisco","juan","david","carlos","jesus","miguel",
-    "angel","pedro","pablo","rafael","alejandro","javier","alberto","sergio","jorge",
-    "roberto","fernando","daniel","luis","mario","jorge","ricardo","ivan","gonzalo",
-    "alvaro","marcos","diego","julian","emilio","jaime","hugo","victor","hector",
-    "cesar","ignacio","felix","tomas","ramon","andres","enrique","nicolas","eduardo",
-}
-
-def _inferir_sexo(nombre):
-    """Heurística por primer nombre; devuelve 'F' o 'M'."""
-    if not nombre:
-        return "M"
-    primer = nombre.strip().split()[0].lower().rstrip(".")
-    if primer in _NOMBRES_FEMENINOS:
-        return "F"
-    if primer in _NOMBRES_MASCULINOS:
-        return "M"
-    # Fallback: nombres terminados en 'a' → F, resto → M
-    return "F" if primer.endswith("a") else "M"
-
-
-_SVG_SILUETA_M = (
-    '<svg viewBox="0 0 40 72" xmlns="http://www.w3.org/2000/svg" fill="currentColor">'
-    '<circle cx="20" cy="11" r="9"/>'
-    '<rect x="11" y="22" width="18" height="22" rx="4"/>'
-    '<rect x="11" y="43" width="7" height="20" rx="3.5"/>'
-    '<rect x="22" y="43" width="7" height="20" rx="3.5"/>'
-    '<rect x="2" y="22" width="8" height="18" rx="4"/>'
-    '<rect x="30" y="22" width="8" height="18" rx="4"/>'
-    '</svg>'
-)
-_SVG_SILUETA_F = (
-    '<svg viewBox="0 0 40 72" xmlns="http://www.w3.org/2000/svg" fill="currentColor">'
-    '<circle cx="20" cy="11" r="9"/>'
-    '<path d="M10 22 L5 55 L16 55 L20 38 L24 55 L35 55 L30 22 Z"/>'
-    '<rect x="2" y="22" width="7" height="16" rx="3.5"/>'
-    '<rect x="31" y="22" width="7" height="16" rx="3.5"/>'
-    '</svg>'
-)
-
-
-def _get_estado_visita_anterior(df_visitas_all, visita_row):
-    """Devuelve el estado guardado en interfaz_medica_visita de la visita previa del mismo paciente."""
-    cod = str(visita_row.get("codigo", "") or "").strip()
-    ens = str(visita_row.get("ensayo", "") or "").strip()
-    nom = str(visita_row.get("nombre", "") or "").strip()
-    fecha_actual = pd.to_datetime(str(visita_row.get("fecha", "") or ""), errors="coerce")
-
-    mask = (
-        df_visitas_all["ensayo"].str.strip().str.casefold() == ens.casefold()
-    )
-    if cod:
-        mask = mask & (df_visitas_all["codigo"].str.strip().str.casefold() == cod.casefold())
-    else:
-        mask = mask & (df_visitas_all["nombre"].str.strip().str.casefold() == nom.casefold())
-
-    anteriores = df_visitas_all[mask].copy()
-    anteriores["_fdt"] = pd.to_datetime(anteriores["fecha"], errors="coerce")
-    if pd.notna(fecha_actual):
-        anteriores = anteriores[anteriores["_fdt"] < fecha_actual]
-    anteriores = anteriores.sort_values("_fdt", ascending=False)
-    if anteriores.empty:
-        return None, None
-
-    prev_row = anteriores.iloc[0]
-    from_estado = get_estado_interfaz_medica(prev_row)
-    return prev_row, from_estado
-
-
 def formatear_fecha_visita(fecha_iso):
     if not fecha_iso:
         return ""
@@ -3324,22 +2487,6 @@ def parse_fecha_iso(fecha_iso):
         except (ValueError, TypeError):
             continue
     return None
-
-
-def _resolver_fecha_compartida(fecha):
-    if fecha is None:
-        return None
-    if isinstance(fecha, datetime):
-        return fecha.date()
-    if isinstance(fecha, date):
-        return fecha
-    if hasattr(fecha, "to_pydatetime"):
-        try:
-            return fecha.to_pydatetime().date()
-        except Exception:
-            pass
-    return parse_fecha_iso(fecha)
-
 
 @st.cache_data(show_spinner=False)
 def generar_visita_teorica_2274(df_visitas):
@@ -3418,50 +2565,27 @@ def construir_eventos_calendario(df_visitas):
     if df_visitas.empty:
         return eventos
 
-    # Compatibilidad con esquemas heredados (PostgreSQL/SQLite) que pueden
-    # no incluir todas las columnas esperadas en calendario.
-    df_local = df_visitas.copy()
-    defaults = {
-        "id": "",
-        "nombre": "",
-        "codigo": "",
-        "ensayo": "",
-        "ciclo": "",
-        "medula": False,
-        "fecha": "",
-    }
-    for col, default_val in defaults.items():
-        if col not in df_local.columns:
-            df_local[col] = default_val
-
-    # Normalizamos medula a bool para evitar errores con None/NaN/textos.
-    df_local["medula"] = (
-        df_local["medula"]
-        .fillna(False)
-        .apply(lambda v: str(v).strip().lower() in {"1", "true", "t", "si", "sí", "yes", "y"} if isinstance(v, str) else bool(v))
-    )
-
-    for _, row in df_local.iterrows():
-        titulo_evento = f"🆔 {row.get('codigo', '')} | {row.get('ensayo', '')}"
-        if bool(row.get('medula', False)):
+    for _, row in df_visitas.iterrows():
+        titulo_evento = f"🆔 {row['codigo']} | {row['ensayo']}"
+        if row['medula']:
             titulo_evento += " 🩸"
 
         event = {
             "title": titulo_evento,
-            "start": row.get('fecha', ''),
+            "start": row['fecha'],
             "allDay": True,
             "extendedProps": {
-                "id": row.get('id', ''),
-                "nombre": row.get('nombre', ''),
-                "ciclo": row.get('ciclo', ''),
-                "medula": bool(row.get('medula', False)),
-                "ensayo": row.get('ensayo', '')
+                "id": row['id'],
+                "nombre": row['nombre'],
+                "ciclo": row['ciclo'],
+                "medula": row['medula'],
+                "ensayo": row['ensayo']
             },
-            "backgroundColor": "#ff4b4b" if bool(row.get('medula', False)) else "#3788d8"
+            "backgroundColor": "#ff4b4b" if row['medula'] else "#3788d8"
         }
         eventos.append(event)
 
-    eventos.extend(generar_visita_teorica_2274(df_local))
+    eventos.extend(generar_visita_teorica_2274(df_visitas))
     return eventos
 
 def listar_pdfs(directorio):
@@ -4572,907 +3696,6 @@ def render_resumen_manana():
                 st.write(f"• {tarea}")
 
 
-def renderizar_registro_kits_integrado():
-    ruta_kits = os.path.join(SCRIPT_DIR, "inventario_kits_app.py")
-    if not os.path.isfile(ruta_kits):
-        st.error("No se encuentra el modulo de registro de kits en el servidor.")
-        return
-
-    set_page_config_original = st.set_page_config
-    try:
-        # El modulo de kits tambien se ejecuta standalone y configura pagina.
-        # Al integrarlo dentro de la app principal anulamos esa llamada.
-        st.set_page_config = lambda *args, **kwargs: None
-        runpy.run_path(ruta_kits, run_name="__kits_integrado__")
-    except Exception as exc:
-        st.error(f"No se pudo cargar la pestaña de kits: {exc}")
-    finally:
-        st.set_page_config = set_page_config_original
-
-
-def render_interfaz_medica():
-    st.markdown(
-        """
-        <style>
-            .block-container {padding-top: 0.06rem !important; padding-bottom: 0.18rem !important; max-width: 1200px !important;}
-            [data-testid="stVerticalBlock"] > [style*="flex-direction: column"] > [data-testid="stVerticalBlock"] {gap: 0.15rem !important;}
-            h3, h4 {margin-top: 0.08rem !important; margin-bottom: 0.12rem !important; font-size: 0.95rem !important;}
-            div[data-testid="stCheckbox"] {
-                background: #eff6ff;
-                border: 1px solid #bfdbfe;
-                border-radius: 8px;
-                padding: 2px 5px;
-                margin-bottom: 2px;
-            }
-            div[data-testid="stCheckbox"] label p {
-                color: #415271 !important;
-                font-weight: 700 !important;
-                font-size: 0.88rem !important;
-                margin: 0 !important;
-            }
-            div[data-testid="stCheckbox"]:has(input:checked) {
-                background: linear-gradient(135deg, #3b82f6, #2563eb);
-                border-color: #2563eb;
-                box-shadow: 0 3px 8px rgba(37, 99, 235, 0.2);
-            }
-            div[data-testid="stCheckbox"]:has(input:checked) label p {
-                color: #ffffff !important;
-            }
-            .im-shell {background: linear-gradient(160deg, #ffffff 0%, #f4f9ff 100%); border: 1px solid #bfdbfe; border-radius: 12px; box-shadow: 0 6px 14px rgba(30, 64, 175, 0.08); padding: 6px 8px; margin-bottom: 3px;}
-            .im-top {display: flex; align-items: center; gap: 5px; margin-bottom: 2px;}
-            .im-avatar {width: 26px; height: 26px; border-radius: 50%; display:flex; align-items:center; justify-content:center; background: linear-gradient(135deg, #dbe9ff, #c8f3e1); border: 1px solid #c4d9ff; color: #1f3b66; font-size: 0.8rem; font-weight: 700;}
-            .im-title {font-size: 0.95rem; font-weight: 800; color: #22314a; margin-bottom: 0; line-height: 1.05;}
-            .im-sub {font-size: 0.8rem; color: #55729a; margin-bottom: 0; line-height: 1.08;}
-            .im-banner {border-radius: 8px; padding: 4px 6px; font-size: 0.8rem; font-weight: 700; margin-top: 2px; border: 1px solid #d6e3f8;}
-            .im-day-card {border: 1px solid #93c5fd; background: linear-gradient(135deg, #eff6ff, #dbeafe); border-radius: 12px; padding: 8px 10px; margin-bottom: 6px;}
-            .im-day-top {display:flex; align-items:center; justify-content:space-between; gap:8px;}
-            .im-day-title {font-size: 0.78rem; color:#1e3a8a; font-weight:700; text-transform: uppercase; letter-spacing: 0.04em;}
-            .im-day-date {font-size: 1.28rem; color:#1e40af; font-weight:900; line-height:1; margin-top:2px;}
-            .im-day-count {font-size: 0.8rem; color:#1d4ed8; margin-top:2px;}
-            .im-day-badge {font-size:0.76rem; font-weight:800; padding:4px 8px; border-radius:999px; border:1px solid #60a5fa; background:#eff6ff; color:#1e40af;}
-            .im-day-badge-true {background:#3b82f6; color:#ffffff; border-color:#3b82f6;}
-            .im-chip {padding: 4px 8px; border-radius: 999px; border: 1px solid #bfdbfe; font-size: 0.73rem; color: #1e3a8a; background: #eff6ff;}
-            .im-chip-active {padding: 4px 8px; border-radius: 999px; border: 1px solid #2563eb; font-size: 0.73rem; color: #ffffff; background: linear-gradient(90deg, #2563eb, #3b82f6);}
-            .im-mini-card {border: 1px solid #bfdbfe; background: #ffffff; border-radius: 12px; padding: 8px 10px; margin-bottom: 7px; font-size: 0.86rem; color: #1f2937;}
-            .im-ok {border-left: 4px solid #1b9f66;}
-            .im-warn {border-left: 4px solid #db6a1a;}
-            .im-danger {border-left: 4px solid #c0392b;}
-            [data-testid="stWidgetLabel"] p,
-            .stTextInput label,
-            .stTextArea label,
-            .stSelectbox label,
-            .stDateInput label,
-            .stMultiSelect label,
-            .stRadio label {
-                font-size: 0.92rem !important;
-                font-weight: 700 !important;
-                margin: 0 !important;
-            }
-            .stTextInput input,
-            .stTextArea textarea,
-            .stDateInput input,
-            .stSelectbox div[data-baseweb="select"] input {
-                font-size: 0.9rem !important;
-            }
-            .stCaption {font-size: 0.75rem !important; margin: 1px 0 !important;}
-            [data-testid="stButton"] > button,
-            div[data-testid="stCheckbox"] label p,
-            .im-mini-card,
-            .im-banner,
-            .im-title,
-            .im-sub {
-                word-break: keep-all !important;
-                overflow-wrap: normal !important;
-                hyphens: none !important;
-            }
-            [data-testid="stButton"] > button {
-                white-space: normal !important;
-                line-height: 1.15 !important;
-            }
-            [data-testid="stButton"] > button * {
-                word-break: keep-all !important;
-                overflow-wrap: normal !important;
-                hyphens: none !important;
-            }
-            .im-box-select-marker,
-            .im-box-picked-marker,
-            .im-box-content-marker {
-                display: none !important;
-            }
-            div[data-testid="stVerticalBlockBorderWrapper"]:has(.im-box-select-marker) {
-                background: linear-gradient(180deg, #eff6ff 0%, #dbeafe 100%) !important;
-                border: 1px solid #93c5fd !important;
-                border-radius: 12px !important;
-                min-height: 42vh !important;
-            }
-            div[data-testid="stVerticalBlockBorderWrapper"]:has(.im-box-picked-marker) {
-                background: linear-gradient(180deg, #f3f8ff 0%, #eaf3ff 100%) !important;
-                border: 1px solid #93c5fd !important;
-                border-radius: 12px !important;
-                min-height: 48vh !important;
-            }
-            div[data-testid="stVerticalBlockBorderWrapper"]:has(.im-box-content-marker) {
-                background: linear-gradient(180deg, #f8fbff 0%, #eff6ff 100%) !important;
-                border: 1px solid #93c5fd !important;
-                border-radius: 12px !important;
-                min-height: 90vh !important;
-            }
-            div[data-testid="stVerticalBlockBorderWrapper"]:has(.im-box-select-marker) > div,
-            div[data-testid="stVerticalBlockBorderWrapper"]:has(.im-box-picked-marker) > div,
-            div[data-testid="stVerticalBlockBorderWrapper"]:has(.im-box-content-marker) > div {
-                height: auto !important;
-            }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    df_visitas = get_visitas()
-    if df_visitas.empty:
-        st.info("No hay visitas registradas para mostrar la interfaz medica.")
-        return
-
-    df_visitas = df_visitas.copy()
-    df_visitas["ensayo"] = df_visitas["ensayo"].fillna("").astype(str)
-    df_visitas["codigo"] = df_visitas["codigo"].fillna("").astype(str)
-    df_visitas["nombre"] = df_visitas["nombre"].fillna("").astype(str)
-    df_visitas["fecha"] = df_visitas["fecha"].fillna("").astype(str)
-    # Parseamos usando parse_fecha_iso (igual que la Agenda) para soportar todos los formatos.
-    df_visitas["_fecha_date"] = df_visitas["fecha"].apply(parse_fecha_iso)
-
-    hoy = st.session_state.get("agenda_hoy_referencia", fecha_hoy_local())
-    key_fecha = "im_fecha_sel"
-    key_hoy_ref = "im_hoy_ref"
-    key_agenda_seed = "im_agenda_seed"
-
-    fecha_desde_agenda = None
-    agenda_sel = st.session_state.get("datos_seleccionados")
-    if isinstance(agenda_sel, str):
-        fecha_desde_agenda = parse_fecha_iso(agenda_sel[:10])
-
-    if key_fecha not in st.session_state:
-        st.session_state[key_fecha] = fecha_desde_agenda or hoy
-        st.session_state[key_hoy_ref] = hoy
-    elif st.session_state.get(key_hoy_ref) != hoy:
-        # Si cambia el "hoy" de referencia (p.ej. nuevo día), resincronizamos.
-        st.session_state[key_hoy_ref] = hoy
-        st.session_state[key_fecha] = hoy
-
-    # Si el usuario llega desde Agenda con una fecha concreta, sincronizamos una vez.
-    if fecha_desde_agenda and st.session_state.get(key_agenda_seed) != agenda_sel:
-        st.session_state[key_fecha] = fecha_desde_agenda
-        st.session_state[key_agenda_seed] = agenda_sel
-
-    panel_izq, panel_der = st.columns([1, 1], gap="large")
-    panel_der = panel_der.container(border=True)
-
-    fecha_sel = st.session_state.get(key_fecha, hoy)
-    fecha_compartida = _resolver_fecha_compartida(st.session_state.get("agenda_fecha_compartida"))
-    if fecha_compartida is not None:
-        st.session_state[key_fecha] = fecha_compartida
-        fecha_sel = fecha_compartida
-    else:
-        st.session_state["agenda_fecha_compartida"] = fecha_sel
-    pacientes_en_fecha = int((df_visitas["_fecha_date"] == fecha_sel).sum())
-    es_hoy = fecha_sel == hoy
-
-    caja_seleccion = panel_izq.container(border=True)
-    caja_seleccion.markdown("<div class='im-box-select-marker'></div>", unsafe_allow_html=True)
-
-    caja_seleccion.markdown(
-        f"""
-        <div class=\"im-day-card\">
-            <div class=\"im-day-top\">
-                <div>
-                    <div class=\"im-day-title\">Día activo</div>
-                    <div class=\"im-day-date\">{fecha_sel.strftime('%d/%m/%Y')}</div>
-                    <div class=\"im-day-count\">{pacientes_en_fecha} paciente(s)</div>
-                </div>
-                <div class=\"im-day-badge {'im-day-badge-true' if es_hoy else ''}\">{'HOY' if es_hoy else 'SELECCIONADO'}</div>
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    nav_fecha = caja_seleccion.columns(5)
-    if nav_fecha[0].button("-7d", key="im_dia_menos_7", use_container_width=True):
-        st.session_state[key_fecha] = fecha_sel - timedelta(days=7)
-        st.session_state["agenda_fecha_compartida"] = fecha_sel - timedelta(days=7)
-        st.rerun()
-    if nav_fecha[1].button("Ayer", key="im_dia_ant", use_container_width=True):
-        st.session_state[key_fecha] = fecha_sel - timedelta(days=1)
-        st.session_state["agenda_fecha_compartida"] = fecha_sel - timedelta(days=1)
-        st.rerun()
-    if nav_fecha[2].button("Hoy", key="im_fecha_hoy", use_container_width=True, type="primary"):
-        st.session_state[key_fecha] = hoy
-        st.session_state["agenda_fecha_compartida"] = hoy
-        st.rerun()
-    if nav_fecha[3].button("Mañana", key="im_dia_sig", use_container_width=True):
-        st.session_state[key_fecha] = fecha_sel + timedelta(days=1)
-        st.session_state["agenda_fecha_compartida"] = fecha_sel + timedelta(days=1)
-        st.rerun()
-    if nav_fecha[4].button("+7d", key="im_dia_mas_7", use_container_width=True):
-        st.session_state[key_fecha] = fecha_sel + timedelta(days=7)
-        st.session_state["agenda_fecha_compartida"] = fecha_sel + timedelta(days=7)
-        st.rerun()
-
-    fecha_picker = caja_seleccion.date_input(
-        "Cambiar día",
-        value=fecha_sel,
-        key="im_fecha_picker",
-        help="Puedes escribir la fecha o seleccionarla en calendario",
-    )
-    if fecha_picker != fecha_sel:
-        st.session_state[key_fecha] = fecha_picker
-        st.session_state["agenda_fecha_compartida"] = fecha_picker
-        st.rerun()
-
-    # Filtramos directamente por fecha — misma lógica que la Agenda.
-    df_fil = df_visitas[df_visitas["_fecha_date"] == fecha_sel].copy()
-    df_fil = df_fil.sort_values(by=["ensayo", "codigo", "nombre", "id"], na_position="last")
-
-    pacientes_map = {}
-    opciones_paciente = []
-    for _, row in df_fil[["codigo", "nombre", "ensayo"]].drop_duplicates().iterrows():
-        cod = str(row.get("codigo", "") or "").strip()
-        nom = str(row.get("nombre", "") or "").strip()
-        ens = str(row.get("ensayo", "") or "").strip()
-        etiqueta = f"{cod} | {nom} | {ens}".strip(" |")
-        if etiqueta and etiqueta not in pacientes_map:
-            pacientes_map[etiqueta] = (cod, nom, ens)
-            opciones_paciente.append(etiqueta)
-
-    if not opciones_paciente:
-        st.warning("No hay pacientes para la fecha seleccionada.")
-        return
-
-    # Fila de iconos de paciente: silueta + ciclo, clic para seleccionar
-    pac_sel_key = "im_pac_sel"
-    if pac_sel_key not in st.session_state or st.session_state[pac_sel_key] not in opciones_paciente:
-        st.session_state[pac_sel_key] = opciones_paciente[0]
-    paciente_sel = st.session_state[pac_sel_key]
-
-    max_por_fila = 3
-    for fila_inicio in range(0, len(opciones_paciente), max_por_fila):
-        sub = opciones_paciente[fila_inicio:fila_inicio + max_por_fila]
-        pac_cols = caja_seleccion.columns(len(sub))
-        for j, etiqueta in enumerate(sub):
-            i = fila_inicio + j
-            cod_i, nom_i, ens_i = pacientes_map[etiqueta]
-            sexo_i = _inferir_sexo(nom_i)
-            svg_i = _SVG_SILUETA_F if sexo_i == "F" else _SVG_SILUETA_M
-            iniciales_i = "".join([t[0] for t in nom_i.split()[:2]]).upper() if nom_i else cod_i[:2].upper()
-            is_sel = etiqueta == paciente_sel
-            color_sil = "#0f4aa6" if is_sel else "#7a9cc4"
-            with pac_cols[j]:
-                st.markdown(
-                    f'<div style="text-align:center;color:{color_sil};width:26px;margin:0 auto 2px auto">{svg_i}</div>',
-                    unsafe_allow_html=True,
-                )
-                btn_label = f"{nom_i or cod_i} | {ens_i}"
-                if st.button(
-                    btn_label,
-                    key=f"im_pac_{i}",
-                    use_container_width=True,
-                    type="primary" if is_sel else "secondary",
-                    help=f"{iniciales_i}"
-                ):
-                    st.session_state[pac_sel_key] = etiqueta
-                    st.rerun()
-
-    cod_sel, nom_sel, ens_sel = pacientes_map[paciente_sel]
-
-    cod_norm = normalizar_clave_paciente(cod_sel)
-    nom_norm = normalizar_clave_paciente(nom_sel)
-    ens_norm = normalizar_clave_paciente(ens_sel)
-
-    mask = df_fil["ensayo"].apply(normalizar_clave_paciente) == ens_norm
-    if cod_norm:
-        mask = mask & (df_fil["codigo"].apply(normalizar_clave_paciente) == cod_norm)
-    else:
-        mask = mask & (df_fil["nombre"].apply(normalizar_clave_paciente) == nom_norm)
-
-    df_paciente_visitas = df_fil[mask].sort_values(by=["_fecha_date", "id"], ascending=[False, False]).copy()
-    if df_paciente_visitas.empty:
-        st.warning("No se encontraron visitas para este paciente.")
-        return
-
-    opciones_visita = []
-    mapa_visitas = {}
-    for _, row in df_paciente_visitas.iterrows():
-        visita_id = int(row["id"])
-        fecha_txt = formatear_fecha_visita(row.get("fecha"))
-        ciclo_txt = str(row.get("ciclo", "") or "").strip() or "Sin ciclo"
-        etiqueta = f"Visita #{visita_id} | {fecha_txt} | {ciclo_txt}"
-        opciones_visita.append(etiqueta)
-        mapa_visitas[etiqueta] = row.to_dict()
-
-    if len(opciones_visita) == 1:
-        visita_sel = opciones_visita[0]
-    else:
-        visita_sel = st.selectbox("Visita", options=opciones_visita, key="im_visita")
-    visita_row = mapa_visitas[visita_sel]
-    visita_id = int(visita_row["id"])
-    fecha_visita_txt = formatear_fecha_visita(visita_row.get("fecha"))
-    fecha_agenda_txt = fecha_sel.strftime("%d/%m/%Y")
-    fecha_real_hoy_txt = fecha_hoy_local().strftime("%d/%m/%Y")
-
-    estado = get_estado_interfaz_medica(visita_row)
-
-    pasos = [
-        "Resumen de visita",
-        "Constantes y parametros",
-        "Comentarios del paciente",
-        "Pruebas a realizar",
-        "Farmacos de estudio",
-        "Medicacion concomitante",
-        "Efectos adversos",
-        "Decision de tratamiento",
-        "Confirmacion",
-        "Historia clinica generada",
-        "Mas informacion",
-    ]
-    step_key = f"im_step_{visita_id}"
-    if step_key not in st.session_state:
-        st.session_state[step_key] = 1
-    paso = int(st.session_state[step_key])
-    paso = max(1, min(len(pasos), paso))
-    st.session_state[step_key] = paso
-
-    iconos = ["R", "V", "C", "P", "F", "M", "AE", "D", "OK", "N", "I"]
-    iconos_barra = [
-        "📋 Resumen",
-        "🩺 Constantes",
-        "💬 Síntomas",
-        "🔬 Pruebas",
-        "💊 Fármacos",
-        "🏥 Medicación",
-        "⚠️ AEs",
-        "✅ Decisión",
-        "🔒 Confirmar",
-        "📝 Historia",
-        "ℹ️ Info",
-    ]
-    color_paso = {
-        1: "#0f4aa6",
-        2: "#0f8b5f",
-        3: "#5f3dc4",
-        4: "#4f46e5",
-        5: "#0f8b5f",
-        6: "#265ea8",
-        7: "#c0392b",
-        8: "#db6a1a",
-        9: "#1f8f62",
-        10: "#db6a1a",
-        11: "#2f3e63",
-    }
-
-    nombre_pac = str(visita_row.get("nombre", "") or "").strip()
-    sexo_pac = _inferir_sexo(nombre_pac)
-    svgsilhouette = _SVG_SILUETA_F if sexo_pac == "F" else _SVG_SILUETA_M
-    silueta_color = "#b0c8e8" if sexo_pac == "F" else "#93b8dc"
-
-    color_actual = color_paso.get(paso, "#0f4aa6")
-
-    def _lista_unica_texto(items):
-        vistos = set()
-        salida = []
-        for item in items or []:
-            txt = str(item or "").strip()
-            if not txt:
-                continue
-            clave = txt.casefold()
-            if clave in vistos:
-                continue
-            vistos.add(clave)
-            salida.append(txt)
-        return salida
-
-    def _render_checklist_onoff(titulo, estado_dict, campo, base_ops, extra_ops, clave_ui, columnas=3):
-        st.markdown(f"**{titulo}**")
-        ext_key = f"{campo}_expandido"
-        custom_key = f"{campo}_custom"
-
-        estado_dict[campo] = _lista_unica_texto(estado_dict.get(campo, []))
-        estado_dict[custom_key] = _lista_unica_texto(estado_dict.get(custom_key, []))
-
-        if ext_key not in estado_dict:
-            estado_dict[ext_key] = False
-
-        acciones = st.columns([1.15, 1.25, 2.6])
-        if acciones[0].button("Generar mas", key=f"im_gen_{clave_ui}_{visita_id}"):
-            estado_dict[ext_key] = True
-        if acciones[1].button("Quitar todo", key=f"im_clear_{clave_ui}_{visita_id}"):
-            estado_dict[campo] = []
-
-        nuevas_op = acciones[2].text_input("", placeholder="Nueva opcion", key=f"im_new_{clave_ui}_{visita_id}", label_visibility="collapsed")
-        if acciones[2].button("Anadir", key=f"im_add_{clave_ui}_{visita_id}"):
-            nueva = str(nuevas_op or "").strip()
-            if nueva:
-                if nueva.casefold() not in {x.casefold() for x in estado_dict[custom_key]}:
-                    estado_dict[custom_key].append(nueva)
-                if nueva.casefold() not in {x.casefold() for x in estado_dict[campo]}:
-                    estado_dict[campo].append(nueva)
-
-        opciones = _lista_unica_texto(base_ops)
-        if estado_dict.get(ext_key):
-            opciones = _lista_unica_texto(opciones + list(extra_ops or []))
-        opciones = _lista_unica_texto(opciones + estado_dict.get(custom_key, []))
-
-        seleccion = list(estado_dict.get(campo, []))
-        seleccion_set = {x.casefold() for x in seleccion}
-        cols = st.columns(columnas)
-        for idx, item in enumerate(opciones):
-            marcado = item.casefold() in seleccion_set
-            nuevo_estado = cols[idx % columnas].checkbox(item, value=marcado, key=f"im_onoff_{clave_ui}_{visita_id}_{idx}")
-            if nuevo_estado and item.casefold() not in seleccion_set:
-                seleccion.append(item)
-                seleccion_set.add(item.casefold())
-            if not nuevo_estado and item.casefold() in seleccion_set:
-                seleccion = [x for x in seleccion if x.casefold() != item.casefold()]
-                seleccion_set = {x.casefold() for x in seleccion}
-
-        estado_dict[campo] = _lista_unica_texto(seleccion)
-        st.caption(f"{len(estado_dict[campo])} seleccionada(s)")
-        return estado_dict[campo]
-
-    caja_paciente = panel_izq.container(border=True)
-    caja_paciente.markdown("<div class='im-box-picked-marker'></div>", unsafe_allow_html=True)
-
-    caja_paciente.markdown(
-        f"""
-        <div class=\"im-shell\" style=\"display:flex;align-items:center;justify-content:space-between;gap:6px;padding:4px 6px;\">
-            <div style=\"flex:1;min-width:0;\">
-                <div class=\"im-top\">
-                    <div>
-                        <div class=\"im-title\" style=\"font-size:1.55rem;line-height:1.05;font-weight:900;\">{html.escape(nombre_pac or 'Paciente')}</div>
-                        <div class=\"im-sub\" style=\"font-size:1.12rem;line-height:1.1;font-weight:800;color:#2f4f79;\">{html.escape(str(visita_row.get('ensayo', '') or '-'))} · Ciclo {html.escape(str(visita_row.get('ciclo', '') or '-'))}</div>
-                    </div>
-                </div>
-            </div>
-            <div style=\"color:{silueta_color};width:34px;flex-shrink:0;opacity:0.9;\">{svgsilhouette}</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    # Barra de navegación rápida en 3 filas para evitar cortes de palabras.
-    for fila_inicio, fila_fin in [(0, 4), (4, 8), (8, 11)]:
-        step_cols = caja_paciente.columns(fila_fin - fila_inicio)
-        for si in range(fila_inicio, fila_fin):
-            ico_barra = iconos_barra[si]
-            nombre_paso = pasos[si]
-            num = si + 1
-            with step_cols[si - fila_inicio]:
-                if st.button(
-                    ico_barra,
-                    key=f"im_quickstep_{visita_id}_{num}",
-                    use_container_width=True,
-                    type="primary" if paso == num else "secondary",
-                    help=nombre_paso,
-                ):
-                    guardar_estado_interfaz_medica(visita_id, estado)
-                    st.session_state[step_key] = num
-                    st.rerun()
-
-    with panel_der:
-        st.markdown("<div class='im-box-content-marker'></div>", unsafe_allow_html=True)
-        st.markdown(
-            "<div style='background:linear-gradient(90deg,#eff6ff,#dbeafe);border:1px solid #93c5fd;border-radius:10px;padding:6px 10px;margin-bottom:6px;color:#1e3a8a;font-weight:700;'>Contenido clínico</div>",
-            unsafe_allow_html=True,
-        )
-        st.caption("Formulario clínico")
-
-        completadas = 0
-        if estado.get("estado_constantes", {}).get("tension_arterial"):
-            completadas += 1
-        if estado.get("estado_comentarios", {}).get("comentario_libre"):
-            completadas += 1
-        if estado.get("estado_pruebas", {}).get("pruebas"):
-            completadas += 1
-        if estado.get("estado_farmacos_estudio", {}).get("farmacos"):
-            completadas += 1
-        if estado.get("estado_medicacion_concomitante", {}).get("medicaciones"):
-            completadas += 1
-        if estado.get("estado_aes", {}).get("eventos"):
-            completadas += 1
-        if estado.get("estado_decision", {}).get("decision", "") != "Pendiente":
-            completadas += 1
-    
-        if paso == 1:
-            prev_row, prev_estado = _get_estado_visita_anterior(df_visitas, visita_row)
-            st.markdown("**Visita anterior**")
-            if prev_row is None or prev_estado is None:
-                st.caption("Sin visitas previas registradas.")
-            else:
-                fecha_prev = formatear_fecha_visita(prev_row.get("fecha"))
-                ciclo_prev = str(prev_row.get("ciclo", "") or "-")
-                c_prev = prev_estado.get("estado_constantes", {})
-                com_prev = prev_estado.get("estado_comentarios", {})
-                ae_prev = prev_estado.get("estado_aes", {}).get("eventos", [])
-                dec_prev = prev_estado.get("estado_decision", {}).get("decision", "Pendiente")
-                sint_prev = com_prev.get("sintomas", [])
-                st.markdown(
-                    f"<div class='im-mini-card im-ok' style='font-size:0.8rem;padding:5px 7px;'>"
-                    f"<b>{ciclo_prev}</b> · {fecha_prev}<br>"
-                    f"TA {c_prev.get('tension_arterial','-')} · FC {c_prev.get('fc','-')} · "
-                    f"Peso {c_prev.get('peso','-')} kg · SatO2 {c_prev.get('sat_o2','-')}<br>"
-                    f"Síntomas: {', '.join(sint_prev) if sint_prev else 'ninguno'}<br>"
-                    f"AEs: {len(ae_prev)} · Decisión: {html.escape(dec_prev)}"
-                    f"</div>",
-                    unsafe_allow_html=True,
-                )
-    
-        if paso == 2:
-            st.markdown("#### Constantes y parametros")
-            c = estado["estado_constantes"]
-            a1, a2, a3 = st.columns(3)
-            c["tension_arterial"] = a1.text_input("Tension arterial", value=str(c.get("tension_arterial", "")), key=f"im_ta_{visita_id}")
-            c["fc"] = a2.text_input("Frecuencia cardiaca", value=str(c.get("fc", "")), key=f"im_fc_{visita_id}")
-            c["fr"] = a3.text_input("Frecuencia respiratoria", value=str(c.get("fr", "")), key=f"im_fr_{visita_id}")
-            b1, b2, b3 = st.columns(3)
-            c["temperatura"] = b1.text_input("Temperatura", value=str(c.get("temperatura", "")), key=f"im_temp_{visita_id}")
-            c["sat_o2"] = b2.text_input("Saturacion O2", value=str(c.get("sat_o2", "")), key=f"im_sato2_{visita_id}")
-            c["peso"] = b3.text_input("Peso (kg)", value=str(c.get("peso", "")), key=f"im_peso_{visita_id}")
-            d1, d2, d3 = st.columns(3)
-            c["talla"] = d1.text_input("Talla (cm)", value=str(c.get("talla", "")), key=f"im_talla_{visita_id}")
-            c["imc"] = d2.text_input("IMC", value=str(c.get("imc", "")), key=f"im_imc_{visita_id}")
-            c["superficie_corporal"] = d3.text_input("Superficie corporal", value=str(c.get("superficie_corporal", "")), key=f"im_sc_{visita_id}")
-    
-        if paso == 3:
-            st.markdown("#### Comentarios del paciente")
-            sintomas_base = [
-                "Astenia/fatiga",
-                "Dolor oseo",
-                "Dolor neuropatico",
-                "Fiebre",
-                "Disnea",
-                "Tos",
-                "Nauseas",
-                "Diarrea",
-                "Estrenimiento",
-                "Perdida de apetito",
-                "Edema",
-                "Sangrado/moretones",
-            ]
-            sintomas_extra = [
-                "Prurito",
-                "Mucositis",
-                "Infecciones respiratorias",
-                "Mareo",
-                "Perdida de peso",
-                "Dolor abdominal",
-                "Cefalea",
-                "Insomnio",
-            ]
-            com = estado["estado_comentarios"]
-            com["sintomas"] = _render_checklist_onoff(
-                "Sintomas referidos",
-                com,
-                "sintomas",
-                sintomas_base,
-                sintomas_extra,
-                "sintomas",
-                columnas=4,
-            )
-            com["comentario_libre"] = st.text_area(
-                "Comentario libre",
-                value=str(com.get("comentario_libre", "")),
-                height=55,
-                key=f"im_comentario_{visita_id}",
-            )
-            com["estado_general"] = st.selectbox(
-                "Estado general",
-                options=["", "ECOG 0 - Asintomatico", "ECOG 1 - Restriccion leve", "ECOG 2 - Restriccion moderada", "ECOG 3 - Limitado"],
-                index=["", "ECOG 0 - Asintomatico", "ECOG 1 - Restriccion leve", "ECOG 2 - Restriccion moderada", "ECOG 3 - Limitado"].index(str(com.get("estado_general", "")) if str(com.get("estado_general", "")) in ["", "ECOG 0 - Asintomatico", "ECOG 1 - Restriccion leve", "ECOG 2 - Restriccion moderada", "ECOG 3 - Limitado"] else ""),
-                key=f"im_estado_general_{visita_id}",
-            )
-    
-        if paso == 4:
-            st.markdown("#### Pruebas a realizar")
-            pruebas = estado["estado_pruebas"]
-            pruebas_base = [
-                "Hemograma completo",
-                "Bioquimica basica",
-                "Perfil renal y hepatica",
-                "LDH",
-                "Beta-2 microglobulina",
-                "Proteinograma",
-                "Inmunofijacion suero",
-                "Cadenas ligeras libres",
-                "Calcio",
-                "Creatinina",
-            ]
-            pruebas_extra = [
-                "Inmunofijacion orina 24h",
-                "Cuantificacion de inmunoglobulinas",
-                "Aspirado/biopsia medula osea",
-                "Citometria de flujo",
-                "FISH/citogenetica",
-                "PET-TC",
-                "RMN columna",
-                "ECOG Performance Status",
-                "Serologias",
-                "Coagulacion",
-            ]
-            pruebas["pruebas"] = _render_checklist_onoff(
-                "Listado de pruebas",
-                pruebas,
-                "pruebas",
-                pruebas_base,
-                pruebas_extra,
-                "pruebas",
-                columnas=3,
-            )
-            for item in pruebas["pruebas"]:
-                st.markdown(f"<div class='im-mini-card im-ok'>{html.escape(item)}</div>", unsafe_allow_html=True)
-    
-        if paso == 5:
-            st.markdown("#### Farmacos de estudio")
-            far = estado["estado_farmacos_estudio"]
-            far_txt = st.text_area(
-                "Farmacos (una linea por farmaco con dosis)",
-                value="\n".join(far.get("farmacos", [])),
-                height=78,
-                key=f"im_farmacos_{visita_id}",
-            )
-            far["farmacos"] = [p.strip() for p in far_txt.split("\n") if p.strip()]
-            for item in far["farmacos"]:
-                st.markdown(f"<div class='im-mini-card im-ok'>{html.escape(item)}</div>", unsafe_allow_html=True)
-    
-        if paso == 6:
-            st.markdown("#### Medicacion concomitante")
-            med = estado["estado_medicacion_concomitante"]
-            med_base = [
-                "Aciclovir profilaxis",
-                "Cotrimoxazol profilaxis",
-                "Omeprazol",
-                "Alopurinol",
-                "Ondansetron",
-                "Paracetamol",
-                "Loperamida",
-                "Calcio + vitamina D",
-                "Bifosfonato (zoledronato)",
-                "Heparina profilactica",
-            ]
-            med_extra = [
-                "Levofloxacino profilaxis",
-                "Fluconazol profilaxis",
-                "G-CSF",
-                "Eritropoyetina",
-                "Morfina rescate",
-                "Gabapentina",
-                "AAS",
-                "DOAC",
-                "IECA/ARA-II",
-                "Insulina",
-            ]
-            med["medicaciones"] = _render_checklist_onoff(
-                "Medicacion concomitante",
-                med,
-                "medicaciones",
-                med_base,
-                med_extra,
-                "concom",
-                columnas=3,
-            )
-            for item in med["medicaciones"]:
-                st.markdown(f"<div class='im-mini-card'>{html.escape(item)}</div>", unsafe_allow_html=True)
-    
-        if paso == 7:
-            st.markdown("#### Efectos adversos (AEs)")
-            ae = estado["estado_aes"]
-            ae_base = [
-                "Neutropenia G1-2",
-                "Neutropenia G3-4",
-                "Anemia G1-2",
-                "Trombocitopenia G1-2",
-                "Neuropatia periferica G1-2",
-                "Nauseas/vomitos G1-2",
-                "Diarrea G1-2",
-                "Infeccion respiratoria",
-                "Mucositis oral",
-                "Fatiga intensa",
-            ]
-            ae_extra = [
-                "Fiebre neutropenica",
-                "Trombosis venosa",
-                "Rash cutaneo",
-                "Toxicidad hepatica",
-                "Toxicidad renal",
-                "Reaccion infusion",
-                "Hipocalcemia",
-                "Hiperglucemia por corticoides",
-            ]
-            ae["eventos"] = _render_checklist_onoff(
-                "AEs detectados",
-                ae,
-                "eventos",
-                ae_base,
-                ae_extra,
-                "aes",
-                columnas=3,
-            )
-            if ae["eventos"]:
-                for item in ae["eventos"]:
-                    st.markdown(f"<div class='im-mini-card im-danger'>{html.escape(item)}</div>", unsafe_allow_html=True)
-                st.error(f"AEs registrados: {len(ae['eventos'])}")
-            else:
-                st.success("Sin AEs registrados")
-    
-        if paso == 8:
-            st.markdown("#### Decision de tratamiento")
-            dec = estado["estado_decision"]
-            opciones_dec = ["Pendiente", "Si administrar", "No administrar"]
-            dec_actual = str(dec.get("decision", "Pendiente") or "Pendiente")
-            if dec_actual not in opciones_dec:
-                dec_actual = "Pendiente"
-            dec["decision"] = st.radio(
-                "Decision",
-                options=opciones_dec,
-                index=opciones_dec.index(dec_actual),
-                horizontal=True,
-                key=f"im_decision_{visita_id}",
-            )
-            dec["accion"] = st.text_input("Accion recomendada", value=str(dec.get("accion", "")), key=f"im_accion_{visita_id}")
-            dec["motivo"] = st.text_area("Motivo", value=str(dec.get("motivo", "")), height=55, key=f"im_motivo_{visita_id}")
-    
-        if paso == 9:
-            st.markdown("#### Confirmacion")
-            dec = estado["estado_decision"]
-            st.markdown(f"<div class='im-mini-card im-ok'>Decision: {html.escape(str(dec.get('decision', 'Pendiente')))}</div>", unsafe_allow_html=True)
-            st.markdown(f"<div class='im-mini-card'>Accion: {html.escape(str(dec.get('accion', '') or '-'))}</div>", unsafe_allow_html=True)
-            st.markdown(f"<div class='im-mini-card'>Motivo: {html.escape(str(dec.get('motivo', '') or '-'))}</div>", unsafe_allow_html=True)
-            confirmado_key = f"im_confirmado_{visita_id}"
-            if confirmado_key not in st.session_state:
-                st.session_state[confirmado_key] = False
-            if st.button("Confirmar decision", key=f"im_btn_confirmar_{visita_id}"):
-                st.session_state[confirmado_key] = True
-            if st.session_state[confirmado_key]:
-                st.info("Decision confirmada y lista para notificar al equipo.")
-    
-        if paso == 10:
-            st.markdown("#### Historia clinica generada")
-            c = estado.get("estado_constantes", {})
-            com = estado.get("estado_comentarios", {})
-            pr = estado.get("estado_pruebas", {})
-            far = estado.get("estado_farmacos_estudio", {})
-            med = estado.get("estado_medicacion_concomitante", {})
-            ae = estado.get("estado_aes", {})
-            dec = estado.get("estado_decision", {})
-            texto_auto = (
-                f"Ensayo {visita_row.get('ensayo', '')}. Ciclo/Dia {visita_row.get('ciclo', '')}. Fecha {formatear_fecha_visita(visita_row.get('fecha'))}.\n"
-                f"Constantes: TA {c.get('tension_arterial', '-')}, FC {c.get('fc', '-')}, FR {c.get('fr', '-')}, Temp {c.get('temperatura', '-')}, SatO2 {c.get('sat_o2', '-')}.\n"
-                f"Antropometria: Peso {c.get('peso', '-')}, Talla {c.get('talla', '-')}, IMC {c.get('imc', '-')}, SC {c.get('superficie_corporal', '-')}.\n"
-                f"Sintomas: {', '.join(com.get('sintomas', [])) if com.get('sintomas') else 'No referidos'}.\n"
-                f"Comentario: {com.get('comentario_libre', '') or 'Sin comentarios'}.\n"
-                f"Pruebas: {', '.join(pr.get('pruebas', [])) if pr.get('pruebas') else 'Sin pruebas'}.\n"
-                f"Farmacos estudio: {', '.join(far.get('farmacos', [])) if far.get('farmacos') else 'No registrados'}.\n"
-                f"Medicacion concomitante: {', '.join(med.get('medicaciones', [])) if med.get('medicaciones') else 'No registrada'}.\n"
-                f"AEs: {', '.join(ae.get('eventos', [])) if ae.get('eventos') else 'Sin AEs'}.\n"
-                f"Decision: {dec.get('decision', 'Pendiente')}. Accion: {dec.get('accion', '-')}. Motivo: {dec.get('motivo', '-')}."
-            )
-            if not str(estado.get("nota_clinica", "") or "").strip():
-                estado["nota_clinica"] = texto_auto
-            estado["nota_clinica"] = st.text_area(
-                "Nota clinica editable",
-                value=str(estado.get("nota_clinica", "")),
-                height=72,
-                key=f"im_nota_clinica_{visita_id}",
-            )
-            st.download_button(
-                "Descargar nota clinica (.txt)",
-                data=str(estado.get("nota_clinica", "")).encode("utf-8"),
-                file_name=f"nota_clinica_visita_{visita_id}.txt",
-                mime="text/plain",
-                key=f"im_descarga_nota_{visita_id}",
-            )
-    
-        if paso == 11:
-            st.write("Protocolos, citas y notas en el menu lateral.")
-    
-        # Swipe usando window.parent.document para acceder a la página real (no el iframe)
-        swipe_html = """
-        <script>
-        (function() {
-            var doc = window.parent ? window.parent.document : document;
-            var MIN_SWIPE = 52;
-            var startX = 0, startY = 0, dragging = false;
-    
-            // Overlay visual de arrastre inyectado en la página real
-            if (!doc.getElementById('swipe-overlay-im')) {
-                var ov = doc.createElement('div');
-                ov.id = 'swipe-overlay-im';
-                ov.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:9998;transition:background 0.12s;';
-                doc.body.appendChild(ov);
-            }
-            var overlay = doc.getElementById('swipe-overlay-im');
-    
-            function clickBoton(texto) {
-                var btns = doc.querySelectorAll('button');
-                for (var i = 0; i < btns.length; i++) {
-                    if (!btns[i].disabled && btns[i].innerText.trim() === texto) {
-                        btns[i].click();
-                        return;
-                    }
-                }
-            }
-    
-            function mostrarFeedback(dx) {
-                var op = Math.min(Math.abs(dx) / 160, 0.38);
-                if (dx > 0) {
-                    overlay.style.background = 'linear-gradient(to right, rgba(15,74,166,' + op + ') 0%, transparent 45%)';
-                } else {
-                    overlay.style.background = 'linear-gradient(to left, rgba(15,74,166,' + op + ') 0%, transparent 45%)';
-                }
-            }
-    
-            function limpiarFeedback() {
-                overlay.style.background = 'transparent';
-            }
-    
-            // Touch (móvil)
-            doc.addEventListener('touchstart', function(e) {
-                startX = e.touches[0].clientX;
-                startY = e.touches[0].clientY;
-            }, {passive: true});
-    
-            doc.addEventListener('touchmove', function(e) {
-                var dx = e.touches[0].clientX - startX;
-                var dy = e.touches[0].clientY - startY;
-                if (Math.abs(dx) > Math.abs(dy)) mostrarFeedback(dx);
-            }, {passive: true});
-    
-            doc.addEventListener('touchend', function(e) {
-                limpiarFeedback();
-                var dx = e.changedTouches[0].clientX - startX;
-                var dy = e.changedTouches[0].clientY - startY;
-                if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > MIN_SWIPE) {
-                    if (dx > 0) clickBoton('Atras');
-                    else clickBoton('Siguiente');
-                }
-            }, {passive: true});
-    
-            // Mouse (desktop)
-            doc.addEventListener('mousedown', function(e) {
-                dragging = true;
-                startX = e.clientX;
-            });
-            doc.addEventListener('mousemove', function(e) {
-                if (dragging) mostrarFeedback(e.clientX - startX);
-            });
-            doc.addEventListener('mouseup', function(e) {
-                if (!dragging) return;
-                dragging = false;
-                limpiarFeedback();
-                var dx = e.clientX - startX;
-                if (Math.abs(dx) > MIN_SWIPE) {
-                    if (dx > 0) clickBoton('Atras');
-                    else clickBoton('Siguiente');
-                }
-            });
-        })();
-        </script>
-        """
-        components.html(swipe_html, height=0)
-    
-        # Botones ocultos visualmente pero necesarios para que Streamlit capture el clic
-        nav1, nav2, nav3 = st.columns([1, 1.2, 1])
-        if nav1.button("Atras", disabled=(paso <= 1), key=f"im_prev_{visita_id}"):
-            st.session_state[step_key] = max(1, paso - 1)
-            st.rerun()
-    
-        if nav2.button("Guardar", type="primary", key=f"im_guardar_{visita_id}"):
-            guardar_estado_interfaz_medica(visita_id, estado)
-            st.success("Interfaz medica guardada.")
-    
-        if nav3.button("Siguiente", disabled=(paso >= len(pasos)), key=f"im_next_{visita_id}"):
-            guardar_estado_interfaz_medica(visita_id, estado)
-            st.session_state[step_key] = min(len(pasos), paso + 1)
-            st.rerun()
-    
-    
 requerir_login_si_configurado()
 
 # Inicializamos DB una vez por sesion para evitar coste en cada rerun.
@@ -5507,12 +3730,10 @@ _ruta_backup_mostrada = st.session_state.get("_backup_diario_ruta", "")
 secciones_principales = [
     "Copia de seguridad",
     "Agenda",
-    "Registro de kits",
     "Citas ojos",
     "Calendario DREAMM10",
     "Prot. ensayo",
     "Ficha paciente",
-    "Interfaz medica",
     "Check list",
     "Notas enfermeria",
     "Notas coordinacion",
@@ -5570,9 +3791,6 @@ if seccion_activa == "Copia de seguridad":
             mime=st.session_state.get("_backup_descarga_mime", "application/octet-stream"),
             key="btn_descargar_backup_pc_tab",
         )
-
-if seccion_activa == "Registro de kits":
-    renderizar_registro_kits_integrado()
 
 if seccion_activa == "Prot. ensayo":
     st.subheader("📄 Protocolos de Ensayo")
@@ -5970,15 +4188,6 @@ if seccion_activa == "Ficha paciente":
                         }
                     )
                     df_ficha.drop(columns=["visita_id"], inplace=True, errors="ignore")
-                    df_im = get_interfaz_medica_visitas_df()
-                    if not df_im.empty:
-                        df_ficha = df_ficha.merge(
-                            df_im,
-                            how="left",
-                            left_on="id",
-                            right_on="visita_id"
-                        )
-                        df_ficha.drop(columns=["visita_id"], inplace=True, errors="ignore")
 
             if df_ficha.empty and nombre_sel:
                 nombre_sel_norm = normalizar_clave_paciente(nombre_sel)
@@ -6006,15 +4215,6 @@ if seccion_activa == "Ficha paciente":
                         }
                     )
                     df_ficha.drop(columns=["visita_id"], inplace=True, errors="ignore")
-                    df_im = get_interfaz_medica_visitas_df()
-                    if not df_im.empty:
-                        df_ficha = df_ficha.merge(
-                            df_im,
-                            how="left",
-                            left_on="id",
-                            right_on="visita_id"
-                        )
-                        df_ficha.drop(columns=["visita_id"], inplace=True, errors="ignore")
 
             if df_ficha.empty:
                 st.warning("No se encontraron visitas para este paciente.")
@@ -6037,19 +4237,6 @@ if seccion_activa == "Ficha paciente":
                 df_ficha["fecha_revision"] = df_ficha["fecha_revision"].apply(formatear_fecha_visita)
                 df_ficha["tablet"] = df_ficha["tablet"].apply(lambda v: "Si" if v else "No")
                 df_ficha["medula"] = df_ficha["medula"].apply(lambda v: "Si" if v else "No")
-                for col in [
-                    "IM_SINTOMAS",
-                    "IM_PRUEBAS",
-                    "IM_MEDICACION",
-                    "IM_AES",
-                    "IM_DECISION",
-                    "IM_COMENTARIO_LIBRE",
-                    "IM_NOTA_CLINICA",
-                    "IM_ULT_ACT",
-                ]:
-                    if col not in df_ficha.columns:
-                        df_ficha[col] = ""
-                    df_ficha[col] = df_ficha[col].fillna("").astype(str)
 
                 df_ficha = df_ficha.rename(
                     columns={
@@ -6063,14 +4250,6 @@ if seccion_activa == "Ficha paciente":
                         "medula": "MEDULA",
                         "otras_pruebas": "OTRAS PRUEBAS",
                         "comentarios": "COMENTARIOS",
-                        "IM_SINTOMAS": "IM SINTOMAS",
-                        "IM_PRUEBAS": "IM PRUEBAS",
-                        "IM_MEDICACION": "IM MEDICACION",
-                        "IM_AES": "IM AEs",
-                        "IM_DECISION": "IM DECISION",
-                        "IM_COMENTARIO_LIBRE": "IM COMENTARIO",
-                        "IM_NOTA_CLINICA": "IM NOTA CLINICA",
-                        "IM_ULT_ACT": "IM ULT ACT",
                         "sede_ocular": "REVISION OCULAR (SEDE)",
                         "agenda_hospitalaria_ocular": "AGENDA HOSPITALARIA (OCULAR)",
                         "fecha_revision": "REVISION OCULAR (FECHA)",
@@ -6089,14 +4268,6 @@ if seccion_activa == "Ficha paciente":
                         "MEDULA",
                         "OTRAS PRUEBAS",
                         "COMENTARIOS",
-                        "IM SINTOMAS",
-                        "IM PRUEBAS",
-                        "IM MEDICACION",
-                        "IM AEs",
-                        "IM DECISION",
-                        "IM COMENTARIO",
-                        "IM NOTA CLINICA",
-                        "IM ULT ACT",
                         "REVISION OCULAR (SEDE)",
                         "AGENDA HOSPITALARIA (OCULAR)",
                         "REVISION OCULAR (FECHA)",
@@ -6112,9 +4283,6 @@ if seccion_activa == "Ficha paciente":
 
                 st.caption("Verde: visitas realizadas. Amarillo: hoy. Rojo: pendientes.")
                 st.dataframe(df_ficha.style.apply(colorear_filas, axis=1), use_container_width=True)
-
-if seccion_activa == "Interfaz medica":
-    render_interfaz_medica()
 
 if seccion_activa == "Citas ojos":
     st.subheader("👁️ Citas de ojos")
@@ -7205,37 +5373,18 @@ if seccion_activa == "Agenda":
     # 1. Preparar eventos para el calendario
     df_visitas = get_visitas()
     calendar_events = construir_eventos_calendario(df_visitas)
-    hoy_agenda = fecha_hoy_local()
-    fecha_compartida = _resolver_fecha_compartida(st.session_state.get("agenda_fecha_compartida"))
-    if fecha_compartida is None:
-        fecha_compartida = hoy_agenda
-    st.session_state["agenda_fecha_compartida"] = fecha_compartida
-    st.session_state["agenda_hoy_referencia"] = hoy_agenda
-
-    # Filtro estricto por dia compartido para que Agenda e Interfaz medica
-    # muestren exactamente los mismos pacientes del mismo dia.
-    if not df_visitas.empty and "fecha" in df_visitas.columns:
-        df_visitas_dia = df_visitas.copy()
-        df_visitas_dia["_fecha_dia"] = df_visitas_dia["fecha"].apply(parse_fecha_iso)
-        df_visitas_dia = df_visitas_dia[df_visitas_dia["_fecha_dia"] == fecha_compartida].copy()
-        df_visitas_dia = df_visitas_dia.drop(columns=["_fecha_dia"], errors="ignore")
-    else:
-        df_visitas_dia = df_visitas
-    calendar_events = construir_eventos_calendario(df_visitas_dia)
-    tz_cal = APP_TIMEZONE if APP_TIMEZONE else "local"
 
     # 2. Configuración del Calendario
     calendar_options = {
         "editable": True,
         "navLinks": True,
-        "initialView": "listDay",
+        "initialView": "dayGridMonth",
         "headerToolbar": {
             "left": "today prev,next",
             "center": "title",
             "right": "dayGridMonth,listDay"
         },
-        "initialDate": fecha_compartida.isoformat(),
-        "timeZone": tz_cal,
+        "initialDate": fecha_hoy_local().isoformat(),
         "firstDay": 1,
         "selectable": True,
     }
@@ -7249,18 +5398,10 @@ if seccion_activa == "Agenda":
     # --- LÓGICA DE DETECCIÓN DE CLICS ---
     # Si se hace clic en el calendario, actualizamos la memoria (Session State)
     if calendar_state.get("dateClick"):
-        fecha_click = calendar_state["dateClick"].get("dateStr") or calendar_state["dateClick"]["date"]
-        st.session_state["agenda_fecha_compartida"] = _resolver_fecha_compartida(fecha_click) or fecha_hoy_local()
         st.session_state['modo_formulario'] = 'nuevo'
-        st.session_state['datos_seleccionados'] = fecha_click
+        st.session_state['datos_seleccionados'] = calendar_state["dateClick"].get("dateStr") or calendar_state["dateClick"]["date"]
 
     elif calendar_state.get("eventClick"):
-        fecha_evento = (
-            calendar_state["eventClick"]["event"].get("start")
-            or calendar_state["eventClick"]["event"].get("startStr")
-        )
-        if fecha_evento:
-            st.session_state["agenda_fecha_compartida"] = _resolver_fecha_compartida(fecha_evento) or fecha_hoy_local()
         st.session_state['modo_formulario'] = 'ver'
         # Guardamos el ID del evento clickado
         props = calendar_state["eventClick"]["event"].get("extendedProps", {})
