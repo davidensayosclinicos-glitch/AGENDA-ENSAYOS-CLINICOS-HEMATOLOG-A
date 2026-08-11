@@ -3440,9 +3440,11 @@ def construir_eventos_calendario(df_visitas):
         if bool(row.get('medula', False)):
             titulo_evento += " 🩸"
 
+        fecha_normalizada = parse_fecha_iso(row.get('fecha', ''))
+        start_str = fecha_normalizada.isoformat() if fecha_normalizada else str(row.get('fecha', ''))
         event = {
             "title": titulo_evento,
-            "start": row.get('fecha', ''),
+            "start": start_str,
             "allDay": True,
             "extendedProps": {
                 "id": row.get('id', ''),
@@ -7206,7 +7208,6 @@ if seccion_activa == "Agenda":
     st.session_state["agenda_hoy_referencia"] = hoy_agenda
 
     calendar_events = construir_eventos_calendario(df_visitas)
-    tz_cal = APP_TIMEZONE if APP_TIMEZONE else "local"
 
     # 2. Configuración del Calendario
     calendar_options = {
@@ -7219,7 +7220,6 @@ if seccion_activa == "Agenda":
             "right": "dayGridMonth,listDay"
         },
         "initialDate": fecha_compartida.isoformat(),
-        "timeZone": tz_cal,
         "firstDay": 1,
         "selectable": True,
     }
