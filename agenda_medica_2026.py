@@ -4594,7 +4594,7 @@ def render_interfaz_medica():
     st.markdown(
         """
         <style>
-            .block-container {padding-top: 0.06rem !important; padding-bottom: 0.18rem !important; max-width: 1200px !important; height: calc(100vh - 0.5rem) !important; overflow: hidden !important;}
+            .block-container {padding-top: 0.06rem !important; padding-bottom: 0.18rem !important; max-width: 1200px !important;}
             [data-testid="stVerticalBlock"] > [style*="flex-direction: column"] > [data-testid="stVerticalBlock"] {gap: 0.15rem !important;}
             h3, h4 {margin-top: 0.08rem !important; margin-bottom: 0.12rem !important; font-size: 0.95rem !important;}
             div[data-testid="stCheckbox"] {
@@ -4684,29 +4684,23 @@ def render_interfaz_medica():
                 border: 1px solid #93c5fd !important;
                 border-radius: 12px !important;
                 min-height: 42vh !important;
-                max-height: 42vh !important;
-                overflow: hidden !important;
             }
             div[data-testid="stVerticalBlockBorderWrapper"]:has(.im-box-picked-marker) {
                 background: linear-gradient(180deg, #f3f8ff 0%, #eaf3ff 100%) !important;
                 border: 1px solid #93c5fd !important;
                 border-radius: 12px !important;
                 min-height: 48vh !important;
-                max-height: 48vh !important;
-                overflow: hidden !important;
             }
             div[data-testid="stVerticalBlockBorderWrapper"]:has(.im-box-content-marker) {
                 background: linear-gradient(180deg, #f8fbff 0%, #eff6ff 100%) !important;
                 border: 1px solid #93c5fd !important;
                 border-radius: 12px !important;
                 min-height: 90vh !important;
-                max-height: 90vh !important;
-                overflow: hidden !important;
             }
             div[data-testid="stVerticalBlockBorderWrapper"]:has(.im-box-select-marker) > div,
             div[data-testid="stVerticalBlockBorderWrapper"]:has(.im-box-picked-marker) > div,
             div[data-testid="stVerticalBlockBorderWrapper"]:has(.im-box-content-marker) > div {
-                height: 100% !important;
+                height: auto !important;
             }
         </style>
         """,
@@ -7217,6 +7211,17 @@ if seccion_activa == "Agenda":
         fecha_compartida = hoy_agenda
     st.session_state["agenda_fecha_compartida"] = fecha_compartida
     st.session_state["agenda_hoy_referencia"] = hoy_agenda
+
+    # Filtro estricto por dia compartido para que Agenda e Interfaz medica
+    # muestren exactamente los mismos pacientes del mismo dia.
+    if not df_visitas.empty and "fecha" in df_visitas.columns:
+        df_visitas_dia = df_visitas.copy()
+        df_visitas_dia["_fecha_dia"] = df_visitas_dia["fecha"].apply(parse_fecha_iso)
+        df_visitas_dia = df_visitas_dia[df_visitas_dia["_fecha_dia"] == fecha_compartida].copy()
+        df_visitas_dia = df_visitas_dia.drop(columns=["_fecha_dia"], errors="ignore")
+    else:
+        df_visitas_dia = df_visitas
+    calendar_events = construir_eventos_calendario(df_visitas_dia)
     tz_cal = APP_TIMEZONE if APP_TIMEZONE else "local"
 
     # 2. Configuración del Calendario
