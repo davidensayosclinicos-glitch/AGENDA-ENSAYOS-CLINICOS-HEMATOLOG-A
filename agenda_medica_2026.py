@@ -4,7 +4,7 @@ try:
 except ImportError:
     calendar = None
 import sqlite3
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 import pandas as pd
 import numpy as np
 import html
@@ -3325,6 +3325,22 @@ def parse_fecha_iso(fecha_iso):
             continue
     return None
 
+
+def _resolver_fecha_compartida(fecha):
+    if fecha is None:
+        return None
+    if isinstance(fecha, datetime):
+        return fecha.date()
+    if isinstance(fecha, date):
+        return fecha
+    if hasattr(fecha, "to_pydatetime"):
+        try:
+            return fecha.to_pydatetime().date()
+        except Exception:
+            pass
+    return parse_fecha_iso(fecha)
+
+
 @st.cache_data(show_spinner=False)
 def generar_visita_teorica_2274(df_visitas):
     if df_visitas.empty:
@@ -4737,6 +4753,12 @@ def render_interfaz_medica():
     panel_der = panel_der.container(border=True)
 
     fecha_sel = st.session_state.get(key_fecha, hoy)
+    fecha_compartida = _resolver_fecha_compartida(st.session_state.get("agenda_fecha_compartida"))
+    if fecha_compartida is not None:
+        st.session_state[key_fecha] = fecha_compartida
+        fecha_sel = fecha_compartida
+    else:
+        st.session_state["agenda_fecha_compartida"] = fecha_sel
     pacientes_en_fecha = int((df_visitas["_fecha_date"] == fecha_sel).sum())
     es_hoy = fecha_sel == hoy
 
@@ -4762,18 +4784,23 @@ def render_interfaz_medica():
     nav_fecha = caja_seleccion.columns(5)
     if nav_fecha[0].button("-7d", key="im_dia_menos_7", use_container_width=True):
         st.session_state[key_fecha] = fecha_sel - timedelta(days=7)
+        st.session_state["agenda_fecha_compartida"] = fecha_sel - timedelta(days=7)
         st.rerun()
     if nav_fecha[1].button("Ayer", key="im_dia_ant", use_container_width=True):
         st.session_state[key_fecha] = fecha_sel - timedelta(days=1)
+        st.session_state["agenda_fecha_compartida"] = fecha_sel - timedelta(days=1)
         st.rerun()
     if nav_fecha[2].button("Hoy", key="im_fecha_hoy", use_container_width=True, type="primary"):
         st.session_state[key_fecha] = hoy
+        st.session_state["agenda_fecha_compartida"] = hoy
         st.rerun()
     if nav_fecha[3].button("Mañana", key="im_dia_sig", use_container_width=True):
         st.session_state[key_fecha] = fecha_sel + timedelta(days=1)
+        st.session_state["agenda_fecha_compartida"] = fecha_sel + timedelta(days=1)
         st.rerun()
     if nav_fecha[4].button("+7d", key="im_dia_mas_7", use_container_width=True):
         st.session_state[key_fecha] = fecha_sel + timedelta(days=7)
+        st.session_state["agenda_fecha_compartida"] = fecha_sel + timedelta(days=7)
         st.rerun()
 
     fecha_picker = caja_seleccion.date_input(
@@ -4784,6 +4811,7 @@ def render_interfaz_medica():
     )
     if fecha_picker != fecha_sel:
         st.session_state[key_fecha] = fecha_picker
+        st.session_state["agenda_fecha_compartida"] = fecha_picker
         st.rerun()
 
     # Filtramos directamente por fecha — misma lógica que la Agenda.
@@ -7184,6 +7212,10 @@ if seccion_activa == "Agenda":
     df_visitas = get_visitas()
     calendar_events = construir_eventos_calendario(df_visitas)
     hoy_agenda = fecha_hoy_local()
+    fecha_compartida = _resolver_fecha_compartida(st.session_state.get("agenda_fecha_compartida"))
+    if fecha_compartida is None:
+        fecha_compartida = hoy_agenda
+    st.session_state["agenda_fecha_compartida"] = fecha_compartida
     st.session_state["agenda_hoy_referencia"] = hoy_agenda
     tz_cal = APP_TIMEZONE if APP_TIMEZONE else "local"
 
@@ -7197,7 +7229,7 @@ if seccion_activa == "Agenda":
             "center": "title",
             "right": "dayGridMonth,listDay"
         },
-        "initialDate": hoy_agenda.isoformat(),
+        "initialDate": fecha_compartida.isoformat(),
         "timeZone": tz_cal,
         "firstDay": 1,
         "selectable": True,
@@ -7212,8 +7244,10 @@ if seccion_activa == "Agenda":
     # --- LÓGICA DE DETECCIÓN DE CLICS ---
     # Si se hace clic en el calendario, actualizamos la memoria (Session State)
     if calendar_state.get("dateClick"):
+        fecha_click = calendar_state["dateClick"].get("dateStr") or calendar_state["dateClick"]["date"]
+        st.session_state["agenda_fecha_compartida"] = _resolver_fecha_compartida(fecha_click) or fecha_hoy_local()
         st.session_state['modo_formulario'] = 'nuevo'
-        st.session_state['datos_seleccionados'] = calendar_state["dateClick"].get("dateStr") or calendar_state["dateClick"]["date"]
+        st.session_state['datos_seleccionados'] = fecha_click
 
     elif calendar_state.get("eventClick"):
         st.session_state['modo_formulario'] = 'ver'
