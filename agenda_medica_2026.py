@@ -3297,11 +3297,13 @@ def parse_fecha_iso(fecha_iso):
         return None
 
     if "T" in valor:
-        # Para eventos de día completo, la fecha local está antes de la T.
-        # Convertir a local timezone desplazaría "2026-08-11T22:00:00Z" a 2026-08-12.
-        fecha_parte = valor.split("T", 1)[0][:10]
         try:
-            return datetime.strptime(fecha_parte, "%Y-%m-%d").date()
+            valor_iso = valor[:-1] + "+00:00" if valor.endswith("Z") else valor
+            dt = datetime.fromisoformat(valor_iso)
+            if dt.tzinfo is not None:
+                # Convertir a hora local para obtener la fecha del usuario, no la UTC.
+                dt = dt.astimezone(ZoneInfo("Europe/Madrid")) if ZoneInfo is not None else dt.astimezone()
+            return dt.date()
         except (ValueError, TypeError):
             pass
 
