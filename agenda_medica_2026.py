@@ -4747,12 +4747,6 @@ def render_interfaz_medica():
     panel_der = panel_der.container(border=True)
 
     fecha_sel = st.session_state.get(key_fecha, hoy)
-    fecha_compartida = _resolver_fecha_compartida(st.session_state.get("agenda_fecha_compartida"))
-    if fecha_compartida is not None:
-        st.session_state[key_fecha] = fecha_compartida
-        fecha_sel = fecha_compartida
-    else:
-        st.session_state["agenda_fecha_compartida"] = fecha_sel
     pacientes_en_fecha = int((df_visitas["_fecha_date"] == fecha_sel).sum())
     es_hoy = fecha_sel == hoy
 
@@ -4777,24 +4771,28 @@ def render_interfaz_medica():
 
     nav_fecha = caja_seleccion.columns(5)
     if nav_fecha[0].button("-7d", key="im_dia_menos_7", use_container_width=True):
-        st.session_state[key_fecha] = fecha_sel - timedelta(days=7)
-        st.session_state["agenda_fecha_compartida"] = fecha_sel - timedelta(days=7)
+        nueva = fecha_sel - timedelta(days=7)
+        st.session_state[key_fecha] = nueva
+        st.session_state["im_fecha_picker"] = nueva
         st.rerun()
     if nav_fecha[1].button("Ayer", key="im_dia_ant", use_container_width=True):
-        st.session_state[key_fecha] = fecha_sel - timedelta(days=1)
-        st.session_state["agenda_fecha_compartida"] = fecha_sel - timedelta(days=1)
+        nueva = fecha_sel - timedelta(days=1)
+        st.session_state[key_fecha] = nueva
+        st.session_state["im_fecha_picker"] = nueva
         st.rerun()
     if nav_fecha[2].button("Hoy", key="im_fecha_hoy", use_container_width=True, type="primary"):
         st.session_state[key_fecha] = hoy
-        st.session_state["agenda_fecha_compartida"] = hoy
+        st.session_state["im_fecha_picker"] = hoy
         st.rerun()
     if nav_fecha[3].button("Mañana", key="im_dia_sig", use_container_width=True):
-        st.session_state[key_fecha] = fecha_sel + timedelta(days=1)
-        st.session_state["agenda_fecha_compartida"] = fecha_sel + timedelta(days=1)
+        nueva = fecha_sel + timedelta(days=1)
+        st.session_state[key_fecha] = nueva
+        st.session_state["im_fecha_picker"] = nueva
         st.rerun()
     if nav_fecha[4].button("+7d", key="im_dia_mas_7", use_container_width=True):
-        st.session_state[key_fecha] = fecha_sel + timedelta(days=7)
-        st.session_state["agenda_fecha_compartida"] = fecha_sel + timedelta(days=7)
+        nueva = fecha_sel + timedelta(days=7)
+        st.session_state[key_fecha] = nueva
+        st.session_state["im_fecha_picker"] = nueva
         st.rerun()
 
     fecha_picker = caja_seleccion.date_input(
@@ -4805,7 +4803,6 @@ def render_interfaz_medica():
     )
     if fecha_picker != fecha_sel:
         st.session_state[key_fecha] = fecha_picker
-        st.session_state["agenda_fecha_compartida"] = fecha_picker
         st.rerun()
 
     # Filtramos directamente por fecha — misma lógica que la Agenda.
@@ -4824,7 +4821,9 @@ def render_interfaz_medica():
             opciones_paciente.append(etiqueta)
 
     if not opciones_paciente:
-        st.warning("No hay pacientes para la fecha seleccionada.")
+        # Mostrar mensaje en el panel derecho y dejar el panel izquierdo (nav) visible.
+        with panel_der:
+            st.info("No hay pacientes para la fecha seleccionada.")
         return
 
     # Fila de iconos de paciente: silueta + ciclo, clic para seleccionar
