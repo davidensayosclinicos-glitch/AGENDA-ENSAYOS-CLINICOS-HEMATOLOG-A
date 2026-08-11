@@ -7223,7 +7223,7 @@ if seccion_activa == "Agenda":
     calendar_options = {
         "editable": True,
         "navLinks": True,
-        "initialView": "dayGridMonth",
+        "initialView": "listDay",
         "headerToolbar": {
             "left": "today prev,next",
             "center": "title",
@@ -7250,6 +7250,12 @@ if seccion_activa == "Agenda":
         st.session_state['datos_seleccionados'] = fecha_click
 
     elif calendar_state.get("eventClick"):
+        fecha_evento = (
+            calendar_state["eventClick"]["event"].get("start")
+            or calendar_state["eventClick"]["event"].get("startStr")
+        )
+        if fecha_evento:
+            st.session_state["agenda_fecha_compartida"] = _resolver_fecha_compartida(fecha_evento) or fecha_hoy_local()
         st.session_state['modo_formulario'] = 'ver'
         # Guardamos el ID del evento clickado
         props = calendar_state["eventClick"]["event"].get("extendedProps", {})
