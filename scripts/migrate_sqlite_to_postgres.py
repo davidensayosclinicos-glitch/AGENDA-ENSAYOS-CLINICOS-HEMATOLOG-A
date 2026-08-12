@@ -127,6 +127,17 @@ def ensure_postgres_schema(pg_cur) -> None:
         )
         """
     )
+    pg_cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS catalogo_clinico (
+            id BIGSERIAL PRIMARY KEY,
+            categoria TEXT NOT NULL,
+            nombre TEXT NOT NULL,
+            creado_en TEXT NOT NULL,
+            UNIQUE(categoria, nombre)
+        )
+        """
+    )
 
 
 def fetch_all(sqlite_cur, table: str, columns: list[str]) -> list[tuple]:
@@ -227,6 +238,11 @@ def main() -> int:
             "notas_enfermeria",
             ["id", "fecha_nota", "texto", "urgencia", "creado_en"],
         )
+        catalogo_clinico = fetch_all(
+            sqlite_cur,
+            "catalogo_clinico",
+            ["id", "categoria", "nombre", "creado_en"],
+        )
 
         # SQLite stores booleans as integers; Postgres expects bool.
         visitas = [
@@ -291,6 +307,12 @@ def main() -> int:
             ["id", "fecha_nota", "texto", "urgencia", "creado_en"],
             notas_enf,
         )
+        upsert_table(
+            pg_cur,
+            "catalogo_clinico",
+            ["id", "categoria", "nombre", "creado_en"],
+            catalogo_clinico,
+        )
 
         for table in (
             "visitas",
@@ -299,6 +321,7 @@ def main() -> int:
             "checklist_items",
             "notas_esquemas",
             "notas_enfermeria",
+            "catalogo_clinico",
         ):
             reset_sequence(pg_cur, table)
 

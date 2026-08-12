@@ -761,6 +761,7 @@ def backup_diario_ensayos(forzar=False):
             "visitas", "revision_ocular", "pacientes", "checklist_items",
             "notas_esquemas", "notas_enfermeria", "notas_coordinacion",
             "adendas_ensayo", "adendas_paciente", "dreamm10_excels",
+            "catalogo_clinico",
         ]
         subcarpeta = os.path.join(carpeta, f"backup_{hoy}")
         marca = os.path.join(subcarpeta, ".completado")
@@ -838,6 +839,7 @@ def construir_backup_descargable():
         "visitas", "revision_ocular", "pacientes", "checklist_items",
         "notas_esquemas", "notas_enfermeria", "notas_coordinacion",
         "adendas_ensayo", "adendas_paciente", "dreamm10_excels",
+        "catalogo_clinico",
     ]
 
     buffer = io.BytesIO()
@@ -1503,6 +1505,27 @@ def init_db():
                 nota_clinica TEXT,
                 ultima_actualizacion TEXT,
                 FOREIGN KEY(visita_id) REFERENCES visitas(id)
+            )
+        ''')
+
+    if DB_BACKEND == "postgres":
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS catalogo_clinico (
+                id BIGSERIAL PRIMARY KEY,
+                categoria TEXT NOT NULL,
+                nombre TEXT NOT NULL,
+                creado_en TEXT NOT NULL,
+                UNIQUE(categoria, nombre)
+            )
+        ''')
+    else:
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS catalogo_clinico (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                categoria TEXT NOT NULL,
+                nombre TEXT NOT NULL,
+                creado_en TEXT NOT NULL,
+                UNIQUE(categoria, nombre)
             )
         ''')
 
@@ -3117,7 +3140,75 @@ def get_revisiones_oculares_df():
     return df
 
 
+@st.cache_data(show_spinner=False, ttl=3)
+def get_catalogo_clinico():
+    conn = connect_db()
+    try:
+        filas = conn.cursor().execute(
+            "SELECT categoria, nombre FROM catalogo_clinico ORDER BY categoria, nombre"
+        ).fetchall()
+    except Exception:
+        filas = []
+    finally:
+        conn.close()
+
+    catalogo = {"Sintoma": [], "Medicación": [], "Efecto adverso": []}
+    for categoria, nombre in filas:
+        categoria_txt = str(categoria or "").strip()
+        nombre_txt = normalizar_texto_campo(nombre)
+        if categoria_txt in catalogo and nombre_txt:
+            catalogo[categoria_txt].append(nombre_txt)
+    return catalogo
+
+
+def guardar_item_catalogo_clinico(categoria, nombre):
+    categoria = str(categoria or "").strip()
+    nombre = normalizar_texto_campo(nombre)
+    if categoria not in {"Sintoma", "Medicación", "Efecto adverso"} or not nombre:
+        return False
+
+    conn = connect_db()
+    try:
+        conn.cursor().execute(
+            "INSERT INTO catalogo_clinico (categoria, nombre, creado_en) VALUES (?, ?, ?)",
+            (categoria, nombre, ahora_local().isoformat(timespec="seconds")),
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        conn.close()
+        return False
+    conn.close()
+    get_catalogo_clinico.clear()
+    return True
+
+
+def borrar_item_catalogo_clinico(categoria, nombre):
+    categoria = str(categoria or "").strip()
+    nombre = normalizar_texto_campo(nombre)
+    if not categoria or not nombre:
+        return False
+
+    conn = connect_db()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "DELETE FROM catalogo_clinico WHERE categoria = ? AND nombre = ?",
+            (categoria, nombre),
+        )
+        eliminado = bool(cursor.rowcount)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        eliminado = False
+    conn.close()
+    if eliminado:
+        get_catalogo_clinico.clear()
+    return eliminado
+
+
 def invalidar_cache_lecturas():
+    get_catalogo_clinico.clear()
     get_visitas.clear()
     get_pacientes_unicos.clear()
     get_ensayos_existentes.clear()
@@ -5100,86 +5191,90 @@ def render_interfaz_medica():
         return estado
 
     def _render_unificado_clinico(estado, visita_id):
-        categorias = {
-            "Sintoma": [
-                "Astenia/fatiga",
-                "Dolor oseo",
-                "Dolor neuropatico",
-                "Fiebre",
-                "Disnea",
-                "Tos",
-                "Nauseas",
-                "Diarrea",
-                "Estrenimiento",
-                "Perdida de apetito",
-                "Edema",
-                "Sangrado/moretones",
-                "Prurito",
-                "Mucositis",
-                "Infecciones respiratorias",
-                "Mareo",
-                "Perdida de peso",
-                "Dolor abdominal",
-                "Cefalea",
-                "Insomnio",
-            ],
-            "Medicación": [
-                "Aciclovir profilaxis",
-                "Cotrimoxazol profilaxis",
-                "Omeprazol",
-                "Alopurinol",
-                "Ondansetron",
-                "Paracetamol",
-                "Loperamida",
-                "Calcio + vitamina D",
-                "Bifosfonato (zoledronato)",
-                "Heparina profilactica",
-                "Levofloxacino profilaxis",
-                "Fluconazol profilaxis",
-                "G-CSF",
-                "Eritropoyetina",
-                "Morfina rescate",
-                "Gabapentina",
-                "AAS",
-                "DOAC",
-                "IECA/ARA-II",
-                "Insulina",
-            ],
-            "Efecto adverso": [
-                "Neutropenia G1-2",
-                "Neutropenia G3-4",
-                "Anemia G1-2",
-                "Trombocitopenia G1-2",
-                "Neuropatia periferica G1-2",
-                "Nauseas/vomitos G1-2",
-                "Diarrea G1-2",
-                "Infeccion respiratoria",
-                "Mucositis oral",
-                "Fatiga intensa",
-                "Fiebre neutropenica",
-                "Trombosis venosa",
-                "Rash cutaneo",
-                "Toxicidad hepatica",
-                "Toxicidad renal",
-                "Reaccion infusion",
-                "Hipocalcemia",
-                "Hiperglucemia por corticoides",
-            ],
-        }
-
+        categorias = ["Sintoma", "Medicación", "Efecto adverso"]
+        catalogo = get_catalogo_clinico()
         items = _items_unificados_desde_estado(estado)
-        indices = {f"{it['categoria']}::{it['nombre']}".casefold(): it for it in items}
-        for categoria, opciones in categorias.items():
+
+        st.markdown("**Catálogo clínico común a todos los ensayos**")
+        alta_col, borrar_col = st.columns([2, 1])
+        with alta_col:
+            categoria_nueva = st.selectbox(
+                "Categoría",
+                options=categorias,
+                key=f"im_catalogo_categoria_{visita_id}",
+            )
+            nombre_nuevo = st.text_input(
+                "Nueva opción clínica",
+                placeholder="Escribe un síntoma, medicación o AE",
+                key=f"im_catalogo_nombre_{visita_id}",
+            ).strip()
+            if st.button("Guardar opción para todos los ensayos", key=f"im_catalogo_guardar_{visita_id}"):
+                if not nombre_nuevo:
+                    st.warning("Escribe el nombre de la opción clínica.")
+                elif nombre_nuevo.casefold() in {x.casefold() for x in catalogo.get(categoria_nueva, [])}:
+                    st.info("Esa opción ya está guardada en el catálogo.")
+                elif guardar_item_catalogo_clinico(categoria_nueva, nombre_nuevo):
+                    items.append(_normalizar_entrada_clinica(nombre_nuevo, categoria_nueva))
+                    _guardar_items_unificados(estado, items)
+                    guardar_estado_interfaz_medica(visita_id, estado)
+                    st.rerun()
+                else:
+                    st.error("No se pudo guardar la opción clínica.")
+        with borrar_col:
+            opciones_borrado = [
+                f"{categoria}: {nombre}"
+                for categoria in categorias
+                for nombre in catalogo.get(categoria, [])
+            ]
+            if opciones_borrado:
+                opcion_borrado = st.selectbox(
+                    "Eliminar del catálogo",
+                    options=[""] + opciones_borrado,
+                    key=f"im_catalogo_borrar_sel_{visita_id}",
+                )
+                if st.button("Eliminar opción", key=f"im_catalogo_borrar_{visita_id}") and opcion_borrado:
+                    categoria_borrado, nombre_borrado = opcion_borrado.split(": ", 1)
+                    if borrar_item_catalogo_clinico(categoria_borrado, nombre_borrado):
+                        st.rerun()
+            else:
+                st.caption("Catálogo vacío. Añade la primera opción.")
+
+        for categoria in categorias:
             st.markdown(f"**{categoria}**")
+            nombres_guardados = list(catalogo.get(categoria, []))
+            nombres_en_visita = [
+                str(it.get("nombre", "") or "").strip()
+                for it in items
+                if it.get("categoria") == categoria and str(it.get("nombre", "") or "").strip()
+            ]
+            opciones = _lista_unica_texto(nombres_guardados + nombres_en_visita)
+            if not opciones:
+                st.caption("Sin opciones guardadas")
+                continue
+
+            indices = {
+                f"{it['categoria']}::{it['nombre']}".casefold(): it
+                for it in items
+            }
             cols = st.columns(3)
-            for idx, item in enumerate(opciones):
-                key = f"im_unif_{categoria}_{idx}_{visita_id}"
-                marcado = f"{categoria}::{item}".casefold() in indices
-                if cols[idx % 3].checkbox(item, value=marcado, key=key):
-                    if f"{categoria}::{item}".casefold() not in indices:
-                        items.append(_normalizar_entrada_clinica(item, categoria))
-                elif f"{categoria}::{item}".casefold() in indices:
-                    items = [it for it in items if not (it.get("categoria", "") == categoria and it.get("nombre", "").casefold() == item.casefold())]
+            for idx, nombre_opcion in enumerate(opciones):
+                clave_opcion = f"{categoria}::{nombre_opcion}".casefold()
+                marcado = clave_opcion in indices
+                nuevo_estado = cols[idx % 3].checkbox(
+                    nombre_opcion,
+                    value=marcado,
+                    key=f"im_unif_{categoria}_{idx}_{visita_id}",
+                )
+                if nuevo_estado and not marcado:
+                    items.append(_normalizar_entrada_clinica(nombre_opcion, categoria))
+                elif not nuevo_estado and marcado:
+                    items = [
+                        it for it in items
+                        if not (
+                            it.get("categoria", "") == categoria
+                            and it.get("nombre", "").casefold() == nombre_opcion.casefold()
+                        )
+                    ]
 
         dedup = []
         vistos = set()
