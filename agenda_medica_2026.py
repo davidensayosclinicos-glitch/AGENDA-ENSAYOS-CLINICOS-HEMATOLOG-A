@@ -5116,6 +5116,7 @@ def render_interfaz_medica():
             c["talla"] = d1.text_input("Talla (cm)", value=str(c.get("talla", "")), key=f"im_talla_{visita_id}")
             c["imc"] = d2.text_input("IMC", value=str(c.get("imc", "")), key=f"im_imc_{visita_id}")
             c["superficie_corporal"] = d3.text_input("Superficie corporal", value=str(c.get("superficie_corporal", "")), key=f"im_sc_{visita_id}")
+            guardar_estado_interfaz_medica(visita_id, estado)
     
         if paso == 3:
             st.markdown("#### Comentarios del paciente")
@@ -5165,6 +5166,7 @@ def render_interfaz_medica():
                 index=["", "ECOG 0 - Asintomatico", "ECOG 1 - Restriccion leve", "ECOG 2 - Restriccion moderada", "ECOG 3 - Limitado"].index(str(com.get("estado_general", "")) if str(com.get("estado_general", "")) in ["", "ECOG 0 - Asintomatico", "ECOG 1 - Restriccion leve", "ECOG 2 - Restriccion moderada", "ECOG 3 - Limitado"] else ""),
                 key=f"im_estado_general_{visita_id}",
             )
+            guardar_estado_interfaz_medica(visita_id, estado)
     
         if paso == 4:
             st.markdown("#### Pruebas a realizar")
@@ -5204,6 +5206,7 @@ def render_interfaz_medica():
             )
             for item in pruebas["pruebas"]:
                 st.markdown(f"<div class='im-mini-card im-ok'>{html.escape(item)}</div>", unsafe_allow_html=True)
+            guardar_estado_interfaz_medica(visita_id, estado)
     
         if paso == 5:
             st.markdown("#### Farmacos de estudio")
@@ -5217,6 +5220,7 @@ def render_interfaz_medica():
             far["farmacos"] = [p.strip() for p in far_txt.split("\n") if p.strip()]
             for item in far["farmacos"]:
                 st.markdown(f"<div class='im-mini-card im-ok'>{html.escape(item)}</div>", unsafe_allow_html=True)
+            guardar_estado_interfaz_medica(visita_id, estado)
     
         if paso == 6:
             st.markdown("#### Medicacion concomitante")
@@ -5256,6 +5260,7 @@ def render_interfaz_medica():
             )
             for item in med["medicaciones"]:
                 st.markdown(f"<div class='im-mini-card'>{html.escape(item)}</div>", unsafe_allow_html=True)
+            guardar_estado_interfaz_medica(visita_id, estado)
     
         if paso == 7:
             st.markdown("#### Efectos adversos (AEs)")
@@ -5297,6 +5302,7 @@ def render_interfaz_medica():
                 st.error(f"AEs registrados: {len(ae['eventos'])}")
             else:
                 st.success("Sin AEs registrados")
+            guardar_estado_interfaz_medica(visita_id, estado)
     
         if paso == 8:
             st.markdown("#### Decision de tratamiento")
@@ -5314,6 +5320,7 @@ def render_interfaz_medica():
             )
             dec["accion"] = st.text_input("Accion recomendada", value=str(dec.get("accion", "")), key=f"im_accion_{visita_id}")
             dec["motivo"] = st.text_area("Motivo", value=str(dec.get("motivo", "")), height=55, key=f"im_motivo_{visita_id}")
+            guardar_estado_interfaz_medica(visita_id, estado)
     
         if paso == 9:
             st.markdown("#### Confirmacion")
@@ -5455,16 +5462,13 @@ def render_interfaz_medica():
         components.html(swipe_html, height=0)
     
         # Botones ocultos visualmente pero necesarios para que Streamlit capture el clic
-        nav1, nav2, nav3 = st.columns([1, 1.2, 1])
+        nav1, nav2 = st.columns([1, 1.2])
         if nav1.button("Atras", disabled=(paso <= 1), key=f"im_prev_{visita_id}"):
+            guardar_estado_interfaz_medica(visita_id, estado)
             st.session_state[step_key] = max(1, paso - 1)
             st.rerun()
     
-        if nav2.button("Guardar", type="primary", key=f"im_guardar_{visita_id}"):
-            guardar_estado_interfaz_medica(visita_id, estado)
-            st.success("Interfaz medica guardada.")
-    
-        if nav3.button("Siguiente", disabled=(paso >= len(pasos)), key=f"im_next_{visita_id}"):
+        if nav2.button("Siguiente", disabled=(paso >= len(pasos)), key=f"im_next_{visita_id}"):
             guardar_estado_interfaz_medica(visita_id, estado)
             st.session_state[step_key] = min(len(pasos), paso + 1)
             st.rerun()
