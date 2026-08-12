@@ -5210,11 +5210,24 @@ def render_interfaz_medica():
         ]
 
         medicamentos = [it for it in dedup if it.get("categoria") == "Medicación"]
-        if medicamentos:
-            st.markdown("**Detalle de medicación concomitante**")
-            cabecera = st.columns([1.8, 1.2, 1.2, 1.6, 2.0])
-            for columna, titulo in zip(cabecera, ["Fármaco", "Dosis", "Pauta", "AE", "AE relacionado con medicación de estudio"]):
-                columna.markdown(f"**{titulo}**")
+        st.markdown("**Detalle de medicación concomitante**")
+        cabecera = st.columns([1.8, 1.2, 1.2, 1.6, 2.0])
+        for columna, titulo in zip(cabecera, ["Fármaco", "Dosis", "Pauta", "AE", "AE relacionado con medicación de estudio"]):
+            columna.markdown(f"**{titulo}**")
+
+        if not medicamentos:
+            nuevo_farmaco = st.text_input(
+                "Añadir fármaco",
+                placeholder="Escribe un fármaco concomitante",
+                key=f"im_unif_nuevo_farmaco_{visita_id}",
+            ).strip()
+            if st.button("Añadir fármaco", key=f"im_unif_btn_nuevo_farmaco_{visita_id}"):
+                if nuevo_farmaco:
+                    dedup.append(_normalizar_entrada_clinica(nuevo_farmaco, "Medicación"))
+                    _guardar_items_unificados(estado, dedup)
+                    st.rerun()
+                else:
+                    st.warning("Escribe el nombre del fármaco antes de añadirlo.")
 
         medicamento_idx = 0
         for idx, item in enumerate(dedup):
