@@ -5511,16 +5511,55 @@ def render_interfaz_medica():
             med = estado.get("estado_medicacion_concomitante", {})
             ae = estado.get("estado_aes", {})
             dec = estado.get("estado_decision", {})
+            items_unificados = com.get("items_unificados", [])
+            if not isinstance(items_unificados, list):
+                items_unificados = []
+
+            def resumen_item_clinico(item):
+                nombre = str(item.get("nombre", "") or "").strip()
+                if not nombre:
+                    return ""
+                partes = [nombre]
+                for etiqueta, clave in (("dosis", "dosis"), ("pauta", "pauta"), ("via", "administracion")):
+                    valor = str(item.get(clave, "") or "").strip()
+                    if valor:
+                        partes.append(f"{etiqueta}: {valor}")
+                categoria = str(item.get("categoria", "") or "").strip()
+                if categoria == "Medicación":
+                    relacion = str(item.get("relacion_con", "") or "").strip()
+                    if relacion == "Historia médica":
+                        partes.append(f"historia médica: {item.get('historia_medica') or 'sin especificar'}")
+                    elif relacion == "Efecto adverso":
+                        partes.append(f"AE: {item.get('ae_asociado') or 'sin especificar'}")
+                        partes.append(f"grado: {item.get('grado_ae') or 'sin especificar'}")
+                        partes.append(f"relación con fármacos de estudio: {item.get('relacion_ae') or 'sin especificar'}")
+                if categoria == "Efecto adverso":
+                    partes.append(f"grado: {item.get('grado_ae') or 'sin especificar'}")
+                    partes.append(f"relación con fármacos de estudio: {item.get('relacion_ae') or 'sin especificar'}")
+                return "; ".join(partes)
+
+            resumen_sintomas = "; ".join(
+                resumen_item_clinico(item) for item in items_unificados
+                if isinstance(item, dict) and item.get("categoria") == "Sintoma"
+            ) or (", ".join(com.get("sintomas", [])) if com.get("sintomas") else "No referidos")
+            resumen_medicacion = "; ".join(
+                resumen_item_clinico(item) for item in items_unificados
+                if isinstance(item, dict) and item.get("categoria") == "Medicación"
+            ) or (", ".join(med.get("medicaciones", [])) if med.get("medicaciones") else "No registrada")
+            resumen_aes = "; ".join(
+                resumen_item_clinico(item) for item in items_unificados
+                if isinstance(item, dict) and item.get("categoria") == "Efecto adverso"
+            ) or (", ".join(ae.get("eventos", [])) if ae.get("eventos") else "Sin AEs")
             texto_auto = (
                 f"Ensayo {visita_row.get('ensayo', '')}. Ciclo/Dia {visita_row.get('ciclo', '')}. Fecha {formatear_fecha_visita(visita_row.get('fecha'))}.\n"
                 f"Constantes: TA {c.get('tension_arterial', '-')}, FC {c.get('fc', '-')}, FR {c.get('fr', '-')}, Temp {c.get('temperatura', '-')}, SatO2 {c.get('sat_o2', '-')}.\n"
                 f"Antropometria: Peso {c.get('peso', '-')}, Talla {c.get('talla', '-')}, IMC {c.get('imc', '-')}, SC {c.get('superficie_corporal', '-')}.\n"
-                f"Sintomas: {', '.join(com.get('sintomas', [])) if com.get('sintomas') else 'No referidos'}.\n"
+                f"Sintomas: {resumen_sintomas}.\n"
                 f"Comentario: {com.get('comentario_libre', '') or 'Sin comentarios'}.\n"
                 f"Pruebas: {', '.join(pr.get('pruebas', [])) if pr.get('pruebas') else 'Sin pruebas'}.\n"
                 f"Farmacos estudio: {', '.join(far.get('farmacos', [])) if far.get('farmacos') else 'No registrados'}.\n"
-                f"Medicacion concomitante: {', '.join(med.get('medicaciones', [])) if med.get('medicaciones') else 'No registrada'}.\n"
-                f"AEs: {', '.join(ae.get('eventos', [])) if ae.get('eventos') else 'Sin AEs'}.\n"
+                f"Medicacion concomitante: {resumen_medicacion}.\n"
+                f"AEs: {resumen_aes}.\n"
                 f"Decision: {dec.get('decision', 'Pendiente')}. Accion: {dec.get('accion', '-')}. Motivo: {dec.get('motivo', '-')}."
             )
             if not str(estado.get("nota_clinica", "") or "").strip():
