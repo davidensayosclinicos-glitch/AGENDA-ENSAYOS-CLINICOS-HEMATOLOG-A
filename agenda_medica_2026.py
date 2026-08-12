@@ -4900,11 +4900,9 @@ def render_interfaz_medica():
     pasos = [
         "Resumen de visita",
         "Constantes y parametros",
-        "Comentarios del paciente",
+        "AEs y medicacion concomitante",
         "Pruebas a realizar",
         "Farmacos de estudio",
-        "Medicacion concomitante",
-        "Efectos adversos",
         "Decision de tratamiento",
         "Confirmacion",
         "Historia clinica generada",
@@ -4917,15 +4915,13 @@ def render_interfaz_medica():
     paso = max(1, min(len(pasos), paso))
     st.session_state[step_key] = paso
 
-    iconos = ["R", "V", "C", "P", "F", "M", "AE", "D", "OK", "N", "I"]
+    iconos = ["R", "V", "AE", "P", "F", "D", "OK", "N", "I"]
     iconos_barra = [
         "📋 Resumen",
         "🩺 Constantes",
-        "💬 Síntomas",
+        "⚠️ AEs y medicación",
         "🔬 Pruebas",
         "💊 Fármacos",
-        "🏥 Medicación",
-        "⚠️ AEs",
         "✅ Decisión",
         "🔒 Confirmar",
         "📝 Historia",
@@ -4934,15 +4930,13 @@ def render_interfaz_medica():
     color_paso = {
         1: "#0f4aa6",
         2: "#0f8b5f",
-        3: "#5f3dc4",
+        3: "#c0392b",
         4: "#4f46e5",
         5: "#0f8b5f",
-        6: "#265ea8",
-        7: "#c0392b",
+        6: "#db6a1a",
+        7: "#1f8f62",
         8: "#db6a1a",
-        9: "#1f8f62",
-        10: "#db6a1a",
-        11: "#2f3e63",
+        9: "#2f3e63",
     }
 
     nombre_pac = str(visita_row.get("nombre", "") or "").strip()
@@ -5354,7 +5348,7 @@ def render_interfaz_medica():
     )
 
     # Barra de navegación rápida en 3 filas para evitar cortes de palabras.
-    for fila_inicio, fila_fin in [(0, 4), (4, 8), (8, 11)]:
+    for fila_inicio, fila_fin in [(0, 4), (4, 8), (8, 9)]:
         step_cols = caja_paciente.columns(fila_fin - fila_inicio)
         for si in range(fila_inicio, fila_fin):
             ico_barra = iconos_barra[si]
@@ -5510,14 +5504,6 @@ def render_interfaz_medica():
             guardar_estado_interfaz_medica(visita_id, estado)
     
         if paso == 6:
-            st.info("La información de síntomas, medicación y AEs se gestiona en el bloque unificado del paso anterior.")
-            guardar_estado_interfaz_medica(visita_id, estado)
-
-        if paso == 7:
-            st.info("La información de síntomas, medicación y AEs se gestiona en el bloque unificado del paso anterior.")
-            guardar_estado_interfaz_medica(visita_id, estado)
-    
-        if paso == 8:
             st.markdown("#### Decision de tratamiento")
             dec = estado["estado_decision"]
             opciones_dec = ["Pendiente", "Si administrar", "No administrar"]
@@ -5535,7 +5521,7 @@ def render_interfaz_medica():
             dec["motivo"] = st.text_area("Motivo", value=str(dec.get("motivo", "")), height=55, key=f"im_motivo_{visita_id}")
             guardar_estado_interfaz_medica(visita_id, estado)
     
-        if paso == 9:
+        if paso == 7:
             st.markdown("#### Confirmacion")
             dec = estado["estado_decision"]
             st.markdown(f"<div class='im-mini-card im-ok'>Decision: {html.escape(str(dec.get('decision', 'Pendiente')))}</div>", unsafe_allow_html=True)
@@ -5549,7 +5535,7 @@ def render_interfaz_medica():
             if st.session_state[confirmado_key]:
                 st.info("Decision confirmada y lista para notificar al equipo.")
     
-        if paso == 10:
+        if paso == 8:
             st.markdown("#### Historia clinica generada")
             c = estado.get("estado_constantes", {})
             com = estado.get("estado_comentarios", {})
@@ -5625,7 +5611,7 @@ def render_interfaz_medica():
                 key=f"im_descarga_nota_{visita_id}",
             )
     
-        if paso == 11:
+        if paso == 9:
             st.write("Protocolos, citas y notas en el menu lateral.")
     
         # Swipe usando window.parent.document para acceder a la página real (no el iframe)
