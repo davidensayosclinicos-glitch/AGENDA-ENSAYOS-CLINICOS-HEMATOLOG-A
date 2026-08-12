@@ -5023,6 +5023,8 @@ def render_interfaz_medica():
                 "dosis": str(item.get("dosis", "") or ""),
                 "pauta": str(item.get("pauta", "") or ""),
                 "administracion": str(item.get("administracion", "") or ""),
+                "relacion_con": str(item.get("relacion_con", "") or ""),
+                "historia_medica": str(item.get("historia_medica", "") or ""),
                 "ae_asociado": str(item.get("ae_asociado", "") or ""),
                 "grado_ae": str(item.get("grado_ae", "") or ""),
                 "relacion_ae": str(item.get("relacion_ae", "") or ""),
@@ -5035,6 +5037,8 @@ def render_interfaz_medica():
             "dosis": "",
             "pauta": "",
             "administracion": "",
+            "relacion_con": "",
+            "historia_medica": "",
             "ae_asociado": "",
             "grado_ae": "",
             "relacion_ae": "",
@@ -5091,6 +5095,8 @@ def render_interfaz_medica():
                 "dosis": it.get("dosis", ""),
                 "pauta": it.get("pauta", ""),
                 "administracion": it.get("administracion", ""),
+                "relacion_con": it.get("relacion_con", ""),
+                "historia_medica": it.get("historia_medica", ""),
                 "ae_asociado": it.get("ae_asociado", ""),
                 "grado_ae": it.get("grado_ae", ""),
                 "relacion_ae": it.get("relacion_ae", ""),
@@ -5181,7 +5187,6 @@ def render_interfaz_medica():
                 elif f"{categoria}::{item}".casefold() in indices:
                     items = [it for it in items if not (it.get("categoria", "") == categoria and it.get("nombre", "").casefold() == item.casefold())]
 
-        # eliminar duplicados y guardar toda la informacion detallada
         dedup = []
         vistos = set()
         for it in items:
@@ -5197,6 +5202,8 @@ def render_interfaz_medica():
                 "dosis": str(it.get("dosis", "") or ""),
                 "pauta": str(it.get("pauta", "") or ""),
                 "administracion": str(it.get("administracion", "") or ""),
+                "relacion_con": str(it.get("relacion_con", "") or ""),
+                "historia_medica": str(it.get("historia_medica", "") or ""),
                 "ae_asociado": str(it.get("ae_asociado", "") or ""),
                 "grado_ae": str(it.get("grado_ae", "") or ""),
                 "relacion_ae": str(it.get("relacion_ae", "") or ""),
@@ -5222,25 +5229,59 @@ def render_interfaz_medica():
                     index=["", "VO", "IV", "SC", "IM", "Topica", "Otra"].index(item.get("administracion", "")) if item.get("administracion", "") in ["", "VO", "IV", "SC", "IM", "Topica", "Otra"] else 0,
                     key=f"im_unif_admin_{visita_id}_{idx}",
                 )
-                if categoria in {"Medicación", "Efecto adverso"}:
-                    item["ae_asociado"] = st.selectbox(
-                        "AE asociado",
-                        options=[""] + aes_existentes,
-                        index=( [""] + aes_existentes).index(item.get("ae_asociado", "")) if item.get("ae_asociado", "") in ([""] + aes_existentes) else 0,
-                        key=f"im_unif_ae_{visita_id}_{idx}",
+                if categoria == "Medicación":
+                    item["relacion_con"] = st.selectbox(
+                        "Relacionado con",
+                        options=["", "Historia médica", "Efecto adverso"],
+                        index=["", "Historia médica", "Efecto adverso"].index(item.get("relacion_con", "")) if item.get("relacion_con", "") in ["", "Historia médica", "Efecto adverso"] else 0,
+                        key=f"im_unif_relacion_{visita_id}_{idx}",
                     )
+                    if item["relacion_con"] == "Historia médica":
+                        item["historia_medica"] = st.text_input("Historia médica / motivo", value=item.get("historia_medica", ""), key=f"im_unif_hist_{visita_id}_{idx}")
+                        item["ae_asociado"] = ""
+                        item["grado_ae"] = ""
+                        item["relacion_ae"] = ""
+                    elif item["relacion_con"] == "Efecto adverso":
+                        item["ae_asociado"] = st.selectbox(
+                            "AE asociado",
+                            options=[""] + aes_existentes,
+                            index=( [""] + aes_existentes).index(item.get("ae_asociado", "")) if item.get("ae_asociado", "") in ([""] + aes_existentes) else 0,
+                            key=f"im_unif_ae_med_{visita_id}_{idx}",
+                        )
+                        item["grado_ae"] = st.selectbox(
+                            "Grado del AE",
+                            options=["", "G1", "G2", "G3", "G4", "G5"],
+                            index=["", "G1", "G2", "G3", "G4", "G5"].index(item.get("grado_ae", "")) if item.get("grado_ae", "") in ["", "G1", "G2", "G3", "G4", "G5"] else 0,
+                            key=f"im_unif_grado_med_{visita_id}_{idx}",
+                        )
+                        item["relacion_ae"] = st.selectbox(
+                            "Relación con fármacos de estudio",
+                            options=["", "No relacionada", "Posiblemente relacionada", "Probablemente relacionada", "Relacionada"],
+                            index=["", "No relacionada", "Posiblemente relacionada", "Probablemente relacionada", "Relacionada"].index(item.get("relacion_ae", "")) if item.get("relacion_ae", "") in ["", "No relacionada", "Posiblemente relacionada", "Probablemente relacionada", "Relacionada"] else 0,
+                            key=f"im_unif_rel_med_{visita_id}_{idx}",
+                        )
+                        item["historia_medica"] = ""
+                    else:
+                        item["historia_medica"] = ""
+                        item["ae_asociado"] = ""
+                        item["grado_ae"] = ""
+                        item["relacion_ae"] = ""
+                elif categoria == "Efecto adverso":
                     item["grado_ae"] = st.selectbox(
                         "Grado del AE",
                         options=["", "G1", "G2", "G3", "G4", "G5"],
                         index=["", "G1", "G2", "G3", "G4", "G5"].index(item.get("grado_ae", "")) if item.get("grado_ae", "") in ["", "G1", "G2", "G3", "G4", "G5"] else 0,
-                        key=f"im_unif_grado_{visita_id}_{idx}",
+                        key=f"im_unif_grado_ae_{visita_id}_{idx}",
                     )
                     item["relacion_ae"] = st.selectbox(
                         "Relación con fármacos de estudio",
                         options=["", "No relacionada", "Posiblemente relacionada", "Probablemente relacionada", "Relacionada"],
                         index=["", "No relacionada", "Posiblemente relacionada", "Probablemente relacionada", "Relacionada"].index(item.get("relacion_ae", "")) if item.get("relacion_ae", "") in ["", "No relacionada", "Posiblemente relacionada", "Probablemente relacionada", "Relacionada"] else 0,
-                        key=f"im_unif_rel_{visita_id}_{idx}",
+                        key=f"im_unif_rel_ae_{visita_id}_{idx}",
                     )
+                    item["ae_asociado"] = ""
+                    item["relacion_con"] = ""
+                    item["historia_medica"] = ""
 
         _guardar_items_unificados(estado, dedup)
         return dedup
