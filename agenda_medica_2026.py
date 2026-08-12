@@ -5014,6 +5014,237 @@ def render_interfaz_medica():
         st.caption(f"{len(estado_dict[campo])} seleccionada(s)")
         return estado_dict[campo]
 
+    def _normalizar_entrada_clinica(item, categoria=""):
+        if isinstance(item, dict):
+            nombre = str(item.get("nombre", item.get("texto", "")) or "").strip()
+            return {
+                "nombre": nombre,
+                "categoria": str(item.get("categoria", categoria) or categoria),
+                "dosis": str(item.get("dosis", "") or ""),
+                "pauta": str(item.get("pauta", "") or ""),
+                "administracion": str(item.get("administracion", "") or ""),
+                "ae_asociado": str(item.get("ae_asociado", "") or ""),
+                "grado_ae": str(item.get("grado_ae", "") or ""),
+                "relacion_ae": str(item.get("relacion_ae", "") or ""),
+                "activo": bool(item.get("activo", True)),
+            }
+        nombre = str(item or "").strip()
+        return {
+            "nombre": nombre,
+            "categoria": categoria,
+            "dosis": "",
+            "pauta": "",
+            "administracion": "",
+            "ae_asociado": "",
+            "grado_ae": "",
+            "relacion_ae": "",
+            "activo": bool(nombre),
+        }
+
+    def _items_unificados_desde_estado(estado):
+        com = estado.get("estado_comentarios", {}) if isinstance(estado.get("estado_comentarios", {}), dict) else {}
+        med = estado.get("estado_medicacion_concomitante", {}) if isinstance(estado.get("estado_medicacion_concomitante", {}), dict) else {}
+        ae = estado.get("estado_aes", {}) if isinstance(estado.get("estado_aes", {}), dict) else {}
+
+        salida = []
+        for categoria, campo in [("Sintoma", com.get("sintomas", [])), ("Medicación", med.get("medicaciones", [])), ("Efecto adverso", ae.get("eventos", []))]:
+            for item in campo or []:
+                salida.append(_normalizar_entrada_clinica(item, categoria))
+
+        unificados = com.get("items_unificados", []) if isinstance(com.get("items_unificados", []), list) else []
+        for item in unificados:
+            norm = _normalizar_entrada_clinica(item)
+            if norm["nombre"] and not any(it["nombre"].casefold() == norm["nombre"].casefold() and it["categoria"] == norm["categoria"] for it in salida):
+                salida.append(norm)
+
+        return salida
+
+    def _guardar_items_unificados(estado, items):
+        com = estado.setdefault("estado_comentarios", {})
+        med = estado.setdefault("estado_medicacion_concomitante", {})
+        ae = estado.setdefault("estado_aes", {})
+
+        cats = {"Sintoma": "sintomas", "Medicación": "medicaciones", "Efecto adverso": "eventos"}
+        for cat, key in cats.items():
+            target = com if key == "sintomas" else med if key == "medicaciones" else ae
+            target[key] = []
+
+        for item in items:
+            nombre = str(item.get("nombre", "") or "").strip()
+            if not nombre:
+                continue
+            categoria = str(item.get("categoria", "") or "")
+            if categoria == "Sintoma":
+                com.setdefault("sintomas", []).append(nombre)
+            elif categoria == "Medicación":
+                med.setdefault("medicaciones", []).append(nombre)
+            elif categoria == "Efecto adverso":
+                ae.setdefault("eventos", []).append(nombre)
+
+        com["sintomas"] = _lista_unica_texto(com.get("sintomas", []))
+        med["medicaciones"] = _lista_unica_texto(med.get("medicaciones", []))
+        ae["eventos"] = _lista_unica_texto(ae.get("eventos", []))
+        com["items_unificados"] = [
+            {
+                "nombre": it.get("nombre", ""),
+                "categoria": it.get("categoria", ""),
+                "dosis": it.get("dosis", ""),
+                "pauta": it.get("pauta", ""),
+                "administracion": it.get("administracion", ""),
+                "ae_asociado": it.get("ae_asociado", ""),
+                "grado_ae": it.get("grado_ae", ""),
+                "relacion_ae": it.get("relacion_ae", ""),
+            }
+            for it in items if str(it.get("nombre", "") or "").strip()
+        ]
+        return estado
+
+    def _render_unificado_clinico(estado, visita_id):
+        categorias = {
+            "Sintoma": [
+                "Astenia/fatiga",
+                "Dolor oseo",
+                "Dolor neuropatico",
+                "Fiebre",
+                "Disnea",
+                "Tos",
+                "Nauseas",
+                "Diarrea",
+                "Estrenimiento",
+                "Perdida de apetito",
+                "Edema",
+                "Sangrado/moretones",
+                "Prurito",
+                "Mucositis",
+                "Infecciones respiratorias",
+                "Mareo",
+                "Perdida de peso",
+                "Dolor abdominal",
+                "Cefalea",
+                "Insomnio",
+            ],
+            "Medicación": [
+                "Aciclovir profilaxis",
+                "Cotrimoxazol profilaxis",
+                "Omeprazol",
+                "Alopurinol",
+                "Ondansetron",
+                "Paracetamol",
+                "Loperamida",
+                "Calcio + vitamina D",
+                "Bifosfonato (zoledronato)",
+                "Heparina profilactica",
+                "Levofloxacino profilaxis",
+                "Fluconazol profilaxis",
+                "G-CSF",
+                "Eritropoyetina",
+                "Morfina rescate",
+                "Gabapentina",
+                "AAS",
+                "DOAC",
+                "IECA/ARA-II",
+                "Insulina",
+            ],
+            "Efecto adverso": [
+                "Neutropenia G1-2",
+                "Neutropenia G3-4",
+                "Anemia G1-2",
+                "Trombocitopenia G1-2",
+                "Neuropatia periferica G1-2",
+                "Nauseas/vomitos G1-2",
+                "Diarrea G1-2",
+                "Infeccion respiratoria",
+                "Mucositis oral",
+                "Fatiga intensa",
+                "Fiebre neutropenica",
+                "Trombosis venosa",
+                "Rash cutaneo",
+                "Toxicidad hepatica",
+                "Toxicidad renal",
+                "Reaccion infusion",
+                "Hipocalcemia",
+                "Hiperglucemia por corticoides",
+            ],
+        }
+
+        items = _items_unificados_desde_estado(estado)
+        indices = {f"{it['categoria']}::{it['nombre']}".casefold(): it for it in items}
+        for categoria, opciones in categorias.items():
+            st.markdown(f"**{categoria}**")
+            cols = st.columns(3)
+            for idx, item in enumerate(opciones):
+                key = f"im_unif_{categoria}_{idx}_{visita_id}"
+                marcado = f"{categoria}::{item}".casefold() in indices
+                if cols[idx % 3].checkbox(item, value=marcado, key=key):
+                    if f"{categoria}::{item}".casefold() not in indices:
+                        items.append(_normalizar_entrada_clinica(item, categoria))
+                elif f"{categoria}::{item}".casefold() in indices:
+                    items = [it for it in items if not (it.get("categoria", "") == categoria and it.get("nombre", "").casefold() == item.casefold())]
+
+        # eliminar duplicados y guardar toda la informacion detallada
+        dedup = []
+        vistos = set()
+        for it in items:
+            nombre = str(it.get("nombre", "") or "").strip()
+            categoria = str(it.get("categoria", "") or "")
+            clave = f"{categoria}::{nombre}".casefold()
+            if not nombre or clave in vistos:
+                continue
+            vistos.add(clave)
+            dedup.append({
+                "nombre": nombre,
+                "categoria": categoria,
+                "dosis": str(it.get("dosis", "") or ""),
+                "pauta": str(it.get("pauta", "") or ""),
+                "administracion": str(it.get("administracion", "") or ""),
+                "ae_asociado": str(it.get("ae_asociado", "") or ""),
+                "grado_ae": str(it.get("grado_ae", "") or ""),
+                "relacion_ae": str(it.get("relacion_ae", "") or ""),
+            })
+
+        aes_existentes = [
+            str(it.get("nombre", "") or "")
+            for it in dedup
+            if it.get("categoria") == "Efecto adverso" and str(it.get("nombre", "") or "").strip()
+        ]
+
+        for idx, item in enumerate(dedup):
+            nombre = item["nombre"]
+            categoria = item["categoria"]
+            if not nombre:
+                continue
+            with st.expander(f"{categoria}: {nombre}", expanded=False):
+                item["dosis"] = st.text_input("Dosis", value=item.get("dosis", ""), key=f"im_unif_dosis_{visita_id}_{idx}")
+                item["pauta"] = st.text_input("Pauta", value=item.get("pauta", ""), key=f"im_unif_pauta_{visita_id}_{idx}")
+                item["administracion"] = st.selectbox(
+                    "Administración",
+                    options=["", "VO", "IV", "SC", "IM", "Topica", "Otra"],
+                    index=["", "VO", "IV", "SC", "IM", "Topica", "Otra"].index(item.get("administracion", "")) if item.get("administracion", "") in ["", "VO", "IV", "SC", "IM", "Topica", "Otra"] else 0,
+                    key=f"im_unif_admin_{visita_id}_{idx}",
+                )
+                if categoria in {"Medicación", "Efecto adverso"}:
+                    item["ae_asociado"] = st.selectbox(
+                        "AE asociado",
+                        options=[""] + aes_existentes,
+                        index=( [""] + aes_existentes).index(item.get("ae_asociado", "")) if item.get("ae_asociado", "") in ([""] + aes_existentes) else 0,
+                        key=f"im_unif_ae_{visita_id}_{idx}",
+                    )
+                    item["grado_ae"] = st.selectbox(
+                        "Grado del AE",
+                        options=["", "G1", "G2", "G3", "G4", "G5"],
+                        index=["", "G1", "G2", "G3", "G4", "G5"].index(item.get("grado_ae", "")) if item.get("grado_ae", "") in ["", "G1", "G2", "G3", "G4", "G5"] else 0,
+                        key=f"im_unif_grado_{visita_id}_{idx}",
+                    )
+                    item["relacion_ae"] = st.selectbox(
+                        "Relación con fármacos de estudio",
+                        options=["", "No relacionada", "Posiblemente relacionada", "Probablemente relacionada", "Relacionada"],
+                        index=["", "No relacionada", "Posiblemente relacionada", "Probablemente relacionada", "Relacionada"].index(item.get("relacion_ae", "")) if item.get("relacion_ae", "") in ["", "No relacionada", "Posiblemente relacionada", "Probablemente relacionada", "Relacionada"] else 0,
+                        key=f"im_unif_rel_{visita_id}_{idx}",
+                    )
+
+        _guardar_items_unificados(estado, dedup)
+        return dedup
+
     caja_paciente = panel_izq.container(border=True)
     caja_paciente.markdown("<div class='im-box-picked-marker'></div>", unsafe_allow_html=True)
 
@@ -5119,41 +5350,8 @@ def render_interfaz_medica():
             guardar_estado_interfaz_medica(visita_id, estado)
     
         if paso == 3:
-            st.markdown("#### Comentarios del paciente")
-            sintomas_base = [
-                "Astenia/fatiga",
-                "Dolor oseo",
-                "Dolor neuropatico",
-                "Fiebre",
-                "Disnea",
-                "Tos",
-                "Nauseas",
-                "Diarrea",
-                "Estrenimiento",
-                "Perdida de apetito",
-                "Edema",
-                "Sangrado/moretones",
-            ]
-            sintomas_extra = [
-                "Prurito",
-                "Mucositis",
-                "Infecciones respiratorias",
-                "Mareo",
-                "Perdida de peso",
-                "Dolor abdominal",
-                "Cefalea",
-                "Insomnio",
-            ]
+            st.markdown("#### Sintomas, medicacion y AEs")
             com = estado["estado_comentarios"]
-            com["sintomas"] = _render_checklist_onoff(
-                "Sintomas referidos",
-                com,
-                "sintomas",
-                sintomas_base,
-                sintomas_extra,
-                "sintomas",
-                columnas=4,
-            )
             com["comentario_libre"] = st.text_area(
                 "Comentario libre",
                 value=str(com.get("comentario_libre", "")),
@@ -5166,6 +5364,7 @@ def render_interfaz_medica():
                 index=["", "ECOG 0 - Asintomatico", "ECOG 1 - Restriccion leve", "ECOG 2 - Restriccion moderada", "ECOG 3 - Limitado"].index(str(com.get("estado_general", "")) if str(com.get("estado_general", "")) in ["", "ECOG 0 - Asintomatico", "ECOG 1 - Restriccion leve", "ECOG 2 - Restriccion moderada", "ECOG 3 - Limitado"] else ""),
                 key=f"im_estado_general_{visita_id}",
             )
+            _render_unificado_clinico(estado, visita_id)
             guardar_estado_interfaz_medica(visita_id, estado)
     
         if paso == 4:
@@ -5209,10 +5408,10 @@ def render_interfaz_medica():
             guardar_estado_interfaz_medica(visita_id, estado)
     
         if paso == 5:
-            st.markdown("#### Farmacos de estudio")
+            st.markdown("#### Fármacos de estudio")
             far = estado["estado_farmacos_estudio"]
             far_txt = st.text_area(
-                "Farmacos (una linea por farmaco con dosis)",
+                "Fármacos del estudio (una línea por fármaco)",
                 value="\n".join(far.get("farmacos", [])),
                 height=78,
                 key=f"im_farmacos_{visita_id}",
@@ -5223,85 +5422,11 @@ def render_interfaz_medica():
             guardar_estado_interfaz_medica(visita_id, estado)
     
         if paso == 6:
-            st.markdown("#### Medicacion concomitante")
-            med = estado["estado_medicacion_concomitante"]
-            med_base = [
-                "Aciclovir profilaxis",
-                "Cotrimoxazol profilaxis",
-                "Omeprazol",
-                "Alopurinol",
-                "Ondansetron",
-                "Paracetamol",
-                "Loperamida",
-                "Calcio + vitamina D",
-                "Bifosfonato (zoledronato)",
-                "Heparina profilactica",
-            ]
-            med_extra = [
-                "Levofloxacino profilaxis",
-                "Fluconazol profilaxis",
-                "G-CSF",
-                "Eritropoyetina",
-                "Morfina rescate",
-                "Gabapentina",
-                "AAS",
-                "DOAC",
-                "IECA/ARA-II",
-                "Insulina",
-            ]
-            med["medicaciones"] = _render_checklist_onoff(
-                "Medicacion concomitante",
-                med,
-                "medicaciones",
-                med_base,
-                med_extra,
-                "concom",
-                columnas=3,
-            )
-            for item in med["medicaciones"]:
-                st.markdown(f"<div class='im-mini-card'>{html.escape(item)}</div>", unsafe_allow_html=True)
+            st.info("La información de síntomas, medicación y AEs se gestiona en el bloque unificado del paso anterior.")
             guardar_estado_interfaz_medica(visita_id, estado)
-    
+
         if paso == 7:
-            st.markdown("#### Efectos adversos (AEs)")
-            ae = estado["estado_aes"]
-            ae_base = [
-                "Neutropenia G1-2",
-                "Neutropenia G3-4",
-                "Anemia G1-2",
-                "Trombocitopenia G1-2",
-                "Neuropatia periferica G1-2",
-                "Nauseas/vomitos G1-2",
-                "Diarrea G1-2",
-                "Infeccion respiratoria",
-                "Mucositis oral",
-                "Fatiga intensa",
-            ]
-            ae_extra = [
-                "Fiebre neutropenica",
-                "Trombosis venosa",
-                "Rash cutaneo",
-                "Toxicidad hepatica",
-                "Toxicidad renal",
-                "Reaccion infusion",
-                "Hipocalcemia",
-                "Hiperglucemia por corticoides",
-            ]
-            ae["eventos"] = _render_checklist_onoff(
-                "AEs detectados",
-                ae,
-                "eventos",
-                ae_base,
-                ae_extra,
-                "aes",
-                columnas=3,
-            )
-            if ae["eventos"]:
-                for item in ae["eventos"]:
-                    st.markdown(f"<div class='im-mini-card im-danger'>{html.escape(item)}</div>", unsafe_allow_html=True)
-                st.error(f"AEs registrados: {len(ae['eventos'])}")
-            else:
-                st.success("Sin AEs registrados")
+            st.info("La información de síntomas, medicación y AEs se gestiona en el bloque unificado del paso anterior.")
             guardar_estado_interfaz_medica(visita_id, estado)
     
         if paso == 8:
