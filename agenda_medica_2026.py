@@ -5215,10 +5215,57 @@ def render_interfaz_medica():
             if it.get("categoria") == "Efecto adverso" and str(it.get("nombre", "") or "").strip()
         ]
 
+        medicamentos = [it for it in dedup if it.get("categoria") == "Medicación"]
+        if medicamentos:
+            st.markdown("**Detalle de medicación concomitante**")
+            cabecera = st.columns([1.8, 1.2, 1.2, 1.6, 2.0])
+            for columna, titulo in zip(cabecera, ["Fármaco", "Dosis", "Pauta", "AE", "AE relacionado con medicación de estudio"]):
+                columna.markdown(f"**{titulo}**")
+
+        medicamento_idx = 0
         for idx, item in enumerate(dedup):
             nombre = item["nombre"]
             categoria = item["categoria"]
             if not nombre:
+                continue
+            if categoria == "Medicación":
+                fila = st.columns([1.8, 1.2, 1.2, 1.6, 2.0])
+                fila[0].markdown(f"**{html.escape(nombre)}**")
+                item["dosis"] = fila[1].text_input(
+                    "Dosis",
+                    value=item.get("dosis", ""),
+                    key=f"im_unif_dosis_linea_{visita_id}_{medicamento_idx}",
+                    label_visibility="collapsed",
+                )
+                item["pauta"] = fila[2].text_input(
+                    "Pauta",
+                    value=item.get("pauta", ""),
+                    key=f"im_unif_pauta_linea_{visita_id}_{medicamento_idx}",
+                    label_visibility="collapsed",
+                )
+                item["relacion_con"] = "Efecto adverso" if item.get("ae_asociado") else item.get("relacion_con", "")
+                item["ae_asociado"] = fila[3].selectbox(
+                    "AE",
+                    options=[""] + aes_existentes,
+                    index=( [""] + aes_existentes).index(item.get("ae_asociado", "")) if item.get("ae_asociado", "") in ([""] + aes_existentes) else 0,
+                    key=f"im_unif_ae_linea_{visita_id}_{medicamento_idx}",
+                    label_visibility="collapsed",
+                )
+                item["relacion_ae"] = fila[4].selectbox(
+                    "AE relacionado con medicación de estudio",
+                    options=["", "No relacionada", "Posiblemente relacionada", "Probablemente relacionada", "Relacionada"],
+                    index=["", "No relacionada", "Posiblemente relacionada", "Probablemente relacionada", "Relacionada"].index(item.get("relacion_ae", "")) if item.get("relacion_ae", "") in ["", "No relacionada", "Posiblemente relacionada", "Probablemente relacionada", "Relacionada"] else 0,
+                    key=f"im_unif_rel_linea_{visita_id}_{medicamento_idx}",
+                    label_visibility="collapsed",
+                )
+                if item.get("ae_asociado"):
+                    item["grado_ae"] = st.selectbox(
+                        f"Grado del AE de {nombre}",
+                        options=["", "G1", "G2", "G3", "G4", "G5"],
+                        index=["", "G1", "G2", "G3", "G4", "G5"].index(item.get("grado_ae", "")) if item.get("grado_ae", "") in ["", "G1", "G2", "G3", "G4", "G5"] else 0,
+                        key=f"im_unif_grado_linea_{visita_id}_{medicamento_idx}",
+                    )
+                medicamento_idx += 1
                 continue
             with st.expander(f"{categoria}: {nombre}", expanded=False):
                 item["dosis"] = st.text_input("Dosis", value=item.get("dosis", ""), key=f"im_unif_dosis_{visita_id}_{idx}")
