@@ -1860,6 +1860,56 @@ def _lista_unica(items):
     return salida
 
 
+def _agrupar_items_por_categoria(items):
+    agrupado = {
+        "Sintoma": [],
+        "Medicación": [],
+    }
+    for item in items or []:
+        if isinstance(item, dict):
+            nombre = str(item.get("nombre", "") or "").strip()
+            categoria = str(item.get("categoria", "") or "").strip()
+            payload = {
+                "nombre": nombre,
+                "categoria": categoria,
+                "dosis": str(item.get("dosis", "") or ""),
+                "pauta": str(item.get("pauta", "") or ""),
+                "administracion": str(item.get("administracion", "") or ""),
+                "relacion_con": str(item.get("relacion_con", "") or ""),
+                "historia_medica": str(item.get("historia_medica", "") or ""),
+                "ae_asociado": str(item.get("ae_asociado", "") or ""),
+                "grado_ae": str(item.get("grado_ae", "") or ""),
+                "relacion_ae": str(item.get("relacion_ae", "") or ""),
+            }
+        else:
+            nombre = str(item or "").strip()
+            categoria = ""
+            payload = {"nombre": nombre, "categoria": ""}
+
+        if not nombre:
+            continue
+
+        clave = nombre.casefold()
+        lower = categoria.casefold()
+
+        if "medic" in clave or "farmaco" in clave or "fármaco" in clave:
+            categoria = "Medicación"
+        elif "ae" in clave or "efecto adverso" in clave or "adverse" in clave or "nause" in clave or "vomit" in clave:
+            categoria = "Sintoma"
+        elif lower.startswith("sint") or lower.startswith("symptom"):
+            categoria = "Sintoma"
+        elif lower.startswith("efecto adverso") or "ae" in lower:
+            categoria = "Sintoma"
+        else:
+            categoria = "Sintoma"
+
+        if categoria not in agrupado:
+            categoria = "Sintoma"
+
+        agrupado.setdefault(categoria, []).append(payload)
+    return agrupado
+
+
 def _estado_base_interfaz_medica(visita_row):
     otras = _normalizar_lista_texto(visita_row.get("otras_pruebas", ""))
     if bool(visita_row.get("medula")):
@@ -3152,7 +3202,7 @@ def get_catalogo_clinico():
     finally:
         conn.close()
 
-    catalogo = {"Sintoma": [], "Medicación": [], "Efecto adverso": []}
+    catalogo = {"Sintoma": [], "Medicación": []}
     for categoria, nombre in filas:
         categoria_txt = str(categoria or "").strip()
         nombre_txt = normalizar_texto_campo(nombre)
@@ -3164,7 +3214,7 @@ def get_catalogo_clinico():
 def guardar_item_catalogo_clinico(categoria, nombre):
     categoria = str(categoria or "").strip()
     nombre = normalizar_texto_campo(nombre)
-    if categoria not in {"Sintoma", "Medicación", "Efecto adverso"} or not nombre:
+    if categoria not in {"Sintoma", "Medicación"} or not nombre:
         return False
 
     conn = connect_db()
@@ -5136,9 +5186,12 @@ def render_interfaz_medica():
         ae = estado.get("estado_aes", {}) if isinstance(estado.get("estado_aes", {}), dict) else {}
 
         salida = []
-        for categoria, campo in [("Sintoma", com.get("sintomas", [])), ("Medicación", med.get("medicaciones", [])), ("Efecto adverso", ae.get("eventos", []))]:
+        for categoria, campo in [("Sintoma", com.get("sintomas", [])), ("Medicación", med.get("medicaciones", []))]:
             for item in campo or []:
                 salida.append(_normalizar_entrada_clinica(item, categoria))
+
+        for item in ae.get("eventos", []) or []:
+            salida.append(_normalizar_entrada_clinica(item, "Sintoma"))
 
         unificados = com.get("items_unificados", []) if isinstance(com.get("items_unificados", []), list) else []
         for item in unificados:
@@ -5153,22 +5206,29 @@ def render_interfaz_medica():
         med = estado.setdefault("estado_medicacion_concomitante", {})
         ae = estado.setdefault("estado_aes", {})
 
-        cats = {"Sintoma": "sintomas", "Medicación": "medicaciones", "Efecto adverso": "eventos"}
-        for cat, key in cats.items():
-            target = com if key == "sintomas" else med if key == "medicaciones" else ae
-            target[key] = []
+        com["sintomas"] = []
+        med["medicaciones"] = []
+        ae["eventos"] = []
 
-        for item in items:
-            nombre = str(item.get("nombre", "") or "").strip()
+        for item in items or []:
+            if isinstance(item, dict):
+                nombre = str(item.get("nombre", "") or "").strip()
+                categoria = str(item.get("categoria", "") or "").strip()
+            else:
+                nombre = str(item or "").strip()
+                categoria = ""
+
             if not nombre:
                 continue
-            categoria = str(item.get("categoria", "") or "")
-            if categoria == "Sintoma":
-                com.setdefault("sintomas", []).append(nombre)
-            elif categoria == "Medicación":
-                med.setdefault("medicaciones", []).append(nombre)
-            elif categoria == "Efecto adverso":
-                ae.setdefault("eventos", []).append(nombre)
+
+            clave = nombre.casefold()
+            lower = categoria.casefold()
+            if "medic" in clave or "farmaco" in clave or "fármaco" in clave or lower.startswith("medic"):
+                med["medicaciones"] = _lista_unica_texto(med.get("medicaciones", []) + [nombre])
+            elif "ae" in clave or "efecto adverso" in clave or "adverse" in clave or "nause" in clave or "vomit" in clave or lower.startswith("efecto adverso") or "ae" in lower:
+                ae["eventos"] = _lista_unica_texto(ae.get("eventos", []) + [nombre])
+            else:
+                com["sintomas"] = _lista_unica_texto(com.get("sintomas", []) + [nombre])
 
         com["sintomas"] = _lista_unica_texto(com.get("sintomas", []))
         med["medicaciones"] = _lista_unica_texto(med.get("medicaciones", []))
@@ -5191,7 +5251,7 @@ def render_interfaz_medica():
         return estado
 
     def _render_unificado_clinico(estado, visita_id):
-        categorias = ["Sintoma", "Medicación", "Efecto adverso"]
+        categorias = ["Sintoma", "Medicación"]
         catalogo = get_catalogo_clinico()
         items = _items_unificados_desde_estado(estado)
 
@@ -5301,7 +5361,7 @@ def render_interfaz_medica():
         aes_existentes = [
             str(it.get("nombre", "") or "")
             for it in dedup
-            if it.get("categoria") == "Efecto adverso" and str(it.get("nombre", "") or "").strip()
+            if it.get("categoria") in {"Sintoma", "Efecto adverso"} and str(it.get("nombre", "") or "").strip()
         ]
 
         medicamentos = [it for it in dedup if it.get("categoria") == "Medicación"]
@@ -5415,7 +5475,7 @@ def render_interfaz_medica():
                         item["ae_asociado"] = ""
                         item["grado_ae"] = ""
                         item["relacion_ae"] = ""
-                elif categoria == "Efecto adverso":
+                elif categoria in {"Sintoma", "Efecto adverso"}:
                     item["grado_ae"] = st.selectbox(
                         "Grado del AE",
                         options=["", "G1", "G2", "G3", "G4", "G5"],
@@ -5674,14 +5734,14 @@ def render_interfaz_medica():
                         partes.append(f"AE: {item.get('ae_asociado') or 'sin especificar'}")
                         partes.append(f"grado: {item.get('grado_ae') or 'sin especificar'}")
                         partes.append(f"relación con fármacos de estudio: {item.get('relacion_ae') or 'sin especificar'}")
-                if categoria == "Efecto adverso":
+                if categoria in {"Sintoma", "Efecto adverso"}:
                     partes.append(f"grado: {item.get('grado_ae') or 'sin especificar'}")
                     partes.append(f"relación con fármacos de estudio: {item.get('relacion_ae') or 'sin especificar'}")
                 return "; ".join(partes)
 
             resumen_sintomas = "; ".join(
                 resumen_item_clinico(item) for item in items_unificados
-                if isinstance(item, dict) and item.get("categoria") == "Sintoma"
+                if isinstance(item, dict) and item.get("categoria") in {"Sintoma", "Efecto adverso"}
             ) or (", ".join(com.get("sintomas", [])) if com.get("sintomas") else "No referidos")
             resumen_medicacion = "; ".join(
                 resumen_item_clinico(item) for item in items_unificados

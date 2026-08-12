@@ -3,7 +3,7 @@ from datetime import date
 
 import pandas as pd
 
-from agenda_medica_2026 import _aplicar_ocultacion_visitas_medicas
+from agenda_medica_2026 import _agrupar_items_por_categoria, _aplicar_ocultacion_visitas_medicas
 
 
 class AgendaMedicaVisibilityTests(unittest.TestCase):
@@ -19,6 +19,19 @@ class AgendaMedicaVisibilityTests(unittest.TestCase):
         resultado = _aplicar_ocultacion_visitas_medicas(df, date(2026, 8, 11))
 
         self.assertEqual(list(resultado["id"]), [2])
+
+    def test_sintomas_y_aes_comparten_la_misma_estructura(self):
+        items = [
+            {"nombre": "Dolor abdominal", "categoria": "Sintoma"},
+            {"nombre": "Náuseas", "categoria": "Efecto adverso"},
+            {"nombre": "Aspirina", "categoria": "Medicación"},
+        ]
+
+        agrupado = _agrupar_items_por_categoria(items)
+
+        self.assertEqual([i["nombre"] for i in agrupado["Sintoma"]], ["Dolor abdominal", "Náuseas"])
+        self.assertEqual([i["nombre"] for i in agrupado["Medicación"]], ["Aspirina"])
+        self.assertNotIn("Efecto adverso", agrupado)
 
 
 if __name__ == "__main__":
