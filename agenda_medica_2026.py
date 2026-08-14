@@ -5542,8 +5542,14 @@ def render_interfaz_medica():
         aes_dedup = [it for it in dedup if it.get("categoria") == "Sintoma"]
         aes_activos = [it for it in aes_dedup if it.get("activo", True)]
 
-        tab_registro, tab_historico, tab_medicacion = st.tabs(["Registro", "Histórico", "Medicación"])
-        with tab_registro:
+        vista_ae = st.radio(
+            "Vista de AEs",
+            ["Registro", "Histórico", "Medicación"],
+            horizontal=True,
+            key=f"im_ae_vista_{visita_id}",
+            label_visibility="collapsed",
+        )
+        if vista_ae == "Registro":
             st.markdown("**AEs activos**")
             if not aes_activos:
                 st.caption("No hay AEs activos.")
@@ -5566,7 +5572,7 @@ def render_interfaz_medica():
                         st.session_state[pending_edit_key] = it["nombre"]
                         st.rerun()
 
-        with tab_historico:
+        elif vista_ae == "Histórico":
             if not aes_dedup:
                 st.caption("Sin registros todavía.")
             else:
@@ -5586,7 +5592,7 @@ def render_interfaz_medica():
                 ])
                 st.dataframe(df_historico_aes, use_container_width=True, hide_index=True)
 
-        with tab_medicacion:
+        else:
             st.markdown("**Medicación relacionada**")
             st.caption("Tratamientos de AEs y medicación del historial clínico.")
             if st.button("+ Añadir medicación", key=f"im_med_add_{visita_id}"):
