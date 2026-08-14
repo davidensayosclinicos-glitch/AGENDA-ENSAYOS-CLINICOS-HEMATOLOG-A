@@ -5152,6 +5152,16 @@ def render_interfaz_medica():
     def _normalizar_entrada_clinica(item, categoria=""):
         if isinstance(item, dict):
             nombre = str(item.get("nombre", item.get("texto", "")) or "").strip()
+            medicaciones_raw = item.get("medicaciones", []) or []
+            medicaciones = [
+                {
+                    "nombre": str(m.get("nombre", "") or ""),
+                    "dosis": str(m.get("dosis", "") or ""),
+                    "pauta": str(m.get("pauta", "") or ""),
+                    "ruta": str(m.get("ruta", "") or ""),
+                }
+                for m in medicaciones_raw if isinstance(m, dict)
+            ]
             return {
                 "nombre": nombre,
                 "categoria": str(item.get("categoria", categoria) or categoria),
@@ -5164,6 +5174,9 @@ def render_interfaz_medica():
                 "grado_ae": str(item.get("grado_ae", "") or ""),
                 "relacion_ae": str(item.get("relacion_ae", "") or ""),
                 "activo": bool(item.get("activo", True)),
+                "medicaciones": medicaciones,
+                "fecha_inicio": str(item.get("fecha_inicio", "") or ""),
+                "fecha_fin": str(item.get("fecha_fin", "") or ""),
             }
         nombre = str(item or "").strip()
         return {
@@ -5178,6 +5191,9 @@ def render_interfaz_medica():
             "grado_ae": "",
             "relacion_ae": "",
             "activo": bool(nombre),
+            "medicaciones": [],
+            "fecha_inicio": "",
+            "fecha_fin": "",
         }
 
     def _items_unificados_desde_estado(estado):
@@ -5245,6 +5261,18 @@ def render_interfaz_medica():
                 "ae_asociado": it.get("ae_asociado", ""),
                 "grado_ae": it.get("grado_ae", ""),
                 "relacion_ae": it.get("relacion_ae", ""),
+                "activo": bool(it.get("activo", True)),
+                "medicaciones": [
+                    {
+                        "nombre": m.get("nombre", ""),
+                        "dosis": m.get("dosis", ""),
+                        "pauta": m.get("pauta", ""),
+                        "ruta": m.get("ruta", ""),
+                    }
+                    for m in (it.get("medicaciones", []) or [])
+                ],
+                "fecha_inicio": it.get("fecha_inicio", ""),
+                "fecha_fin": it.get("fecha_fin", ""),
             }
             for it in items if str(it.get("nombre", "") or "").strip()
         ]
@@ -5299,6 +5327,31 @@ def render_interfaz_medica():
             else:
                 st.caption("Catálogo vacío. Añade la primera opción.")
 
+        st.markdown(
+            """
+            <style>
+                div[data-testid="stToggle"] {
+                    border: 1px solid #e5e7eb; border-radius: 10px;
+                    padding: 8px 12px; background: #fafafa; transition: all .12s ease;
+                }
+                div[data-testid="stToggle"]:has(input:checked) { border-color: #86efac; background: #f0fdf4; }
+                div[data-testid="stToggle"] label p { font-weight: 500; color: #374151; font-size: 0.92rem; }
+                div[data-testid="stToggle"]:has(input:checked) label p { color: #15803d; }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        grados_ctcae = ["G1", "G2", "G3", "G4", "G5"]
+        pending_edit_key = f"im_ae_pending_edit_{visita_id}"
+        pending_off_key = f"im_ae_pending_off_{visita_id}"
+        st.session_state.setdefault(pending_edit_key, None)
+        st.session_state.setdefault(pending_off_key, None)
+
+        def _guardar_ahora(lista_items):
+            _guardar_items_unificados(estado, lista_items)
+            guardar_estado_interfaz_medica(visita_id, estado)
+
         for categoria in categorias:
             st.markdown(f"**{categoria}**")
             nombres_guardados = list(catalogo.get(categoria, []))
@@ -5316,6 +5369,32 @@ def render_interfaz_medica():
                 f"{it['categoria']}::{it['nombre']}".casefold(): it
                 for it in items
             }
+
+            if categoria == "Sintoma":
+                n_cols = 4
+                filas_chip = [opciones[i:i + n_cols] for i in range(0, len(opciones), n_cols)]
+                for fila_chip in filas_chip:
+                    cols_chip = st.columns(n_cols)
+                    for col_chip, nombre_opcion in zip(cols_chip, fila_chip):
+                        clave_opcion = f"{categoria}::{nombre_opcion}".casefold()
+                        marcado = clave_opcion in indices
+                        with col_chip:
+                            nuevo_estado = st.toggle(
+                                nombre_opcion,
+                                value=marcado,
+                                key=f"im_ae_toggle_{visita_id}_{nombre_opcion}",
+                            )
+                        if nuevo_estado and not marcado:
+                            nuevo_item = _normalizar_entrada_clinica(nombre_opcion, categoria)
+                            nuevo_item["activo"] = True
+                            nuevo_item["fecha_inicio"] = datetime.now().strftime("%d/%m/%Y %H:%M")
+                            nuevo_item["fecha_fin"] = ""
+                            items.append(nuevo_item)
+                            st.session_state[pending_edit_key] = nombre_opcion
+                        elif not nuevo_estado and marcado:
+                            st.session_state[pending_off_key] = nombre_opcion
+                continue
+
             cols = st.columns(3)
             for idx, nombre_opcion in enumerate(opciones):
                 clave_opcion = f"{categoria}::{nombre_opcion}".casefold()
@@ -5335,6 +5414,110 @@ def render_interfaz_medica():
                             and it.get("nombre", "").casefold() == nombre_opcion.casefold()
                         )
                     ]
+
+        # --- Modal: grado CTCAE + medicación del AE recién activado o en edición ---
+        nombre_pendiente = st.session_state.get(pending_edit_key)
+        if nombre_pendiente:
+            item_ae = next(
+                (it for it in items if it.get("categoria") == "Sintoma" and it.get("nombre", "").casefold() == nombre_pendiente.casefold()),
+                None,
+            )
+            if item_ae is None:
+                st.session_state[pending_edit_key] = None
+            else:
+                @st.dialog("Registro de AE")
+                def _ae_dialog(item=item_ae, nombre_ae=nombre_pendiente):
+                    st.subheader(item["nombre"])
+                    grado_actual = item.get("grado_ae") or None
+                    grado = st.radio(
+                        "Grado CTCAE",
+                        grados_ctcae,
+                        index=grados_ctcae.index(grado_actual) if grado_actual in grados_ctcae else None,
+                        horizontal=True,
+                        key=f"im_ae_grado_{visita_id}_{nombre_ae}",
+                    )
+
+                    draft_key = f"im_ae_meds_draft_{visita_id}_{nombre_ae}"
+                    if draft_key not in st.session_state:
+                        st.session_state[draft_key] = [dict(m) for m in item.get("medicaciones", [])]
+
+                    st.markdown("**¿Tratamiento para este AE?**")
+                    tto_default = "Sí" if st.session_state[draft_key] else "No"
+                    tto = st.radio(
+                        "tto", ["Sí", "No"], index=["Sí", "No"].index(tto_default),
+                        horizontal=True, key=f"im_ae_tto_{visita_id}_{nombre_ae}", label_visibility="collapsed",
+                    )
+
+                    if tto == "Sí":
+                        a_borrar = None
+                        for i, med in enumerate(st.session_state[draft_key]):
+                            fila_med = st.columns([2.2, 1, 1.4, 1, 0.4])
+                            med["nombre"] = fila_med[0].text_input("Medicamento", value=med.get("nombre", ""), key=f"{draft_key}_{i}_nombre")
+                            med["dosis"] = fila_med[1].text_input("Dosis", value=med.get("dosis", ""), key=f"{draft_key}_{i}_dosis")
+                            med["pauta"] = fila_med[2].text_input("Pauta", value=med.get("pauta", ""), key=f"{draft_key}_{i}_pauta")
+                            med["ruta"] = fila_med[3].text_input("Ruta", value=med.get("ruta", ""), key=f"{draft_key}_{i}_ruta")
+                            fila_med[4].markdown("&nbsp;")
+                            if fila_med[4].button("🗑", key=f"{draft_key}_{i}_del"):
+                                a_borrar = i
+                        if a_borrar is not None:
+                            st.session_state[draft_key].pop(a_borrar)
+                            st.rerun()
+                        if st.button("+ Añadir medicación", key=f"{draft_key}_add"):
+                            st.session_state[draft_key].append({"nombre": "", "dosis": "", "pauta": "", "ruta": ""})
+                            st.rerun()
+
+                    st.divider()
+                    c1, c2 = st.columns(2)
+                    if c1.button("Cancelar", use_container_width=True, key=f"im_ae_cancel_{visita_id}_{nombre_ae}"):
+                        if not item.get("grado_ae") and not item.get("medicaciones"):
+                            items.remove(item)
+                            st.session_state[f"im_ae_toggle_{visita_id}_{nombre_ae}"] = False
+                        del st.session_state[draft_key]
+                        st.session_state[pending_edit_key] = None
+                        _guardar_ahora(items)
+                        st.rerun()
+                    if c2.button("Guardar AE", type="primary", use_container_width=True, key=f"im_ae_save_{visita_id}_{nombre_ae}"):
+                        if not grado:
+                            st.error("Selecciona un grado CTCAE.")
+                        else:
+                            item["grado_ae"] = grado
+                            item["medicaciones"] = (
+                                [m for m in st.session_state[draft_key] if str(m.get("nombre", "")).strip()]
+                                if tto == "Sí" else []
+                            )
+                            del st.session_state[draft_key]
+                            st.session_state[pending_edit_key] = None
+                            _guardar_ahora(items)
+                            st.rerun()
+
+                _ae_dialog()
+
+        # --- Confirmación de apagado (resolución automática, sin pedir datos) ---
+        nombre_off = st.session_state.get(pending_off_key)
+        if nombre_off:
+            item_off = next(
+                (it for it in items if it.get("categoria") == "Sintoma" and it.get("nombre", "").casefold() == nombre_off.casefold()),
+                None,
+            )
+            if item_off is None:
+                st.session_state[pending_off_key] = None
+            else:
+                @st.dialog("Confirmar")
+                def _ae_confirm_off_dialog(item=item_off, nombre_ae=nombre_off):
+                    st.write(f"¿Marcar **{item['nombre']}** como resuelto?")
+                    c1, c2 = st.columns(2)
+                    if c1.button("Cancelar", use_container_width=True, key=f"im_ae_off_cancel_{visita_id}_{nombre_ae}"):
+                        st.session_state[f"im_ae_toggle_{visita_id}_{nombre_ae}"] = True
+                        st.session_state[pending_off_key] = None
+                        st.rerun()
+                    if c2.button("Confirmar", type="primary", use_container_width=True, key=f"im_ae_off_confirm_{visita_id}_{nombre_ae}"):
+                        item["activo"] = False
+                        item["fecha_fin"] = datetime.now().strftime("%d/%m/%Y %H:%M")
+                        st.session_state[pending_off_key] = None
+                        _guardar_ahora(items)
+                        st.rerun()
+
+                _ae_confirm_off_dialog()
 
         dedup = []
         vistos = set()
@@ -5356,7 +5539,58 @@ def render_interfaz_medica():
                 "ae_asociado": str(it.get("ae_asociado", "") or ""),
                 "grado_ae": str(it.get("grado_ae", "") or ""),
                 "relacion_ae": str(it.get("relacion_ae", "") or ""),
+                "activo": bool(it.get("activo", True)),
+                "medicaciones": [dict(m) for m in (it.get("medicaciones", []) or [])],
+                "fecha_inicio": str(it.get("fecha_inicio", "") or ""),
+                "fecha_fin": str(it.get("fecha_fin", "") or ""),
             })
+
+        # --- AEs activos: tabla horizontal compacta ---
+        aes_dedup = [it for it in dedup if it.get("categoria") == "Sintoma"]
+        aes_activos = [it for it in aes_dedup if it.get("activo", True)]
+
+        st.markdown("**AEs activos**")
+        if not aes_activos:
+            st.caption("No hay AEs activos.")
+        else:
+            ratios = [1.1, 0.6, 0.9, 1.4, 1.0, 1.1, 0.7, 0.7]
+            hcols = st.columns(ratios)
+            for c, h in zip(hcols, ["AE", "Grado", "Inicio", "Medicación", "Dosis", "Pauta", "Ruta", "Acción"]):
+                c.markdown(f"**{h}**")
+            for it in aes_activos:
+                meds = it.get("medicaciones") or [{"nombre": "—", "dosis": "—", "pauta": "—", "ruta": "—"}]
+                fila_cols = st.columns(ratios)
+                fila_cols[0].markdown(it["nombre"])
+                fila_cols[1].markdown(it.get("grado_ae") or "—")
+                fila_cols[2].markdown(it.get("fecha_inicio") or "—")
+                fila_cols[3].markdown("<br>".join(m.get("nombre", "") or "—" for m in meds), unsafe_allow_html=True)
+                fila_cols[4].markdown("<br>".join(m.get("dosis", "") or "—" for m in meds), unsafe_allow_html=True)
+                fila_cols[5].markdown("<br>".join(m.get("pauta", "") or "—" for m in meds), unsafe_allow_html=True)
+                fila_cols[6].markdown("<br>".join(m.get("ruta", "") or "—" for m in meds), unsafe_allow_html=True)
+                if fila_cols[7].button("Editar", key=f"im_ae_editar_{visita_id}_{it['nombre']}"):
+                    st.session_state[pending_edit_key] = it["nombre"]
+                    st.rerun()
+
+        # --- Histórico de AEs de esta visita ---
+        with st.expander("Histórico de AEs", expanded=False):
+            if not aes_dedup:
+                st.caption("Sin registros todavía.")
+            else:
+                df_historico_aes = pd.DataFrame([
+                    {
+                        "AE": it["nombre"],
+                        "Grado CTCAE": it.get("grado_ae") or "—",
+                        "Inicio": it.get("fecha_inicio") or "—",
+                        "Fin": it.get("fecha_fin") or "—",
+                        "Estado": "Activo" if it.get("activo", True) else "Resuelto",
+                        "Medicación": "; ".join(m.get("nombre", "") for m in it.get("medicaciones", [])) or "—",
+                        "Dosis": "; ".join(m.get("dosis", "") for m in it.get("medicaciones", [])) or "—",
+                        "Pauta": "; ".join(m.get("pauta", "") for m in it.get("medicaciones", [])) or "—",
+                        "Ruta": "; ".join(m.get("ruta", "") for m in it.get("medicaciones", [])) or "—",
+                    }
+                    for it in aes_dedup
+                ])
+                st.dataframe(df_historico_aes, use_container_width=True, hide_index=True)
 
         aes_existentes = [
             str(it.get("nombre", "") or "")
