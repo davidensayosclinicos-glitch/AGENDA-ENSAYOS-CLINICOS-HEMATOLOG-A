@@ -5307,6 +5307,13 @@ def render_interfaz_medica():
                 div[data-testid="stToggle"]:has(input:checked) { border-color: #86efac; background: #f0fdf4; }
                 div[data-testid="stToggle"] label p { font-weight: 500; color: #374151; font-size: 0.92rem; }
                 div[data-testid="stToggle"]:has(input:checked) label p { color: #15803d; }
+                [class*="st-key-im_ae_btn_"] button[kind="secondary"] {
+                    background: #f3f4f6; border: 1px solid #d1d5db; color: #374151;
+                }
+                [class*="st-key-im_ae_btn_"] button[kind="primary"] {
+                    background: #dcfce7; border: 1px solid #86efac; color: #166534;
+                }
+                [class*="st-key-im_ae_btn_"] button { min-height: 42px; border-radius: 10px; }
             </style>
             """,
             unsafe_allow_html=True,
@@ -5317,7 +5324,7 @@ def render_interfaz_medica():
             "Fatiga", "Náuseas", "Cefalea", "Diarrea", "Rash",
             "Neuropatía periférica", "Fiebre", "Infección", "Dolor óseo",
             "Mucositis", "Edema", "CRS", "ICANS", "Estreñimiento",
-            "Hipotensión", "Hipertensión", "+ Otro",
+            "Hipotensión", "Hipertensión",
         ]
         pending_edit_key = f"im_ae_pending_edit_{visita_id}"
         pending_off_key = f"im_ae_pending_off_{visita_id}"
@@ -5345,6 +5352,38 @@ def render_interfaz_medica():
                 (catalogo_aes if categoria == "Sintoma" else nombres_guardados)
                 + nombres_guardados + nombres_en_visita
             )
+            if categoria == "Sintoma":
+                busqueda = st.text_input(
+                    "Buscar síntoma",
+                    placeholder="Escribe para filtrar la cuadrícula",
+                    key=f"im_ae_busqueda_{visita_id}",
+                ).strip().casefold()
+                opciones = sorted(
+                    [opcion for opcion in opciones if not busqueda or busqueda in opcion.casefold()],
+                    key=str.casefold,
+                )
+                nuevo_sintoma = st.text_input(
+                    "Crear síntoma",
+                    placeholder="Nombre del nuevo síntoma",
+                    key=f"im_ae_nuevo_{visita_id}",
+                ).strip()
+                if st.button("+ Crear síntoma", key=f"im_ae_crear_{visita_id}"):
+                    nombres_totales = {
+                        opcion.casefold()
+                        for opcion in catalogo_aes + nombres_guardados + nombres_en_visita
+                    }
+                    if not nuevo_sintoma:
+                        st.warning("Escribe el nombre del síntoma.")
+                    elif nuevo_sintoma.casefold() in nombres_totales:
+                        st.info("Ese síntoma ya existe.")
+                    else:
+                        guardar_item_catalogo_clinico("Sintoma", nuevo_sintoma)
+                        nuevo_item = _normalizar_entrada_clinica(nuevo_sintoma, "Sintoma")
+                        nuevo_item["fecha_inicio"] = datetime.now().strftime("%d/%m/%Y %H:%M")
+                        items.append(nuevo_item)
+                        st.session_state[pending_edit_key] = nuevo_sintoma
+                        _guardar_ahora(items)
+                        st.rerun()
             if not opciones:
                 st.caption("Sin opciones guardadas")
                 continue
@@ -5364,10 +5403,11 @@ def render_interfaz_medica():
                         item_actual = indices.get(clave_opcion)
                         marcado = bool(item_actual and item_actual.get("activo", True))
                         with col_chip:
-                            nuevo_estado = st.toggle(
+                            nuevo_estado = st.button(
                                 nombre_opcion,
-                                value=marcado,
-                                key=f"im_ae_toggle_{visita_id}_{nombre_opcion}",
+                                type="primary" if marcado else "secondary",
+                                key=f"im_ae_btn_{visita_id}_{fila_chip.index(nombre_opcion)}_{nombre_opcion}",
+                                use_container_width=True,
                             )
                         if nuevo_estado and not marcado:
                             nuevo_item = _normalizar_entrada_clinica(nombre_opcion, categoria)
@@ -5377,7 +5417,7 @@ def render_interfaz_medica():
                             items.append(nuevo_item)
                             st.session_state[pending_off_key] = None
                             st.session_state[pending_edit_key] = nombre_opcion
-                        elif not nuevo_estado and marcado:
+                        elif nuevo_estado and marcado:
                             st.session_state[pending_edit_key] = None
                             st.session_state[pending_off_key] = nombre_opcion
                 continue
