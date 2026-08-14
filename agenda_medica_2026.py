@@ -2142,6 +2142,44 @@ def _resumen_cambios_interfaz_para_ficha(estado_anterior, estado_actual):
     _diff_lista("estado_medicacion_concomitante", "medicaciones", "Medicacion")
     _diff_lista("estado_aes", "eventos", "AEs")
 
+    items_ant = {
+        str(item.get("nombre", "")).casefold(): item
+        for item in ((estado_anterior.get("estado_comentarios", {}) or {}).get("items_unificados", []) or [])
+        if isinstance(item, dict) and str(item.get("nombre", "")).strip()
+    }
+    items_act = {
+        str(item.get("nombre", "")).casefold(): item
+        for item in ((estado_actual.get("estado_comentarios", {}) or {}).get("items_unificados", []) or [])
+        if isinstance(item, dict) and str(item.get("nombre", "")).strip()
+    }
+    for clave, item in items_act.items():
+        anterior = items_ant.get(clave)
+        if not anterior:
+            continue
+        detalles_anteriores = (
+            str(anterior.get("grado_ae", "") or ""),
+            str(anterior.get("fecha_inicio", "") or ""),
+            str(anterior.get("fecha_fin", "") or ""),
+            json.dumps(anterior.get("medicaciones", []) or [], ensure_ascii=False, sort_keys=True),
+        )
+        detalles_actuales = (
+            str(item.get("grado_ae", "") or ""),
+            str(item.get("fecha_inicio", "") or ""),
+            str(item.get("fecha_fin", "") or ""),
+            json.dumps(item.get("medicaciones", []) or [], ensure_ascii=False, sort_keys=True),
+        )
+        if detalles_anteriores != detalles_actuales:
+            medicaciones = ", ".join(
+                f"{m.get('nombre', '')} ({m.get('dosis', '')}; {m.get('pauta', '')}; {m.get('ruta', '')})"
+                for m in (item.get("medicaciones", []) or [])
+                if isinstance(m, dict) and m.get("nombre")
+            ) or "sin medicación"
+            cambios.append(
+                f"AE {item.get('nombre')}: grado {item.get('grado_ae') or 'sin especificar'}, "
+                f"ON {item.get('fecha_inicio') or 'sin fecha'}, OFF {item.get('fecha_fin') or 'activo'}, "
+                f"medicación {medicaciones}"
+            )
+
     dec_ant = str((estado_anterior.get("estado_decision", {}) or {}).get("decision", "Pendiente") or "Pendiente")
     dec_act = str((estado_actual.get("estado_decision", {}) or {}).get("decision", "Pendiente") or "Pendiente")
     if dec_ant != dec_act:
@@ -5919,6 +5957,8 @@ def render_interfaz_medica():
                         partes.append(f"{etiqueta}: {valor}")
                 categoria = str(item.get("categoria", "") or "").strip()
                 if categoria == "Medicación":
+                    partes.append(f"inicio ON: {item.get('fecha_inicio') or 'sin fecha'}")
+                    partes.append(f"fin OFF: {item.get('fecha_fin') or 'activa'}")
                     relacion = str(item.get("relacion_con", "") or "").strip()
                     if relacion == "Historia médica":
                         partes.append(f"historia médica: {item.get('historia_medica') or 'sin especificar'}")
@@ -5927,8 +5967,17 @@ def render_interfaz_medica():
                         partes.append(f"grado: {item.get('grado_ae') or 'sin especificar'}")
                         partes.append(f"relación con fármacos de estudio: {item.get('relacion_ae') or 'sin especificar'}")
                 if categoria in {"Sintoma", "Efecto adverso"}:
-                    partes.append(f"grado: {item.get('grado_ae') or 'sin especificar'}")
+                    partes.append(f"grado CTCAE: {item.get('grado_ae') or 'sin especificar'}")
+                    partes.append(f"inicio ON: {item.get('fecha_inicio') or 'sin fecha'}")
+                    partes.append(f"fin OFF: {item.get('fecha_fin') or 'activo'}")
                     partes.append(f"relación con fármacos de estudio: {item.get('relacion_ae') or 'sin especificar'}")
+                    medicaciones_ae = [
+                        f"{med.get('nombre', '')} ({med.get('dosis', '')}; {med.get('pauta', '')}; {med.get('ruta', '')})"
+                        for med in (item.get("medicaciones", []) or [])
+                        if isinstance(med, dict) and med.get("nombre")
+                    ]
+                    if medicaciones_ae:
+                        partes.append("medicación: " + ", ".join(medicaciones_ae))
                 return "; ".join(partes)
 
             resumen_sintomas = "; ".join(
@@ -5941,7 +5990,7 @@ def render_interfaz_medica():
             ) or (", ".join(med.get("medicaciones", [])) if med.get("medicaciones") else "No registrada")
             resumen_aes = "; ".join(
                 resumen_item_clinico(item) for item in items_unificados
-                if isinstance(item, dict) and item.get("categoria") == "Efecto adverso"
+                if isinstance(item, dict) and item.get("categoria") in {"Sintoma", "Efecto adverso"}
             ) or (", ".join(ae.get("eventos", [])) if ae.get("eventos") else "Sin AEs")
             texto_auto = (
                 f"Ensayo {visita_row.get('ensayo', '')}. Ciclo/Dia {visita_row.get('ciclo', '')}. Fecha {formatear_fecha_visita(visita_row.get('fecha'))}.\n"
@@ -5955,7 +6004,8 @@ def render_interfaz_medica():
                 f"AEs: {resumen_aes}.\n"
                 f"Decision: {dec.get('decision', 'Pendiente')}. Accion: {dec.get('accion', '-')}. Motivo: {dec.get('motivo', '-')}."
             )
-            if not str(estado.get("nota_clinica", "") or "").strip():
+            nota_existente = str(estado.get("nota_clinica", "") or "").strip()
+            if not nota_existente or nota_existente.startswith("Ensayo "):
                 estado["nota_clinica"] = texto_auto
             estado["nota_clinica"] = st.text_area(
                 "Nota clinica editable",
