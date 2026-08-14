@@ -5345,6 +5345,12 @@ def render_interfaz_medica():
         )
 
         grados_ctcae = ["G1", "G2", "G3", "G4", "G5"]
+        catalogo_aes = [
+            "Fatiga", "Náuseas", "Cefalea", "Diarrea", "Rash",
+            "Neuropatía periférica", "Fiebre", "Infección", "Dolor óseo",
+            "Mucositis", "Edema", "CRS", "ICANS", "Estreñimiento",
+            "Hipotensión", "Hipertensión", "+ Otro",
+        ]
         pending_edit_key = f"im_ae_pending_edit_{visita_id}"
         pending_off_key = f"im_ae_pending_off_{visita_id}"
         st.session_state.setdefault(pending_edit_key, None)
@@ -5362,7 +5368,10 @@ def render_interfaz_medica():
                 for it in items
                 if it.get("categoria") == categoria and str(it.get("nombre", "") or "").strip()
             ]
-            opciones = _lista_unica_texto(nombres_guardados + nombres_en_visita)
+            opciones = _lista_unica_texto(
+                (catalogo_aes if categoria == "Sintoma" else nombres_guardados)
+                + nombres_guardados + nombres_en_visita
+            )
             if not opciones:
                 st.caption("Sin opciones guardadas")
                 continue
@@ -5379,7 +5388,8 @@ def render_interfaz_medica():
                     cols_chip = st.columns(n_cols)
                     for col_chip, nombre_opcion in zip(cols_chip, fila_chip):
                         clave_opcion = f"{categoria}::{nombre_opcion}".casefold()
-                        marcado = clave_opcion in indices
+                        item_actual = indices.get(clave_opcion)
+                        marcado = bool(item_actual and item_actual.get("activo", True))
                         with col_chip:
                             nuevo_estado = st.toggle(
                                 nombre_opcion,
@@ -5400,7 +5410,8 @@ def render_interfaz_medica():
             cols = st.columns(3)
             for idx, nombre_opcion in enumerate(opciones):
                 clave_opcion = f"{categoria}::{nombre_opcion}".casefold()
-                marcado = clave_opcion in indices
+                item_actual = indices.get(clave_opcion)
+                marcado = bool(item_actual and item_actual.get("activo", True))
                 nuevo_estado = cols[idx % 3].checkbox(
                     nombre_opcion,
                     value=marcado,
@@ -5430,6 +5441,13 @@ def render_interfaz_medica():
                 @st.dialog("Registro de AE")
                 def _ae_dialog(item=item_ae, nombre_ae=nombre_pendiente):
                     st.subheader(item["nombre"])
+                    if item["nombre"] == "+ Otro":
+                        nuevo_nombre = st.text_input(
+                            "Nombre del AE",
+                            key=f"im_ae_otro_nombre_{visita_id}",
+                        ).strip()
+                    else:
+                        nuevo_nombre = item["nombre"]
                     grado_actual = item.get("grado_ae") or None
                     grado = st.radio(
                         "Grado CTCAE",
@@ -5481,7 +5499,10 @@ def render_interfaz_medica():
                     if c2.button("Guardar AE", type="primary", use_container_width=True, key=f"im_ae_save_{visita_id}_{nombre_ae}"):
                         if not grado:
                             st.error("Selecciona un grado CTCAE.")
+                        elif not nuevo_nombre:
+                            st.error("Indica el nombre del AE.")
                         else:
+                            item["nombre"] = nuevo_nombre
                             item["grado_ae"] = grado
                             item["medicaciones"] = (
                                 [m for m in st.session_state[draft_key] if str(m.get("nombre", "")).strip()]
@@ -5551,30 +5572,31 @@ def render_interfaz_medica():
         aes_dedup = [it for it in dedup if it.get("categoria") == "Sintoma"]
         aes_activos = [it for it in aes_dedup if it.get("activo", True)]
 
-        st.markdown("**AEs activos**")
-        if not aes_activos:
-            st.caption("No hay AEs activos.")
-        else:
-            ratios = [1.1, 0.6, 0.9, 1.4, 1.0, 1.1, 0.7, 0.7]
-            hcols = st.columns(ratios)
-            for c, h in zip(hcols, ["AE", "Grado", "Inicio", "Medicación", "Dosis", "Pauta", "Ruta", "Acción"]):
-                c.markdown(f"**{h}**")
-            for it in aes_activos:
-                meds = it.get("medicaciones") or [{"nombre": "—", "dosis": "—", "pauta": "—", "ruta": "—"}]
-                fila_cols = st.columns(ratios)
-                fila_cols[0].markdown(it["nombre"])
-                fila_cols[1].markdown(it.get("grado_ae") or "—")
-                fila_cols[2].markdown(it.get("fecha_inicio") or "—")
-                fila_cols[3].markdown("<br>".join(m.get("nombre", "") or "—" for m in meds), unsafe_allow_html=True)
-                fila_cols[4].markdown("<br>".join(m.get("dosis", "") or "—" for m in meds), unsafe_allow_html=True)
-                fila_cols[5].markdown("<br>".join(m.get("pauta", "") or "—" for m in meds), unsafe_allow_html=True)
-                fila_cols[6].markdown("<br>".join(m.get("ruta", "") or "—" for m in meds), unsafe_allow_html=True)
-                if fila_cols[7].button("Editar", key=f"im_ae_editar_{visita_id}_{it['nombre']}"):
-                    st.session_state[pending_edit_key] = it["nombre"]
-                    st.rerun()
+        tab_registro, tab_historico = st.tabs(["Registro", "Histórico"])
+        with tab_registro:
+            st.markdown("**AEs activos**")
+            if not aes_activos:
+                st.caption("No hay AEs activos.")
+            else:
+                ratios = [1.1, 0.6, 0.9, 1.4, 1.0, 1.1, 0.7, 0.7]
+                hcols = st.columns(ratios)
+                for c, h in zip(hcols, ["AE", "Grado", "Inicio", "Medicación", "Dosis", "Pauta", "Ruta", "Acción"]):
+                    c.markdown(f"**{h}**")
+                for it in aes_activos:
+                    meds = it.get("medicaciones") or [{"nombre": "—", "dosis": "—", "pauta": "—", "ruta": "—"}]
+                    fila_cols = st.columns(ratios)
+                    fila_cols[0].markdown(it["nombre"])
+                    fila_cols[1].markdown(it.get("grado_ae") or "—")
+                    fila_cols[2].markdown(it.get("fecha_inicio") or "—")
+                    fila_cols[3].markdown("<br>".join(m.get("nombre", "") or "—" for m in meds), unsafe_allow_html=True)
+                    fila_cols[4].markdown("<br>".join(m.get("dosis", "") or "—" for m in meds), unsafe_allow_html=True)
+                    fila_cols[5].markdown("<br>".join(m.get("pauta", "") or "—" for m in meds), unsafe_allow_html=True)
+                    fila_cols[6].markdown("<br>".join(m.get("ruta", "") or "—" for m in meds), unsafe_allow_html=True)
+                    if fila_cols[7].button("Editar", key=f"im_ae_editar_{visita_id}_{it['nombre']}"):
+                        st.session_state[pending_edit_key] = it["nombre"]
+                        st.rerun()
 
-        # --- Histórico de AEs de esta visita ---
-        with st.expander("Histórico de AEs", expanded=False):
+        with tab_historico:
             if not aes_dedup:
                 st.caption("Sin registros todavía.")
             else:
