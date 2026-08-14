@@ -3380,7 +3380,9 @@ def _get_estado_visita_anterior(df_visitas_all, visita_row):
     cod = str(visita_row.get("codigo", "") or "").strip()
     ens = str(visita_row.get("ensayo", "") or "").strip()
     nom = str(visita_row.get("nombre", "") or "").strip()
-    fecha_actual = pd.to_datetime(str(visita_row.get("fecha", "") or ""), errors="coerce")
+    fecha_actual = pd.to_datetime(
+        str(visita_row.get("fecha", "") or ""), errors="coerce", utc=True
+    )
 
     mask = (
         df_visitas_all["ensayo"].str.strip().str.casefold() == ens.casefold()
@@ -3391,7 +3393,7 @@ def _get_estado_visita_anterior(df_visitas_all, visita_row):
         mask = mask & (df_visitas_all["nombre"].str.strip().str.casefold() == nom.casefold())
 
     anteriores = df_visitas_all[mask].copy()
-    anteriores["_fdt"] = pd.to_datetime(anteriores["fecha"], errors="coerce")
+    anteriores["_fdt"] = pd.to_datetime(anteriores["fecha"], errors="coerce", utc=True)
     if pd.notna(fecha_actual):
         anteriores = anteriores[anteriores["_fdt"] < fecha_actual]
     anteriores = anteriores.sort_values("_fdt", ascending=False)
