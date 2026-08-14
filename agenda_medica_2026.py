@@ -5366,8 +5366,10 @@ def render_interfaz_medica():
         ]
         pending_edit_key = f"im_ae_pending_edit_{visita_id}"
         pending_off_key = f"im_ae_pending_off_{visita_id}"
+        pending_delete_key = f"im_ae_pending_delete_{visita_id}"
         st.session_state.setdefault(pending_edit_key, None)
         st.session_state.setdefault(pending_off_key, None)
+        st.session_state.setdefault(pending_delete_key, None)
 
         def _guardar_ahora(lista_items):
             lista_normalizada = [
@@ -5595,6 +5597,32 @@ def render_interfaz_medica():
 
                 _ae_confirm_off_dialog()
 
+        nombre_delete = st.session_state.get(pending_delete_key)
+        if nombre_delete:
+            item_delete = next(
+                (it for it in items if it.get("categoria") == "Sintoma" and it.get("nombre", "").casefold() == nombre_delete.casefold()),
+                None,
+            )
+            if item_delete is not None:
+                @st.dialog("Eliminar registro")
+                def _ae_delete_dialog(item=item_delete, nombre_ae=nombre_delete):
+                    st.write(f"¿Eliminar por completo **{item['nombre']}**, su historial y medicación asociada?")
+                    c1, c2 = st.columns(2)
+                    if c1.button("Cancelar", use_container_width=True, key=f"im_ae_delete_cancel_{visita_id}_{nombre_ae}"):
+                        st.session_state[pending_delete_key] = None
+                        st.rerun()
+                    if c2.button("Eliminar definitivamente", type="primary", use_container_width=True, key=f"im_ae_delete_ok_{visita_id}_{nombre_ae}"):
+                        items[:] = [
+                            it for it in items
+                            if not (it.get("categoria") == "Sintoma" and it.get("nombre", "").casefold() == nombre_ae.casefold())
+                        ]
+                        st.session_state[pending_delete_key] = None
+                        st.session_state[pending_edit_key] = None
+                        _guardar_ahora(items)
+                        st.rerun()
+
+                _ae_delete_dialog()
+
         dedup = []
         vistos = set()
         for it in items:
@@ -5651,8 +5679,13 @@ def render_interfaz_medica():
                     fila_cols[4].markdown("<br>".join(m.get("dosis", "") or "—" for m in meds), unsafe_allow_html=True)
                     fila_cols[5].markdown("<br>".join(m.get("pauta", "") or "—" for m in meds), unsafe_allow_html=True)
                     fila_cols[6].markdown("<br>".join(m.get("ruta", "") or "—" for m in meds), unsafe_allow_html=True)
-                    if fila_cols[7].button("Editar", key=f"im_ae_editar_{visita_id}_{it['nombre']}"):
+                    acciones = fila_cols[7].columns(2)
+                    if acciones[0].button("Editar", key=f"im_ae_editar_{visita_id}_{it['nombre']}"):
                         st.session_state[pending_edit_key] = it["nombre"]
+                        st.rerun()
+                    if acciones[1].button("Eliminar", key=f"im_ae_eliminar_{visita_id}_{it['nombre']}"):
+                        st.session_state[pending_delete_key] = it["nombre"]
+                        st.session_state[pending_edit_key] = None
                         st.rerun()
 
         elif vista_ae == "Histórico":
@@ -5674,6 +5707,16 @@ def render_interfaz_medica():
                     for it in aes_dedup
                 ])
                 st.dataframe(df_historico_aes, use_container_width=True, hide_index=True)
+                st.caption("Editar o eliminar un registro del histórico:")
+                for it in aes_dedup:
+                    acciones = st.columns([5, 1, 1])
+                    acciones[0].write(f"{it['nombre']} · {it.get('grado_ae') or 'sin grado'} · {it.get('fecha_inicio') or 'sin fecha'}")
+                    if acciones[1].button("Editar", key=f"im_ae_hist_editar_{visita_id}_{it['nombre']}"):
+                        st.session_state[pending_edit_key] = it["nombre"]
+                        st.rerun()
+                    if acciones[2].button("Eliminar", key=f"im_ae_hist_eliminar_{visita_id}_{it['nombre']}"):
+                        st.session_state[pending_delete_key] = it["nombre"]
+                        st.rerun()
 
         else:
             st.markdown("**Medicación relacionada**")
@@ -5697,13 +5740,13 @@ def render_interfaz_medica():
             if not filas_medicacion:
                 st.caption("No hay medicación registrada.")
             else:
-                cabecera = st.columns([1.5, 1.0, 1.1, 1.0, 1.0, 1.1, 1.1, 0.8])
-                for columna, titulo in zip(cabecera, ["Medicamento", "Dosis", "Pauta", "Ruta", "Relacionado con", "Grado", "ON", "OFF"]):
+                cabecera = st.columns([1.5, 1.0, 1.1, 1.0, 1.0, 1.1, 1.1, 0.8, 0.9])
+                for columna, titulo in zip(cabecera, ["Medicamento", "Dosis", "Pauta", "Ruta", "Relacionado con", "Grado", "ON", "OFF", "Acción"]):
                     columna.markdown(f"**{titulo}**")
                 for med_idx, (item, med, relacion_tipo) in enumerate(filas_medicacion):
                     es_ae = med is not None
                     datos = med if es_ae else item
-                    fila = st.columns([1.5, 1.0, 1.1, 1.0, 1.0, 1.1, 1.1, 0.8])
+                    fila = st.columns([1.5, 1.0, 1.1, 1.0, 1.0, 1.1, 1.1, 0.8, 0.9])
                     datos["nombre"] = fila[0].text_input("Medicamento", value=datos.get("nombre", ""), key=f"im_med_nombre_{visita_id}_{med_idx}")
                     datos["dosis"] = fila[1].text_input("Dosis", value=datos.get("dosis", ""), key=f"im_med_dosis_{visita_id}_{med_idx}")
                     datos["pauta"] = fila[2].text_input("Pauta", value=datos.get("pauta", ""), key=f"im_med_pauta_{visita_id}_{med_idx}")
@@ -5717,6 +5760,16 @@ def render_interfaz_medica():
                     fila[5].markdown(item.get("grado_ae", "—") if item.get("grado_ae") else "—")
                     fila[6].markdown(item.get("fecha_inicio", "—"))
                     fila[7].markdown(item.get("fecha_fin", "—"))
+                    if fila[8].button("Eliminar", key=f"im_med_delete_{visita_id}_{med_idx}"):
+                        if es_ae:
+                            item["medicaciones"] = [
+                                existente for existente in item.get("medicaciones", [])
+                                if existente is not med
+                            ]
+                        else:
+                            dedup.remove(item)
+                        _guardar_ahora(dedup)
+                        st.rerun()
 
                 if st.button("Guardar cambios de medicación", type="primary", key=f"im_med_save_{visita_id}"):
                     _guardar_ahora(dedup)
