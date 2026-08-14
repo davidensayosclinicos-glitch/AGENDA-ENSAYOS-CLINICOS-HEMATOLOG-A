@@ -5402,8 +5402,10 @@ def render_interfaz_medica():
                             nuevo_item["fecha_inicio"] = datetime.now().strftime("%d/%m/%Y %H:%M")
                             nuevo_item["fecha_fin"] = ""
                             items.append(nuevo_item)
+                            st.session_state[pending_off_key] = None
                             st.session_state[pending_edit_key] = nombre_opcion
                         elif not nuevo_estado and marcado:
+                            st.session_state[pending_edit_key] = None
                             st.session_state[pending_off_key] = nombre_opcion
                 continue
 
@@ -5430,7 +5432,7 @@ def render_interfaz_medica():
 
         # --- Modal: grado CTCAE + medicación del AE recién activado o en edición ---
         nombre_pendiente = st.session_state.get(pending_edit_key)
-        if nombre_pendiente:
+        if nombre_pendiente and not st.session_state.get(pending_off_key):
             item_ae = next(
                 (it for it in items if it.get("categoria") == "Sintoma" and it.get("nombre", "").casefold() == nombre_pendiente.casefold()),
                 None,
