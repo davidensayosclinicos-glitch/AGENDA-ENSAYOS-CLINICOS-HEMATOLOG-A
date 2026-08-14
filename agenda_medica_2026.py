@@ -5214,8 +5214,20 @@ def render_interfaz_medica():
         unificados = com.get("items_unificados", []) if isinstance(com.get("items_unificados", []), list) else []
         for item in unificados:
             norm = _normalizar_entrada_clinica(item)
-            if norm["nombre"] and not any(it["nombre"].casefold() == norm["nombre"].casefold() and it["categoria"] == norm["categoria"] for it in salida):
+            if not norm["nombre"]:
+                continue
+            existente = next(
+                (
+                    it for it in salida
+                    if it["nombre"].casefold() == norm["nombre"].casefold()
+                    and it["categoria"] == norm["categoria"]
+                ),
+                None,
+            )
+            if existente is None:
                 salida.append(norm)
+            else:
+                existente.update(norm)
 
         return salida
 
