@@ -5281,53 +5281,9 @@ def render_interfaz_medica():
         return estado
 
     def _render_unificado_clinico(estado, visita_id):
-        categorias = ["Sintoma", "Medicación"]
+        categorias = ["Sintoma"]
         catalogo = get_catalogo_clinico()
         items = _items_unificados_desde_estado(estado)
-
-        st.markdown("**Catálogo clínico común a todos los ensayos**")
-        alta_col, borrar_col = st.columns([2, 1])
-        with alta_col:
-            categoria_nueva = st.selectbox(
-                "Categoría",
-                options=categorias,
-                key=f"im_catalogo_categoria_{visita_id}",
-            )
-            nombre_nuevo = st.text_input(
-                "Nueva opción clínica",
-                placeholder="Escribe un síntoma, medicación o AE",
-                key=f"im_catalogo_nombre_{visita_id}",
-            ).strip()
-            if st.button("Guardar opción para todos los ensayos", key=f"im_catalogo_guardar_{visita_id}"):
-                if not nombre_nuevo:
-                    st.warning("Escribe el nombre de la opción clínica.")
-                elif nombre_nuevo.casefold() in {x.casefold() for x in catalogo.get(categoria_nueva, [])}:
-                    st.info("Esa opción ya está guardada en el catálogo.")
-                elif guardar_item_catalogo_clinico(categoria_nueva, nombre_nuevo):
-                    items.append(_normalizar_entrada_clinica(nombre_nuevo, categoria_nueva))
-                    _guardar_items_unificados(estado, items)
-                    guardar_estado_interfaz_medica(visita_id, estado)
-                    st.rerun()
-                else:
-                    st.error("No se pudo guardar la opción clínica.")
-        with borrar_col:
-            opciones_borrado = [
-                f"{categoria}: {nombre}"
-                for categoria in categorias
-                for nombre in catalogo.get(categoria, [])
-            ]
-            if opciones_borrado:
-                opcion_borrado = st.selectbox(
-                    "Eliminar del catálogo",
-                    options=[""] + opciones_borrado,
-                    key=f"im_catalogo_borrar_sel_{visita_id}",
-                )
-                if st.button("Eliminar opción", key=f"im_catalogo_borrar_{visita_id}") and opcion_borrado:
-                    categoria_borrado, nombre_borrado = opcion_borrado.split(": ", 1)
-                    if borrar_item_catalogo_clinico(categoria_borrado, nombre_borrado):
-                        st.rerun()
-            else:
-                st.caption("Catálogo vacío. Añade la primera opción.")
 
         st.markdown(
             """
@@ -5574,7 +5530,7 @@ def render_interfaz_medica():
         aes_dedup = [it for it in dedup if it.get("categoria") == "Sintoma"]
         aes_activos = [it for it in aes_dedup if it.get("activo", True)]
 
-        tab_registro, tab_historico = st.tabs(["Registro", "Histórico"])
+        tab_registro, tab_historico, tab_medicacion = st.tabs(["Registro", "Histórico", "Medicación"])
         with tab_registro:
             st.markdown("**AEs activos**")
             if not aes_activos:
@@ -5618,139 +5574,52 @@ def render_interfaz_medica():
                 ])
                 st.dataframe(df_historico_aes, use_container_width=True, hide_index=True)
 
-        aes_existentes = [
-            str(it.get("nombre", "") or "")
-            for it in dedup
-            if it.get("categoria") in {"Sintoma", "Efecto adverso"} and str(it.get("nombre", "") or "").strip()
-        ]
+        with tab_medicacion:
+            st.markdown("**Medicación relacionada**")
+            st.caption("Tratamientos de AEs y medicación del historial clínico.")
+            if st.button("+ Añadir medicación", key=f"im_med_add_{visita_id}"):
+                nuevo = _normalizar_entrada_clinica("Nueva medicación", "Medicación")
+                nuevo["relacion_con"] = "Historia médica"
+                nuevo["fecha_inicio"] = datetime.now().strftime("%d/%m/%Y %H:%M")
+                dedup.append(nuevo)
+                _guardar_ahora(dedup)
+                st.rerun()
 
-        medicamentos = [it for it in dedup if it.get("categoria") == "Medicación"]
-        st.markdown("**Detalle de medicación concomitante**")
-        cabecera = st.columns([1.8, 1.2, 1.2, 1.6, 2.0])
-        for columna, titulo in zip(cabecera, ["Fármaco", "Dosis", "Pauta", "AE", "AE relacionado con medicación de estudio"]):
-            columna.markdown(f"**{titulo}**")
+            filas_medicacion = []
+            for item in dedup:
+                if item.get("categoria") == "Medicación":
+                    filas_medicacion.append((item, None, "Historial Clínico"))
+            for ae in aes_dedup:
+                for med in ae.get("medicaciones", []):
+                    filas_medicacion.append((ae, med, "AE"))
 
-        if not medicamentos:
-            nuevo_farmaco = st.text_input(
-                "Añadir fármaco",
-                placeholder="Escribe un fármaco concomitante",
-                key=f"im_unif_nuevo_farmaco_{visita_id}",
-            ).strip()
-            if st.button("Añadir fármaco", key=f"im_unif_btn_nuevo_farmaco_{visita_id}"):
-                if nuevo_farmaco:
-                    dedup.append(_normalizar_entrada_clinica(nuevo_farmaco, "Medicación"))
-                    _guardar_items_unificados(estado, dedup)
+            if not filas_medicacion:
+                st.caption("No hay medicación registrada.")
+            else:
+                cabecera = st.columns([1.5, 1.0, 1.1, 1.0, 1.0, 1.1, 1.1, 0.8])
+                for columna, titulo in zip(cabecera, ["Medicamento", "Dosis", "Pauta", "Ruta", "Relacionado con", "Grado", "ON", "OFF"]):
+                    columna.markdown(f"**{titulo}**")
+                for med_idx, (item, med, relacion_tipo) in enumerate(filas_medicacion):
+                    es_ae = med is not None
+                    datos = med if es_ae else item
+                    fila = st.columns([1.5, 1.0, 1.1, 1.0, 1.0, 1.1, 1.1, 0.8])
+                    datos["nombre"] = fila[0].text_input("Medicamento", value=datos.get("nombre", ""), key=f"im_med_nombre_{visita_id}_{med_idx}")
+                    datos["dosis"] = fila[1].text_input("Dosis", value=datos.get("dosis", ""), key=f"im_med_dosis_{visita_id}_{med_idx}")
+                    datos["pauta"] = fila[2].text_input("Pauta", value=datos.get("pauta", ""), key=f"im_med_pauta_{visita_id}_{med_idx}")
+                    datos["ruta"] = fila[3].text_input("Ruta", value=datos.get("ruta", item.get("administracion", "")), key=f"im_med_ruta_{visita_id}_{med_idx}")
+                    relacion = (
+                        "AE: " + item.get("nombre", "")
+                        if es_ae
+                        else ("AE: " + item.get("ae_asociado", "") if item.get("ae_asociado") else "Historial Clínico")
+                    )
+                    fila[4].markdown(relacion)
+                    fila[5].markdown(item.get("grado_ae", "—") if item.get("grado_ae") else "—")
+                    fila[6].markdown(item.get("fecha_inicio", "—"))
+                    fila[7].markdown(item.get("fecha_fin", "—"))
+
+                if st.button("Guardar cambios de medicación", type="primary", key=f"im_med_save_{visita_id}"):
+                    _guardar_ahora(dedup)
                     st.rerun()
-                else:
-                    st.warning("Escribe el nombre del fármaco antes de añadirlo.")
-
-        medicamento_idx = 0
-        for idx, item in enumerate(dedup):
-            nombre = item["nombre"]
-            categoria = item["categoria"]
-            if not nombre:
-                continue
-            if categoria == "Medicación":
-                fila = st.columns([1.8, 1.2, 1.2, 1.6, 2.0])
-                fila[0].markdown(f"**{html.escape(nombre)}**")
-                item["dosis"] = fila[1].text_input(
-                    "Dosis",
-                    value=item.get("dosis", ""),
-                    key=f"im_unif_dosis_linea_{visita_id}_{medicamento_idx}",
-                    label_visibility="collapsed",
-                )
-                item["pauta"] = fila[2].text_input(
-                    "Pauta",
-                    value=item.get("pauta", ""),
-                    key=f"im_unif_pauta_linea_{visita_id}_{medicamento_idx}",
-                    label_visibility="collapsed",
-                )
-                item["relacion_con"] = "Efecto adverso" if item.get("ae_asociado") else item.get("relacion_con", "")
-                item["ae_asociado"] = fila[3].selectbox(
-                    "AE",
-                    options=[""] + aes_existentes,
-                    index=( [""] + aes_existentes).index(item.get("ae_asociado", "")) if item.get("ae_asociado", "") in ([""] + aes_existentes) else 0,
-                    key=f"im_unif_ae_linea_{visita_id}_{medicamento_idx}",
-                    label_visibility="collapsed",
-                )
-                item["relacion_ae"] = fila[4].selectbox(
-                    "AE relacionado con medicación de estudio",
-                    options=["", "No relacionada", "Posiblemente relacionada", "Probablemente relacionada", "Relacionada"],
-                    index=["", "No relacionada", "Posiblemente relacionada", "Probablemente relacionada", "Relacionada"].index(item.get("relacion_ae", "")) if item.get("relacion_ae", "") in ["", "No relacionada", "Posiblemente relacionada", "Probablemente relacionada", "Relacionada"] else 0,
-                    key=f"im_unif_rel_linea_{visita_id}_{medicamento_idx}",
-                    label_visibility="collapsed",
-                )
-                if item.get("ae_asociado"):
-                    item["grado_ae"] = st.selectbox(
-                        f"Grado del AE de {nombre}",
-                        options=["", "G1", "G2", "G3", "G4", "G5"],
-                        index=["", "G1", "G2", "G3", "G4", "G5"].index(item.get("grado_ae", "")) if item.get("grado_ae", "") in ["", "G1", "G2", "G3", "G4", "G5"] else 0,
-                        key=f"im_unif_grado_linea_{visita_id}_{medicamento_idx}",
-                    )
-                medicamento_idx += 1
-                continue
-            with st.expander(f"{categoria}: {nombre}", expanded=False):
-                item["dosis"] = st.text_input("Dosis", value=item.get("dosis", ""), key=f"im_unif_dosis_{visita_id}_{idx}")
-                item["pauta"] = st.text_input("Pauta", value=item.get("pauta", ""), key=f"im_unif_pauta_{visita_id}_{idx}")
-                item["administracion"] = st.selectbox(
-                    "Administración",
-                    options=["", "VO", "IV", "SC", "IM", "Topica", "Otra"],
-                    index=["", "VO", "IV", "SC", "IM", "Topica", "Otra"].index(item.get("administracion", "")) if item.get("administracion", "") in ["", "VO", "IV", "SC", "IM", "Topica", "Otra"] else 0,
-                    key=f"im_unif_admin_{visita_id}_{idx}",
-                )
-                if categoria == "Medicación":
-                    item["relacion_con"] = st.selectbox(
-                        "Relacionado con",
-                        options=["", "Historia médica", "Efecto adverso"],
-                        index=["", "Historia médica", "Efecto adverso"].index(item.get("relacion_con", "")) if item.get("relacion_con", "") in ["", "Historia médica", "Efecto adverso"] else 0,
-                        key=f"im_unif_relacion_{visita_id}_{idx}",
-                    )
-                    if item["relacion_con"] == "Historia médica":
-                        item["historia_medica"] = st.text_input("Historia médica / motivo", value=item.get("historia_medica", ""), key=f"im_unif_hist_{visita_id}_{idx}")
-                        item["ae_asociado"] = ""
-                        item["grado_ae"] = ""
-                        item["relacion_ae"] = ""
-                    elif item["relacion_con"] == "Efecto adverso":
-                        item["ae_asociado"] = st.selectbox(
-                            "AE asociado",
-                            options=[""] + aes_existentes,
-                            index=( [""] + aes_existentes).index(item.get("ae_asociado", "")) if item.get("ae_asociado", "") in ([""] + aes_existentes) else 0,
-                            key=f"im_unif_ae_med_{visita_id}_{idx}",
-                        )
-                        item["grado_ae"] = st.selectbox(
-                            "Grado del AE",
-                            options=["", "G1", "G2", "G3", "G4", "G5"],
-                            index=["", "G1", "G2", "G3", "G4", "G5"].index(item.get("grado_ae", "")) if item.get("grado_ae", "") in ["", "G1", "G2", "G3", "G4", "G5"] else 0,
-                            key=f"im_unif_grado_med_{visita_id}_{idx}",
-                        )
-                        item["relacion_ae"] = st.selectbox(
-                            "Relación con fármacos de estudio",
-                            options=["", "No relacionada", "Posiblemente relacionada", "Probablemente relacionada", "Relacionada"],
-                            index=["", "No relacionada", "Posiblemente relacionada", "Probablemente relacionada", "Relacionada"].index(item.get("relacion_ae", "")) if item.get("relacion_ae", "") in ["", "No relacionada", "Posiblemente relacionada", "Probablemente relacionada", "Relacionada"] else 0,
-                            key=f"im_unif_rel_med_{visita_id}_{idx}",
-                        )
-                        item["historia_medica"] = ""
-                    else:
-                        item["historia_medica"] = ""
-                        item["ae_asociado"] = ""
-                        item["grado_ae"] = ""
-                        item["relacion_ae"] = ""
-                elif categoria in {"Sintoma", "Efecto adverso"}:
-                    item["grado_ae"] = st.selectbox(
-                        "Grado del AE",
-                        options=["", "G1", "G2", "G3", "G4", "G5"],
-                        index=["", "G1", "G2", "G3", "G4", "G5"].index(item.get("grado_ae", "")) if item.get("grado_ae", "") in ["", "G1", "G2", "G3", "G4", "G5"] else 0,
-                        key=f"im_unif_grado_ae_{visita_id}_{idx}",
-                    )
-                    item["relacion_ae"] = st.selectbox(
-                        "Relación con fármacos de estudio",
-                        options=["", "No relacionada", "Posiblemente relacionada", "Probablemente relacionada", "Relacionada"],
-                        index=["", "No relacionada", "Posiblemente relacionada", "Probablemente relacionada", "Relacionada"].index(item.get("relacion_ae", "")) if item.get("relacion_ae", "") in ["", "No relacionada", "Posiblemente relacionada", "Probablemente relacionada", "Relacionada"] else 0,
-                        key=f"im_unif_rel_ae_{visita_id}_{idx}",
-                    )
-                    item["ae_asociado"] = ""
-                    item["relacion_con"] = ""
-                    item["historia_medica"] = ""
 
         _guardar_items_unificados(estado, dedup)
         return dedup
