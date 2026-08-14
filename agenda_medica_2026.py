@@ -5325,7 +5325,12 @@ def render_interfaz_medica():
         st.session_state.setdefault(pending_off_key, None)
 
         def _guardar_ahora(lista_items):
-            _guardar_items_unificados(estado, lista_items)
+            lista_normalizada = [
+                _normalizar_entrada_clinica(item)
+                for item in lista_items
+                if isinstance(item, dict) and str(item.get("nombre", "") or "").strip()
+            ]
+            _guardar_items_unificados(estado, lista_normalizada)
             guardar_estado_interfaz_medica(visita_id, estado)
 
         for categoria in categorias:
