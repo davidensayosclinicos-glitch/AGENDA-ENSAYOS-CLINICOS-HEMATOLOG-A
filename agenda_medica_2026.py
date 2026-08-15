@@ -24,6 +24,11 @@ import importlib
 import glob
 import runpy
 from urllib.parse import quote_plus
+from kits_tipo_resolver import (
+    cargar_catalogos_desde_csv,
+    cargar_catalogos_desde_postgres,
+    resolver_tipo_kit,
+)
 
 try:
     from PIL import Image
@@ -1660,6 +1665,24 @@ def get_visitas():
         df["ensayo"] = df["ensayo"].fillna("").astype(str).apply(normalizar_ensayo)
         df = filtrar_visitas_importadas_dreamm10(df)
     return df
+
+
+@st.cache_data(show_spinner=False, ttl=10)
+def cargar_catalogos_tipos_kits():
+    catalogo_ciclos_csv, catalogo_tipos_csv = cargar_catalogos_desde_csv(SCRIPT_DIR)
+    if DATABASE_URL and psycopg2 is not None:
+        catalogo_ciclos_pg, catalogo_tipos_pg = cargar_catalogos_desde_postgres(DATABASE_URL, psycopg2)
+        if not catalogo_ciclos_pg.empty or not catalogo_tipos_pg.empty:
+            return catalogo_ciclos_pg, catalogo_tipos_pg
+    return catalogo_ciclos_csv, catalogo_tipos_csv
+
+
+def obtener_tipo_kit_sugerido_paciente(ensayo, ciclo) -> str:
+    try:
+        catalogo_ciclos, catalogo_tipos = cargar_catalogos_tipos_kits()
+        return resolver_tipo_kit(ensayo, ciclo, catalogo_ciclos, catalogo_tipos)
+    except Exception:
+        return ""
 
 @st.cache_data(show_spinner=False, ttl=3)
 def get_pacientes_unicos():
@@ -8025,6 +8048,9 @@ if seccion_activa == "Agenda":
                     st.session_state["ensayo_input"] = ensayo_seleccionado
 
                 ciclo = st.text_input("Ciclo / Día (Ej. C1D1)")
+                tipo_kit_sugerido_form = obtener_tipo_kit_sugerido_paciente(ensayo, ciclo)
+                if tipo_kit_sugerido_form:
+                    st.caption(f"🧪 Tipo de kit sugerido: {tipo_kit_sugerido_form}")
 
                 st.divider()
                 tab_medula, tab_kits, tab_otras, tab_comentarios = st.tabs(
@@ -8090,6 +8116,12 @@ if seccion_activa == "Agenda":
                     st.markdown(f"## 🆔 {paciente['codigo']}")
                     st.markdown(f"**Paciente:** {paciente['nombre']}")
                     st.markdown(f"**Ensayo:** {paciente['ensayo']} | **Ciclo:** {paciente['ciclo']}")
+                    tipo_kit_sugerido = obtener_tipo_kit_sugerido_paciente(
+                        paciente.get('ensayo', ''),
+                        paciente.get('ciclo', ''),
+                    )
+                    if tipo_kit_sugerido:
+                        st.markdown(f"**Tipo de kit sugerido (ensayo+ciclo):** {tipo_kit_sugerido}")
 
                     adenda_paciente_info = get_adenda_paciente(
                         paciente.get('codigo'),
@@ -8284,6 +8316,7 @@ if seccion_activa == "Agenda":
                         f"Paciente: {paciente['nombre']}\n"
                         f"Ensayo: {paciente['ensayo']}\n"
                         f"Ciclo: {paciente['ciclo']}\n"
+                        f"Tipo de kit sugerido: {tipo_kit_sugerido}\n"
                         f"Kits: {paciente['kits']}\n"
                         f"Tablet: {'Si' if paciente['tablet'] else 'No'}\n"
                         f"Medula: {'Si' if paciente['medula'] else 'No'}\n"
@@ -8325,4 +8358,3 @@ if seccion_activa == "Agenda":
         else:
             st.info("👈 Haz clic en un día para añadir pacientes.")
             st.caption("Los días con '🩸' indican punción de médula.")
-
