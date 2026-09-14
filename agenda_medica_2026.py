@@ -1264,10 +1264,14 @@ def init_db():
                 codigo TEXT,
                 ensayo TEXT,
                 ciclo TEXT,
+                dia TEXT,
+                week TEXT,
                 kits TEXT,
                 tablet BOOLEAN,
                 medula BOOLEAN,
                 otras_pruebas TEXT,
+                pruebas_complementarias TEXT,
+                fecha_regreso TEXT,
                 comentarios TEXT
             )
             '''
@@ -1399,10 +1403,14 @@ def init_db():
                 codigo TEXT,
                 ensayo TEXT,
                 ciclo TEXT,
+                dia TEXT,
+                week TEXT,
                 kits TEXT,
                 tablet BOOLEAN,
                 medula BOOLEAN,
                 otras_pruebas TEXT,
+                pruebas_complementarias TEXT,
+                fecha_regreso TEXT,
                 comentarios TEXT
             )
         ''')
@@ -1534,6 +1542,10 @@ def init_db():
         c.execute("ALTER TABLE visitas ADD COLUMN IF NOT EXISTS nombre TEXT")
         c.execute("ALTER TABLE visitas ADD COLUMN IF NOT EXISTS codigo TEXT")
         c.execute("ALTER TABLE visitas ADD COLUMN IF NOT EXISTS ensayo TEXT")
+        c.execute("ALTER TABLE visitas ADD COLUMN IF NOT EXISTS dia TEXT")
+        c.execute("ALTER TABLE visitas ADD COLUMN IF NOT EXISTS week TEXT")
+        c.execute("ALTER TABLE visitas ADD COLUMN IF NOT EXISTS pruebas_complementarias TEXT")
+        c.execute("ALTER TABLE visitas ADD COLUMN IF NOT EXISTS fecha_regreso TEXT")
         c.execute("ALTER TABLE pacientes ADD COLUMN IF NOT EXISTS nombre TEXT")
         c.execute("ALTER TABLE pacientes ADD COLUMN IF NOT EXISTS codigo TEXT")
         c.execute("ALTER TABLE pacientes ADD COLUMN IF NOT EXISTS ensayo TEXT")
@@ -1561,6 +1573,10 @@ def init_db():
             "ALTER TABLE revision_ocular ADD COLUMN fecha_evaluacion TEXT",
             "ALTER TABLE revision_ocular ADD COLUMN fechas_previas TEXT",
             "ALTER TABLE revision_ocular ADD COLUMN resultado TEXT",
+            "ALTER TABLE visitas ADD COLUMN dia TEXT",
+            "ALTER TABLE visitas ADD COLUMN week TEXT",
+            "ALTER TABLE visitas ADD COLUMN pruebas_complementarias TEXT",
+            "ALTER TABLE visitas ADD COLUMN fecha_regreso TEXT",
         ):
             try:
                 c.execute(col_sql)
@@ -1603,6 +1619,38 @@ def init_db():
     conn.commit()
     conn.close()
 
+KITS_CENTRALES = [
+    "Sangre Periférica central",
+    "Orina 24 Horas central",
+    "Orina aislada central",
+    "Aspirado/biopsia de médula ósea central",
+]
+
+PRUEBAS_COMPLEMENTARIAS = [
+    "ECG",
+    "Ecocardiograma",
+    "Analítica: Hemograma",
+    "Analítica: Bioquímica",
+    "Analítica: Coagulación",
+    "Prueba de imagen",
+    "TAC",
+    "PET-TC",
+    "MRI",
+    "RX",
+    "Serología infecciosa",
+]
+
+
+def _leer_pruebas_complementarias(valor):
+    if not valor:
+        return {}
+    try:
+        resultado = json.loads(str(valor))
+    except (TypeError, json.JSONDecodeError):
+        return {}
+    return resultado if isinstance(resultado, dict) else {}
+
+
 def guardar_visita(fecha, data):
     data = data.copy()
     data['nombre'] = nombre_a_iniciales(data.get('nombre'))
@@ -1611,10 +1659,17 @@ def guardar_visita(fecha, data):
     conn = connect_db()
     c = conn.cursor()
     c.execute('''
-        INSERT INTO visitas (fecha, nombre, codigo, ensayo, ciclo, kits, tablet, medula, otras_pruebas, comentarios)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ''', (fecha, data['nombre'], data['codigo'], data['ensayo'], data['ciclo'], 
-          data['kits'], data['tablet'], data['medula'], data['otras_pruebas'], data['comentarios']))
+        INSERT INTO visitas (
+            fecha, nombre, codigo, ensayo, ciclo, dia, week, kits, tablet, medula,
+            otras_pruebas, pruebas_complementarias, fecha_regreso, comentarios
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (
+        fecha, data['nombre'], data['codigo'], data['ensayo'], data.get('ciclo', ''),
+        data.get('dia', ''), data.get('week', ''), data.get('kits', ''),
+        data.get('tablet', False), data.get('medula', False), data.get('otras_pruebas', ''),
+        data.get('pruebas_complementarias', ''), data.get('fecha_regreso', ''),
+        data.get('comentarios', '')
+    ))
     guardar_o_actualizar_paciente(c, data.get('codigo'), data.get('nombre'), data.get('ensayo'))
     unificar_pacientes_duplicados(c)
     eliminar_ensayos_sin_pacientes(c)
@@ -1632,12 +1687,16 @@ def actualizar_visita(id_visita, fecha, data):
     c = conn.cursor()
     c.execute('''
         UPDATE visitas
-        SET fecha = ?, nombre = ?, codigo = ?, ensayo = ?, ciclo = ?,
-            kits = ?, tablet = ?, medula = ?, otras_pruebas = ?, comentarios = ?
+        SET fecha = ?, nombre = ?, codigo = ?, ensayo = ?, ciclo = ?, dia = ?, week = ?,
+            kits = ?, tablet = ?, medula = ?, otras_pruebas = ?,
+            pruebas_complementarias = ?, fecha_regreso = ?, comentarios = ?
         WHERE id = ?
     ''', (
-        fecha, data['nombre'], data['codigo'], data['ensayo'], data['ciclo'],
-        data['kits'], data['tablet'], data['medula'], data['otras_pruebas'], data['comentarios'],
+        fecha, data['nombre'], data['codigo'], data['ensayo'], data.get('ciclo', ''),
+        data.get('dia', ''), data.get('week', ''), data.get('kits', ''),
+        data.get('tablet', False), data.get('medula', False), data.get('otras_pruebas', ''),
+        data.get('pruebas_complementarias', ''), data.get('fecha_regreso', ''),
+        data.get('comentarios', ''),
         id_visita
     ))
     guardar_o_actualizar_paciente(c, data.get('codigo'), data.get('nombre'), data.get('ensayo'))
@@ -2527,15 +2586,30 @@ def restaurar_paciente_desde_backups_locales(codigo):
                 "SELECT codigo, nombre, ensayo FROM pacientes WHERE codigo = ? ORDER BY id DESC LIMIT 1",
                 (codigo,),
             ).fetchone()
-            v_rows = s.execute(
-                """
-                SELECT fecha, nombre, codigo, ensayo, ciclo, kits, tablet, medula, otras_pruebas, comentarios
-                FROM visitas
-                WHERE codigo = ?
-                ORDER BY id ASC
-                """,
-                (codigo,),
-            ).fetchall()
+            try:
+                v_rows = s.execute(
+                    """
+                    SELECT fecha, nombre, codigo, ensayo, ciclo, dia, week, kits, tablet,
+                           medula, otras_pruebas, pruebas_complementarias, fecha_regreso, comentarios
+                    FROM visitas
+                    WHERE codigo = ?
+                    ORDER BY id ASC
+                    """,
+                    (codigo,),
+                ).fetchall()
+                filas_backup_nuevas = True
+            except sqlite3.OperationalError:
+                v_rows = s.execute(
+                    """
+                    SELECT fecha, nombre, codigo, ensayo, ciclo, kits, tablet, medula,
+                           otras_pruebas, comentarios
+                    FROM visitas
+                    WHERE codigo = ?
+                    ORDER BY id ASC
+                    """,
+                    (codigo,),
+                ).fetchall()
+                filas_backup_nuevas = False
         except Exception:
             src.close()
             continue
@@ -2564,7 +2638,20 @@ def restaurar_paciente_desde_backups_locales(codigo):
                 )
 
         for fila in v_rows:
-            fecha, nombre, codigo_v, ensayo, ciclo, kits, tablet, medula, otras_pruebas, comentarios = fila
+            if filas_backup_nuevas:
+                (
+                    fecha, nombre, codigo_v, ensayo, ciclo, dia, week, kits, tablet,
+                    medula, otras_pruebas, pruebas_complementarias, fecha_regreso, comentarios
+                ) = fila
+            else:
+                (
+                    fecha, nombre, codigo_v, ensayo, ciclo, kits, tablet, medula,
+                    otras_pruebas, comentarios
+                ) = fila
+                dia = ""
+                week = ""
+                pruebas_complementarias = ""
+                fecha_regreso = ""
             codigo_v = normalizar_texto_campo(codigo_v) or codigo
             nombre_v = nombre_a_iniciales(nombre)
             ensayo_v = normalizar_ensayo(ensayo)
@@ -2586,8 +2673,10 @@ def restaurar_paciente_desde_backups_locales(codigo):
 
             c.execute(
                 """
-                INSERT INTO visitas (fecha, nombre, codigo, ensayo, ciclo, kits, tablet, medula, otras_pruebas, comentarios)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO visitas (
+                    fecha, nombre, codigo, ensayo, ciclo, dia, week, kits, tablet, medula,
+                    otras_pruebas, pruebas_complementarias, fecha_regreso, comentarios
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     fecha,
@@ -2595,10 +2684,14 @@ def restaurar_paciente_desde_backups_locales(codigo):
                     codigo_v,
                     ensayo_v,
                     ciclo,
+                    dia,
+                    week,
                     kits,
                     tablet,
                     medula,
                     otras_pruebas,
+                    pruebas_complementarias,
+                    fecha_regreso,
                     comentarios,
                 ),
             )
@@ -8024,7 +8117,10 @@ if seccion_activa == "Agenda":
                     ensayo = ensayo_seleccionado
                     st.session_state["ensayo_input"] = ensayo_seleccionado
 
-                ciclo = st.text_input("Ciclo / Día (Ej. C1D1)")
+                ciclo_col, dia_col, week_col = st.columns(3)
+                ciclo = ciclo_col.text_input("Ciclo (C)")
+                dia = dia_col.text_input("Día (d)")
+                week = week_col.text_input("Week (w)")
 
                 st.divider()
                 tab_medula, tab_kits, tab_otras, tab_comentarios = st.tabs(
@@ -8035,10 +8131,32 @@ if seccion_activa == "Agenda":
                     tablet = cc1.checkbox("Requiere Tablet")
                     medula = cc2.checkbox("🩸 Punción Médula")
                 with tab_kits:
-                    kits = st.text_input("Kits / Medicación")
+                    kits_seleccionados = st.multiselect(
+                        "Kits centrales",
+                        options=KITS_CENTRALES,
+                    )
+                    kits = ", ".join(kits_seleccionados)
                 with tab_otras:
                     otras = st.text_area("Otras pruebas")
+                    st.markdown("**Pruebas complementarias (Local)**")
+                    pruebas_complementarias = {}
+                    for indice, prueba in enumerate(PRUEBAS_COMPLEMENTARIAS):
+                        prueba_col, comentario_col = st.columns([1, 2])
+                        seleccionada = prueba_col.checkbox(prueba, key=f"alta_prueba_{indice}")
+                        comentario_prueba = comentario_col.text_input(
+                            f"Comentario: {prueba}",
+                            key=f"alta_comentario_prueba_{indice}",
+                        )
+                        if seleccionada or comentario_prueba.strip():
+                            pruebas_complementarias[prueba] = {
+                                "seleccionada": seleccionada,
+                                "comentario": comentario_prueba.strip(),
+                            }
                 with tab_comentarios:
+                    fecha_regreso = st.text_input(
+                        "Fecha de regreso (YYYY-MM-DD)",
+                        placeholder="YYYY-MM-DD",
+                    )
                     notas = st.text_area("Comentarios")
 
                 col_b1, col_b2 = st.columns(2)
@@ -8048,8 +8166,12 @@ if seccion_activa == "Agenda":
                     if codigo:
                         datos = {
                             "nombre": nombre, "codigo": codigo, "ensayo": ensayo,
-                            "ciclo": ciclo, "kits": kits, "tablet": tablet,
-                            "medula": medula, "otras_pruebas": otras, "comentarios": notas
+                            "ciclo": ciclo, "dia": dia, "week": week, "kits": kits,
+                            "tablet": tablet, "medula": medula, "otras_pruebas": otras,
+                            "pruebas_complementarias": json.dumps(
+                                pruebas_complementarias, ensure_ascii=False
+                            ),
+                            "fecha_regreso": fecha_regreso.strip(), "comentarios": notas
                         }
                         guardar_visita(fecha_activa, datos)
                         st.success("Guardado correctamente.")
@@ -8089,7 +8211,29 @@ if seccion_activa == "Agenda":
                     st.info(f"📅 Fecha de visita: {fecha_visita}")
                     st.markdown(f"## 🆔 {paciente['codigo']}")
                     st.markdown(f"**Paciente:** {paciente['nombre']}")
-                    st.markdown(f"**Ensayo:** {paciente['ensayo']} | **Ciclo:** {paciente['ciclo']}")
+                    st.markdown(
+                        f"**Ensayo:** {paciente['ensayo']} | "
+                        f"**C:** {paciente.get('ciclo') or '-'} | "
+                        f"**d:** {paciente.get('dia') or '-'} | "
+                        f"**w:** {paciente.get('week') or '-'}"
+                    )
+                    if paciente.get('fecha_regreso'):
+                        st.markdown(f"**Fecha de regreso:** {paciente['fecha_regreso']}")
+                    kits_detalle = str(paciente.get('kits') or '').strip()
+                    if kits_detalle:
+                        st.markdown(f"**Kits centrales:** {kits_detalle}")
+                    pruebas_detalle = _leer_pruebas_complementarias(
+                        paciente.get('pruebas_complementarias')
+                    )
+                    if pruebas_detalle:
+                        st.markdown("**Pruebas complementarias (Local):**")
+                        for prueba, detalle in pruebas_detalle.items():
+                            if isinstance(detalle, dict):
+                                comentario = str(detalle.get('comentario') or '').strip()
+                            else:
+                                comentario = ''
+                            sufijo = f" - {comentario}" if comentario else ''
+                            st.write(f"- {prueba}{sufijo}")
 
                     adenda_paciente_info = get_adenda_paciente(
                         paciente.get('codigo'),
@@ -8125,6 +8269,13 @@ if seccion_activa == "Agenda":
                     st.divider()
                     with st.expander("Editar visita"):
                         fecha_default = parse_fecha_iso(paciente['fecha']) or fecha_hoy_local()
+                        kits_actuales = [
+                            kit.strip() for kit in str(paciente.get('kits') or "").split(",")
+                            if kit.strip()
+                        ]
+                        pruebas_actuales = _leer_pruebas_complementarias(
+                            paciente.get('pruebas_complementarias')
+                        )
                         with st.form(f"form_editar_{id_evento_cmp}"):
                             c1, c2 = st.columns(2)
                             nombre_edit = c1.text_input(
@@ -8140,9 +8291,15 @@ if seccion_activa == "Agenda":
                                 value=paciente['ensayo'] or ""
                             )
                             fecha_edit = st.date_input("Fecha de visita", value=fecha_default)
-                            ciclo_edit = st.text_input(
-                                "Ciclo / Día (Ej. C1D1)",
-                                value=paciente['ciclo'] or ""
+                            ciclo_col_e, dia_col_e, week_col_e = st.columns(3)
+                            ciclo_edit = ciclo_col_e.text_input(
+                                "Ciclo (C)", value=paciente.get('ciclo') or ""
+                            )
+                            dia_edit = dia_col_e.text_input(
+                                "Día (d)", value=paciente.get('dia') or ""
+                            )
+                            week_edit = week_col_e.text_input(
+                                "Week (w)", value=paciente.get('week') or ""
                             )
                             st.divider()
                             tab_medula_e, tab_kits_e, tab_otras_e, tab_comentarios_e = st.tabs(
@@ -8159,19 +8316,47 @@ if seccion_activa == "Agenda":
                                     value=bool(paciente['medula'])
                                 )
                             with tab_kits_e:
-                                kits_edit = st.text_input(
-                                    "Kits / Medicación",
-                                    value=paciente['kits'] or ""
-                                )
+                                kits_edit = ", ".join(st.multiselect(
+                                    "Kits centrales",
+                                    options=KITS_CENTRALES,
+                                    default=[kit for kit in kits_actuales if kit in KITS_CENTRALES],
+                                ))
                             with tab_otras_e:
                                 otras_edit = st.text_area(
                                     "Otras pruebas",
-                                    value=paciente['otras_pruebas'] or ""
+                                    value=paciente.get('otras_pruebas') or ""
                                 )
+                                st.markdown("**Pruebas complementarias (Local)**")
+                                pruebas_complementarias_edit = {}
+                                for indice, prueba in enumerate(PRUEBAS_COMPLEMENTARIAS):
+                                    prueba_actual = pruebas_actuales.get(prueba, {})
+                                    if not isinstance(prueba_actual, dict):
+                                        prueba_actual = {}
+                                    prueba_col, comentario_col = st.columns([1, 2])
+                                    seleccionada = prueba_col.checkbox(
+                                        prueba,
+                                        value=bool(prueba_actual.get("seleccionada")),
+                                        key=f"editar_prueba_{id_evento_cmp}_{indice}",
+                                    )
+                                    comentario_prueba = comentario_col.text_input(
+                                        f"Comentario: {prueba}",
+                                        value=str(prueba_actual.get("comentario") or ""),
+                                        key=f"editar_comentario_prueba_{id_evento_cmp}_{indice}",
+                                    )
+                                    if seleccionada or comentario_prueba.strip():
+                                        pruebas_complementarias_edit[prueba] = {
+                                            "seleccionada": seleccionada,
+                                            "comentario": comentario_prueba.strip(),
+                                        }
                             with tab_comentarios_e:
+                                fecha_regreso_edit = st.text_input(
+                                    "Fecha de regreso (YYYY-MM-DD)",
+                                    value=paciente.get('fecha_regreso') or "",
+                                    placeholder="YYYY-MM-DD",
+                                )
                                 notas_edit = st.text_area(
                                     "Comentarios",
-                                    value=paciente['comentarios'] or ""
+                                    value=paciente.get('comentarios') or ""
                                 )
 
                             guardar_edicion = st.form_submit_button("Guardar cambios", type="primary")
@@ -8182,10 +8367,16 @@ if seccion_activa == "Agenda":
                                         "codigo": codigo_edit,
                                         "ensayo": ensayo_edit,
                                         "ciclo": ciclo_edit,
+                                        "dia": dia_edit,
+                                        "week": week_edit,
                                         "kits": kits_edit,
                                         "tablet": tablet_edit,
                                         "medula": medula_edit,
                                         "otras_pruebas": otras_edit,
+                                        "pruebas_complementarias": json.dumps(
+                                            pruebas_complementarias_edit, ensure_ascii=False
+                                        ),
+                                        "fecha_regreso": fecha_regreso_edit.strip(),
                                         "comentarios": notas_edit
                                     }
                                     actualizar_visita(
