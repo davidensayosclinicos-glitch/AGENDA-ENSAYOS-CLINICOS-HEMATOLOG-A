@@ -43,6 +43,26 @@ except ImportError:
     PdfReader = None
 
 try:
+    from reportlab.lib import colors
+    from reportlab.lib.enums import TA_CENTER
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import mm
+    from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+except ImportError:
+    colors = None
+    TA_CENTER = None
+    A4 = None
+    getSampleStyleSheet = None
+    ParagraphStyle = None
+    mm = None
+    Paragraph = None
+    SimpleDocTemplate = None
+    Spacer = None
+    Table = None
+    TableStyle = None
+
+try:
     from zoneinfo import ZoneInfo
 except ImportError:
     ZoneInfo = None
@@ -4907,6 +4927,136 @@ def construir_informe_citas_dia(df_visitas, fecha_objetivo):
     return pd.DataFrame(filas, columns=columnas)
 
 
+def construir_informes_pdf_por_paciente(df_visitas, fecha_objetivo):
+    if SimpleDocTemplate is None:
+        return b""
+
+    if df_visitas is None or df_visitas.empty:
+        return b""
+
+    df = df_visitas.copy()
+    if "_fecha_dt" not in df.columns:
+        df["_fecha_dt"] = df["fecha"].apply(parse_fecha_iso)
+    df = df[df["_fecha_dt"] == fecha_objetivo].copy()
+    if df.empty:
+        return b""
+
+    styles = getSampleStyleSheet()
+    titulo_style = ParagraphStyle(
+        "InformeTitulo",
+        parent=styles["Title"],
+        alignment=TA_CENTER,
+        fontSize=16,
+        leading=20,
+        spaceAfter=12,
+    )
+    etiqueta_style = ParagraphStyle(
+        "InformeEtiqueta",
+        parent=styles["BodyText"],
+        fontName="Helvetica-Bold",
+        fontSize=9,
+        leading=11,
+    )
+    valor_style = ParagraphStyle(
+        "InformeValor",
+        parent=styles["BodyText"],
+        fontSize=9,
+        leading=11,
+    )
+
+    def texto(valor):
+        if valor is None or (isinstance(valor, float) and pd.isna(valor)):
+            return ""
+        return html.escape(str(valor)).replace("\n", "<br/>")
+
+    def nombre_archivo(row):
+        identificador = str(row.get("codigo") or row.get("nombre") or "paciente")
+        identificador = re.sub(r"[^A-Za-z0-9_.-]+", "_", identificador).strip("._")
+        return identificador or "paciente"
+
+    pacientes = {}
+    for _, row in df.sort_values(["ensayo", "codigo", "nombre"], na_position="last").iterrows():
+        clave = str(row.get("codigo") or "").strip() or str(row.get("nombre") or "").strip()
+        pacientes.setdefault(clave or "paciente", []).append(row)
+
+    zip_buffer = io.BytesIO()
+    usados = set()
+    with zipfile.ZipFile(zip_buffer, "w", compression=zipfile.ZIP_DEFLATED) as archivo_zip:
+        for clave, visitas_paciente in pacientes.items():
+            primera = visitas_paciente[0]
+            base_nombre = nombre_archivo(primera)
+            nombre_pdf = f"informe_{base_nombre}.pdf"
+            contador = 2
+            while nombre_pdf in usados:
+                nombre_pdf = f"informe_{base_nombre}_{contador}.pdf"
+                contador += 1
+            usados.add(nombre_pdf)
+
+            pdf_buffer = io.BytesIO()
+            documento = SimpleDocTemplate(
+                pdf_buffer,
+                pagesize=A4,
+                rightMargin=15 * mm,
+                leftMargin=15 * mm,
+                topMargin=15 * mm,
+                bottomMargin=15 * mm,
+                title=f"Informe de visita {clave}",
+            )
+            elementos = [
+                Paragraph("Informe de visita", titulo_style),
+                Paragraph(
+                    f"Fecha de agenda: {fecha_objetivo.strftime('%d/%m/%Y')}",
+                    valor_style,
+                ),
+                Spacer(1, 8),
+            ]
+
+            for indice, row in enumerate(visitas_paciente):
+                if indice:
+                    elementos.extend([Spacer(1, 12), Paragraph("Otra visita del día", etiqueta_style), Spacer(1, 6)])
+                pruebas = _leer_pruebas_complementarias(row.get("pruebas_complementarias"))
+                pruebas_txt = []
+                for prueba, detalle in pruebas.items():
+                    comentario = ""
+                    if isinstance(detalle, dict):
+                        comentario = str(detalle.get("comentario") or "").strip()
+                    pruebas_txt.append(f"{prueba}: {comentario}" if comentario else str(prueba))
+
+                campos = [
+                    ("Paciente", row.get("nombre")),
+                    ("Código", row.get("codigo")),
+                    ("Ensayo / Protocolo", row.get("ensayo")),
+                    ("Fecha de visita", formatear_fecha_visita(row.get("fecha"))),
+                    ("Ciclo (C)", row.get("ciclo")),
+                    ("Día (d)", row.get("dia")),
+                    ("Week (w)", row.get("week")),
+                    ("Kits centrales", row.get("kits")),
+                    ("Tablet", "Sí" if bool(row.get("tablet")) else "No"),
+                    ("Punción de médula", "Sí" if bool(row.get("medula")) else "No"),
+                    ("Otras pruebas", row.get("otras_pruebas")),
+                    ("Pruebas complementarias (Local)", "\n".join(pruebas_txt)),
+                    ("Fecha de regreso", row.get("fecha_regreso")),
+                    ("Comentarios", row.get("comentarios")),
+                ]
+                tabla = [[Paragraph(texto(etiqueta), etiqueta_style), Paragraph(texto(valor), valor_style)] for etiqueta, valor in campos]
+                tabla_pdf = Table(tabla, colWidths=[52 * mm, 118 * mm], repeatRows=0)
+                tabla_pdf.setStyle(TableStyle([
+                    ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#cbd5e1")),
+                    ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#f1f5f9")),
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                    ("TOPPADDING", (0, 0), (-1, -1), 5),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+                ]))
+                elementos.append(tabla_pdf)
+
+            documento.build(elementos)
+            archivo_zip.writestr(nombre_pdf, pdf_buffer.getvalue())
+
+    return zip_buffer.getvalue()
+
+
 def renderizar_registro_kits_integrado():
     ruta_kits = os.path.join(SCRIPT_DIR, "inventario_kits_app.py")
     if not os.path.isfile(ruta_kits):
@@ -8121,6 +8271,7 @@ if seccion_activa == "Agenda":
     ) or fecha_compartida
     informe_dia = construir_informe_citas_dia(df_visitas, fecha_informe)
     csv_informe_dia = informe_dia.to_csv(index=False).encode("utf-8-sig")
+    pdfs_informe_dia = construir_informes_pdf_por_paciente(df_visitas, fecha_informe)
     with col_cal:
         st.download_button(
             f"Descargar informe del día {fecha_informe.strftime('%d/%m/%Y')}",
@@ -8129,6 +8280,16 @@ if seccion_activa == "Agenda":
             mime="text/csv",
             key=f"descargar_informe_agenda_{fecha_informe.isoformat()}",
         )
+        if pdfs_informe_dia:
+            st.download_button(
+                f"Descargar PDFs por paciente ({fecha_informe.strftime('%d/%m/%Y')})",
+                data=pdfs_informe_dia,
+                file_name=f"informes_pdf_{fecha_informe.isoformat()}.zip",
+                mime="application/zip",
+                key=f"descargar_pdfs_agenda_{fecha_informe.isoformat()}",
+            )
+        elif SimpleDocTemplate is None:
+            st.warning("Para descargar PDFs debe estar instalada la dependencia reportlab.")
         if informe_dia.empty:
             st.caption("No hay citas registradas para el día seleccionado.")
 
