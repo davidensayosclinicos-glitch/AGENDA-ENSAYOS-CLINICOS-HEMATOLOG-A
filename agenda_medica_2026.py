@@ -1632,13 +1632,35 @@ PRUEBAS_COMPLEMENTARIAS = [
     "Analítica: Hemograma",
     "Analítica: Bioquímica",
     "Analítica: Coagulación",
-    "Prueba de imagen",
+    "Evaluación de la enfermedad",
     "TAC",
     "PET-TC",
     "MRI",
     "RX",
     "Serología infecciosa",
 ]
+
+
+def _asegurar_columnas_visitas(conn, cursor):
+    """Aplica las columnas de citas también si la migración de arranque se omitió."""
+    columnas = (
+        "dia TEXT",
+        "week TEXT",
+        "pruebas_complementarias TEXT",
+        "fecha_regreso TEXT",
+    )
+    for definicion in columnas:
+        try:
+            if DB_BACKEND == "postgres":
+                cursor.execute(f"ALTER TABLE visitas ADD COLUMN IF NOT EXISTS {definicion}")
+                conn.commit()
+            else:
+                cursor.execute(f"ALTER TABLE visitas ADD COLUMN {definicion}")
+                conn.commit()
+        except Exception:
+            conn.rollback()
+            if DB_BACKEND == "postgres":
+                raise
 
 
 def _leer_pruebas_complementarias(valor):
@@ -1658,6 +1680,7 @@ def guardar_visita(fecha, data):
     data['ensayo'] = normalizar_ensayo(data.get('ensayo'))
     conn = connect_db()
     c = conn.cursor()
+    _asegurar_columnas_visitas(conn, c)
     c.execute('''
         INSERT INTO visitas (
             fecha, nombre, codigo, ensayo, ciclo, dia, week, kits, tablet, medula,
@@ -1685,6 +1708,7 @@ def actualizar_visita(id_visita, fecha, data):
     data['ensayo'] = normalizar_ensayo(data.get('ensayo'))
     conn = connect_db()
     c = conn.cursor()
+    _asegurar_columnas_visitas(conn, c)
     c.execute('''
         UPDATE visitas
         SET fecha = ?, nombre = ?, codigo = ?, ensayo = ?, ciclo = ?, dia = ?, week = ?,
