@@ -4844,6 +4844,45 @@ def render_resumen_manana():
                 st.write(f"• {tarea}")
 
 
+def construir_informe_citas_dia(df_visitas, fecha_objetivo):
+    columnas = [
+        "Fecha", "Código", "Paciente", "Ensayo", "Ciclo (C)", "Día (d)", "Week (w)",
+        "Kits centrales", "Pruebas complementarias (Local)", "Fecha de regreso", "Comentarios",
+    ]
+    if df_visitas is None or df_visitas.empty:
+        return pd.DataFrame(columns=columnas)
+
+    df = df_visitas.copy()
+    if "_fecha_dt" not in df.columns:
+        df["_fecha_dt"] = df["fecha"].apply(parse_fecha_iso)
+    df = df[df["_fecha_dt"] == fecha_objetivo].copy()
+
+    filas = []
+    for _, row in df.sort_values(["ensayo", "codigo"], na_position="last").iterrows():
+        pruebas = _leer_pruebas_complementarias(row.get("pruebas_complementarias"))
+        pruebas_txt = []
+        for prueba, detalle in pruebas.items():
+            if isinstance(detalle, dict):
+                comentario = str(detalle.get("comentario") or "").strip()
+            else:
+                comentario = ""
+            pruebas_txt.append(f"{prueba}: {comentario}" if comentario else prueba)
+        filas.append({
+            "Fecha": fecha_objetivo.strftime("%d/%m/%Y"),
+            "Código": str(row.get("codigo") or ""),
+            "Paciente": str(row.get("nombre") or ""),
+            "Ensayo": str(row.get("ensayo") or ""),
+            "Ciclo (C)": str(row.get("ciclo") or ""),
+            "Día (d)": str(row.get("dia") or ""),
+            "Week (w)": str(row.get("week") or ""),
+            "Kits centrales": str(row.get("kits") or ""),
+            "Pruebas complementarias (Local)": " | ".join(pruebas_txt),
+            "Fecha de regreso": str(row.get("fecha_regreso") or ""),
+            "Comentarios": str(row.get("comentarios") or ""),
+        })
+    return pd.DataFrame(filas, columns=columnas)
+
+
 def renderizar_registro_kits_integrado():
     ruta_kits = os.path.join(SCRIPT_DIR, "inventario_kits_app.py")
     if not os.path.isfile(ruta_kits):
@@ -8052,6 +8091,22 @@ if seccion_activa == "Agenda":
             st.session_state['datos_seleccionados'] = props["id"]
         else:
             st.session_state['modo_formulario'] = None
+
+    fecha_informe = _resolver_fecha_compartida(
+        st.session_state.get("agenda_fecha_compartida")
+    ) or fecha_compartida
+    informe_dia = construir_informe_citas_dia(df_visitas, fecha_informe)
+    csv_informe_dia = informe_dia.to_csv(index=False).encode("utf-8-sig")
+    with col_cal:
+        st.download_button(
+            f"Descargar informe del día {fecha_informe.strftime('%d/%m/%Y')}",
+            data=csv_informe_dia,
+            file_name=f"informe_agenda_{fecha_informe.isoformat()}.csv",
+            mime="text/csv",
+            key=f"descargar_informe_agenda_{fecha_informe.isoformat()}",
+        )
+        if informe_dia.empty:
+            st.caption("No hay citas registradas para el día seleccionado.")
 
     # --- PANEL LATERAL (DERECHA) ---
     with col_detalles:
